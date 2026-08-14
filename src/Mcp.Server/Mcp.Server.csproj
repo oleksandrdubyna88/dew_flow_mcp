@@ -1,9 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- The MCP protocol presentation: stdio + HTTP/SSE. A library — hosts mount it. -->
+  <!-- The MCP protocol presentation: stdio + HTTP/SSE. A library — hosts mount it.
+       Tools are published from the catalog, never declared here. -->
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Mcp.Application\Mcp.Application.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Mcp.Tests" />
   </ItemGroup>
 
 </Project>

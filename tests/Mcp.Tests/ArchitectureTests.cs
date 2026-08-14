@@ -38,10 +38,10 @@ public sealed class ArchitectureTests
     [Fact]
     public void Every_shipped_project_is_covered_by_the_rule()
     {
-        // 7 = Contracts, Application, Server, Api, Ui, Workspace.Application, Workspace.Infrastructure.
+        // 8 = Contracts, Application, Server, Bridge, Api, Ui, Workspace.Application, Workspace.Infrastructure.
         // A new src project referenced by this test project lands in the output folder and is picked up
         // automatically; this floor only catches the graph silently shrinking.
-        EnumerateShippedAssemblyFiles().Should().HaveCountGreaterThanOrEqualTo(7);
+        EnumerateShippedAssemblyFiles().Should().HaveCountGreaterThanOrEqualTo(8);
     }
 
     private static IEnumerable<string> EnumerateShippedAssemblyFiles() =>

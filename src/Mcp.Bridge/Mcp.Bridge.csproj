@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The SECOND presentation: local models that speak OpenAI-style function calling rather than MCP.
+       It shares the catalog with Mcp.Server and holds no tool of its own — the measured 11/47 vs 4/47
+       gap between the two surfaces came from two IMPLEMENTATIONS, not two protocols, and this project
+       exists so that cannot happen again. -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\Mcp.Application\Mcp.Application.csproj" />
+  </ItemGroup>
+
+</Project>

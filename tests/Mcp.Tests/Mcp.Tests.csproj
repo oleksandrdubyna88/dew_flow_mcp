@@ -10,12 +10,14 @@
   <ItemGroup>
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Mcp.Contracts\Mcp.Contracts.csproj" />
     <ProjectReference Include="..\..\src\Mcp.Application\Mcp.Application.csproj" />
     <ProjectReference Include="..\..\src\Mcp.Server\Mcp.Server.csproj" />
+    <ProjectReference Include="..\..\src\Mcp.Bridge\Mcp.Bridge.csproj" />
     <ProjectReference Include="..\..\src\Mcp.Api\Mcp.Api.csproj" />
     <ProjectReference Include="..\..\src\Mcp.Ui\Mcp.Ui.csproj" />
     <ProjectReference Include="..\..\src\Workspace.Application\Workspace.Application.csproj" />

@@ -1,0 +1,33 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build",
+      "command": "dotnet",
+      "type": "process",
+      "args": [
+        "build",
+        "${workspaceFolder}/dew_flow_mcp.slnx",
+        "/property:GenerateFullPaths=true",
+        "/consoleloggerparameters:NoSummary"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": "$msCompile"
+    },
+    {
+      // Run the tests the way this repository requires: the MTP runner executable, never `dotnet test`.
+      "label": "test",
+      "command": "${workspaceFolder}/tests/Mcp.Tests/bin/Debug/net10.0/Mcp.Tests",
+      "type": "process",
+      "dependsOn": "build",
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    }
+  ]
+}

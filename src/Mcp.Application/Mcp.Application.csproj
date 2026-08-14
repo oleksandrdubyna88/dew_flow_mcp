@@ -4,6 +4,11 @@
        the architecture test fails the build if anything here ever names a Rag type. -->
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Mcp.Contracts\Mcp.Contracts.csproj" />
   </ItemGroup>
 

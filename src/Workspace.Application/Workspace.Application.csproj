@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- The reference tool provider: sandboxed file reads, git reads, ripgrep.
+  <!-- The reference tool provider: sandboxed file reads (git reads and ripgrep follow).
        Implements IToolProvider from Mcp.Contracts — the proof the contract works. -->
 
   <ItemGroup>

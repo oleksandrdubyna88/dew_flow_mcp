@@ -3,8 +3,10 @@
     <Project Path="src/Mcp.Contracts/Mcp.Contracts.csproj" />
     <Project Path="src/Mcp.Application/Mcp.Application.csproj" />
     <Project Path="src/Mcp.Server/Mcp.Server.csproj" />
+    <Project Path="src/Mcp.Bridge/Mcp.Bridge.csproj" />
     <Project Path="src/Mcp.Api/Mcp.Api.csproj" />
     <Project Path="src/Mcp.Ui/Mcp.Ui.csproj" />
+    <Project Path="src/Mcp.Host/Mcp.Host.csproj" />
     <Project Path="src/Workspace.Application/Workspace.Application.csproj" />
     <Project Path="src/Workspace.Infrastructure/Workspace.Infrastructure.csproj" />
   </Folder>

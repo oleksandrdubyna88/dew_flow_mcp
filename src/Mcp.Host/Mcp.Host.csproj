@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- The standalone server: clone this repository, run this, and Claude Code has the workspace tools
+       against a local checkout with no product and no index anywhere. That is the bar a public
+       framework has to clear. -->
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Mcp.Server\Mcp.Server.csproj" />
+    <ProjectReference Include="..\Mcp.Api\Mcp.Api.csproj" />
+    <ProjectReference Include="..\Mcp.Bridge\Mcp.Bridge.csproj" />
+    <ProjectReference Include="..\Workspace.Infrastructure\Workspace.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

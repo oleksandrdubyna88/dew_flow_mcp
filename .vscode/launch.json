@@ -1,0 +1,33 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // The standalone server over HTTP/SSE. --root chooses the workspace the tools may touch.
+      "name": "Mcp.Host (HTTP)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/src/Mcp.Host/bin/Debug/net10.0/Mcp.Host.dll",
+      "args": ["--root", "${workspaceFolder}"],
+      "cwd": "${workspaceFolder}/src/Mcp.Host",
+      "stopAtEntry": false,
+      "console": "internalConsole",
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    },
+    {
+      // stdio transport: how a CLI runtime launches the server as a subprocess. Logs go to stderr —
+      // stdout carries the protocol.
+      "name": "Mcp.Host (stdio)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/src/Mcp.Host/bin/Debug/net10.0/Mcp.Host.dll",
+      "args": ["--stdio", "--root", "${workspaceFolder}"],
+      "cwd": "${workspaceFolder}/src/Mcp.Host",
+      "stopAtEntry": false,
+      "console": "integratedTerminal"
+    }
+  ]
+}
