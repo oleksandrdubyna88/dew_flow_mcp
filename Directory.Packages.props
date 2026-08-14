@@ -1,7 +1,8 @@
 <Project>
 
   <ItemGroup>
-    <PackageVersion Include="Microsoft.AspNetCore.Components.Web" Version="10.0.10" />
+    <!-- Monthly policy: bump to the latest STABLE each month (previews never; this product is strictly .NET 10). -->
+    <PackageVersion Include="Microsoft.AspNetCore.Components.Web" Version="10.0.11" />
     <PackageVersion Include="xunit.v3" Version="3.2.2" />
     <!-- 7.2.2 = the last Apache-2.0 release; 8.x moved to the Xceed Community License (non-commercial only). Do NOT bump. -->
     <PackageVersion Include="FluentAssertions" Version="7.2.2" />
