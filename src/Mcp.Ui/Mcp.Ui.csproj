@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <!-- MCP's own console pages and settings screen. A Razor class library, WASM-compatible:
+       it is mounted by a Blazor SSR host running its interactivity in WebAssembly. -->
+
+  <ItemGroup>
+    <SupportedPlatform Include="browser" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Mcp.Contracts\Mcp.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

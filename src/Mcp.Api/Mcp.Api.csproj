@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The MCP MANAGEMENT surface (settings, analytics) consumed by a console UI.
+       Not the protocol — that is Mcp.Server.
+       Minimal APIs only: this library exposes MapMcpApi(), one route GROUP per area,
+       and the host mounts it. No controllers, ever. -->
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Mcp.Application\Mcp.Application.csproj" />
+  </ItemGroup>
+
+</Project>

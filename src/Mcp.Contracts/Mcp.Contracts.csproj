@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The contract every tool provider implements (IToolProvider, ToolSchema, ToolCall/ToolResult,
+       IUsageSink). Depends on NOTHING — that is the whole point of this project. -->
+
+</Project>

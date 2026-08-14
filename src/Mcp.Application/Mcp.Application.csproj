@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Tool catalog, sandbox policy, call logging, usage metering. Knows nothing about retrieval:
+       the architecture test fails the build if anything here ever names a Rag type. -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\Mcp.Contracts\Mcp.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

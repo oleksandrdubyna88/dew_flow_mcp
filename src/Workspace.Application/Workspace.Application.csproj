@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The reference tool provider: sandboxed file reads, git reads, ripgrep.
+       Implements IToolProvider from Mcp.Contracts — the proof the contract works. -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\Mcp.Contracts\Mcp.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

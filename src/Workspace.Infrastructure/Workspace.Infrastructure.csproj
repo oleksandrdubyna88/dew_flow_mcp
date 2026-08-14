@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Adapters for the workspace provider: the filesystem sandbox, git plumbing,
+       the vendored-ripgrep launcher. -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\Workspace.Application\Workspace.Application.csproj" />
+  </ItemGroup>
+
+</Project>

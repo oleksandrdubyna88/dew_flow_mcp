@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The MCP protocol presentation: stdio + HTTP/SSE. A library — hosts mount it. -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\Mcp.Application\Mcp.Application.csproj" />
+  </ItemGroup>
+
+</Project>
