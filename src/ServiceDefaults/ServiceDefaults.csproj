@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Cross-cutting host defaults for this repository. Today: logging — coloured to the console and on disk
+       with a new file per run, per .claude/rules/common/logging-serilog.md. One place, so a second host
+       cannot start logging differently. -->
+
+  <ItemGroup>
+    <PackageReference Include="Serilog.AspNetCore" />
+  </ItemGroup>
+
+</Project>

@@ -9,6 +9,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\ServiceDefaults\ServiceDefaults.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Mcp.Server\Mcp.Server.csproj" />
     <ProjectReference Include="..\Mcp.Api\Mcp.Api.csproj" />
     <ProjectReference Include="..\Mcp.Bridge\Mcp.Bridge.csproj" />

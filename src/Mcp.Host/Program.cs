@@ -1,4 +1,5 @@
 using Mcp.Api;
+using Mcp.Diagnostics;
 using Mcp.Application;
 using Mcp.Bridge;
 using Mcp.Server;
@@ -18,8 +19,9 @@ if (args.Contains("--stdio"))
 {
     var stdio = Host.CreateApplicationBuilder(args);
 
-    // stdio uses stdout for the protocol, so logs MUST go to stderr — never stdout.
-    stdio.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
+    // stdio uses stdout for the protocol, so logs MUST go to stderr — never stdout. One log line on that
+    // stream corrupts the JSON-RPC and looks like a protocol bug rather than a logging one.
+    stdio.AddDewFlowLogging("mcp-stdio", consoleToStdErr: true);
 
     AddToolStack(stdio.Services, workspaceRoot);
     stdio.Services.AddMcpServer().WithStdioServerTransport().WithCatalogTools();
@@ -29,6 +31,7 @@ if (args.Contains("--stdio"))
 }
 
 var builder = WebApplication.CreateBuilder(args);
+builder.AddDewFlowLogging("mcp");
 
 AddToolStack(builder.Services, workspaceRoot);
 builder.Services.AddMcpServer().WithHttpTransport().WithCatalogTools();

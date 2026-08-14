@@ -58,3 +58,6 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+# Host logs: a folder per day, a file per run (.claude/rules/common/logging-serilog.md)
+logs/
