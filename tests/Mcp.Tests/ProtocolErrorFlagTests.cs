@@ -25,6 +25,18 @@ public sealed class ProtocolErrorFlagTests
     }
 
     [Fact]
+    public async Task A_refused_tool_is_marked_isError_exactly_like_a_failed_one()
+    {
+        var result = await Invoke(ToolResult.Refusal("outside the workspace"));
+
+        // The third case is a distinction this server keeps for ITSELF. The protocol has one error
+        // state, so inventing a second on the wire would break every conforming client to express a
+        // difference only telemetry needs.
+        result.IsError.Should().BeTrue();
+        result.Content.OfType<TextContentBlock>().Single().Text.Should().Contain("outside the workspace");
+    }
+
+    [Fact]
     public async Task A_successful_tool_is_not_marked()
     {
         var result = await Invoke(ToolResult.Success("file body"));

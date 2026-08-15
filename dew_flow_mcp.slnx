@@ -3,6 +3,7 @@
     <Project Path="src/Mcp.Contracts/Mcp.Contracts.csproj" />
     <Project Path="src/ServiceDefaults/ServiceDefaults.csproj" />
     <Project Path="src/Mcp.Application/Mcp.Application.csproj" />
+    <Project Path="src/Mcp.Telemetry/Mcp.Telemetry.csproj" />
     <Project Path="src/Mcp.Server/Mcp.Server.csproj" />
     <Project Path="src/Mcp.Bridge/Mcp.Bridge.csproj" />
     <Project Path="src/Mcp.Api/Mcp.Api.csproj" />

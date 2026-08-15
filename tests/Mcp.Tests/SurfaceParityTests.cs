@@ -23,7 +23,7 @@ public sealed class SurfaceParityTests
         var catalog = BuildWorkspaceCatalog(out _);
 
         var protocolNames = ProtocolToolNames(catalog);
-        var bridgeNames = new LocalLlmToolBridge(catalog).ToolDefinitions.Select(d => d.Function.Name);
+        var bridgeNames = Bridge(catalog).ToolDefinitions.Select(d => d.Function.Name);
 
         bridgeNames.Should().Equal(protocolNames);
     }
@@ -32,7 +32,7 @@ public sealed class SurfaceParityTests
     public void Both_presentations_publish_the_identical_argument_schema()
     {
         var catalog = BuildWorkspaceCatalog(out _);
-        var bridge = new LocalLlmToolBridge(catalog);
+        var bridge = Bridge(catalog);
 
         foreach (var advertised in catalog.Advertised)
         {
@@ -47,7 +47,7 @@ public sealed class SurfaceParityTests
     public async Task A_tool_invoked_through_the_bridge_runs_the_same_code_the_protocol_runs()
     {
         var catalog = BuildWorkspaceCatalog(out var root);
-        var bridge = new LocalLlmToolBridge(catalog);
+        var bridge = Bridge(catalog);
         await File.WriteAllTextAsync(Path.Combine(root, "note.txt"), "alpha\nbeta", TestContext.Current.CancellationToken);
 
         var viaBridge = await bridge.InvokeAsync(
@@ -69,7 +69,7 @@ public sealed class SurfaceParityTests
     public async Task The_bridge_reports_malformed_arguments_as_a_tool_failure_the_model_can_retry()
     {
         var catalog = BuildWorkspaceCatalog(out _);
-        var bridge = new LocalLlmToolBridge(catalog);
+        var bridge = Bridge(catalog);
 
         // Local models emit broken JSON regularly; aborting the loop over it would be the wrong answer.
         var result = await bridge.InvokeAsync(
@@ -85,9 +85,14 @@ public sealed class SurfaceParityTests
         var catalog = ToolCatalogTests.Build(new ExtraProvider());
 
         ProtocolToolNames(catalog).Should().Contain("brand_new_tool");
-        new LocalLlmToolBridge(catalog).ToolDefinitions
+        Bridge(catalog).ToolDefinitions
             .Select(d => d.Function.Name).Should().Contain("brand_new_tool");
     }
+
+    /// <summary>The bridge as a host with no model to declare — the honest default, and the one that
+    /// records the model as not captured rather than inventing one.</summary>
+    private static LocalLlmToolBridge Bridge(ToolCatalog catalog) =>
+        new(catalog, new AmbientCallerContext(), BridgeCaller.Driving(string.Empty));
 
     private static IEnumerable<string> ProtocolToolNames(ToolCatalog catalog) =>
         catalog.Advertised

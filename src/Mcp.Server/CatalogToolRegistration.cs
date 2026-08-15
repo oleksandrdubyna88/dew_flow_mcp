@@ -8,7 +8,10 @@ namespace Mcp.Server;
 /// startup from the catalog — it never names a tool, so a new provider appears here for free.</summary>
 public static class CatalogToolRegistration
 {
-    public static IMcpServerBuilder WithCatalogTools(this IMcpServerBuilder builder)
+    /// <param name="transport">Which transport this server is published on — <c>stdio</c> or
+    /// <c>http</c>. Recorded with every call, and passed in rather than inferred because the host is
+    /// the only party that knows: it chose the transport one line earlier.</param>
+    public static IMcpServerBuilder WithCatalogTools(this IMcpServerBuilder builder, string transport = "")
     {
         builder.Services.AddSingleton<IEnumerable<McpServerTool>>(sp =>
         {
@@ -17,6 +20,6 @@ public static class CatalogToolRegistration
                 McpServerTool.Create(new CatalogToolFunction(schema, catalog)))];
         });
 
-        return builder;
+        return builder.WithCallerContext(transport);
     }
 }

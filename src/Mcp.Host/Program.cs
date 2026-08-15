@@ -3,6 +3,7 @@ using Mcp.Diagnostics;
 using Mcp.Application;
 using Mcp.Bridge;
 using Mcp.Server;
+using Mcp.Telemetry;
 using Microsoft.Extensions.Logging;
 using Workspace.Infrastructure;
 
@@ -13,7 +14,9 @@ using Workspace.Infrastructure;
 // drives a local model in-process needs no second implementation of anything.
 //
 // --root <path> chooses the workspace the tools may touch; it defaults to the current directory.
+// --spool <path> turns on per-call telemetry; absent, the null sink stays and nothing is written.
 var workspaceRoot = ReadOption(args, "--root") ?? Directory.GetCurrentDirectory();
+var spool = ReadOption(args, "--spool");
 
 if (args.Contains("--stdio"))
 {
@@ -23,8 +26,8 @@ if (args.Contains("--stdio"))
     // stream corrupts the JSON-RPC and looks like a protocol bug rather than a logging one.
     stdio.AddDewFlowLogging("mcp-stdio", consoleToStdErr: true);
 
-    AddToolStack(stdio.Services, workspaceRoot);
-    stdio.Services.AddMcpServer().WithStdioServerTransport().WithCatalogTools();
+    AddToolStack(stdio.Services, workspaceRoot, spool, "mcp-stdio");
+    stdio.Services.AddMcpServer().WithStdioServerTransport().WithCatalogTools("stdio");
 
     await stdio.Build().RunAsync();
     return;
@@ -33,8 +36,8 @@ if (args.Contains("--stdio"))
 var builder = WebApplication.CreateBuilder(args);
 builder.AddDewFlowLogging("mcp");
 
-AddToolStack(builder.Services, workspaceRoot);
-builder.Services.AddMcpServer().WithHttpTransport().WithCatalogTools();
+AddToolStack(builder.Services, workspaceRoot, spool, "mcp");
+builder.Services.AddMcpServer().WithHttpTransport().WithCatalogTools("http");
 
 var app = builder.Build();
 
@@ -43,9 +46,10 @@ app.MapMcpApi();
 
 app.Run();
 
-static void AddToolStack(IServiceCollection services, string workspaceRoot)
+static void AddToolStack(IServiceCollection services, string workspaceRoot, string? spool, string app)
 {
     services.AddMcpApplication();          // the catalog + the null usage sink
+    services.AddTelemetrySpool(spool, app); // replaces the null sink ONLY when a spool was named
     services.AddLocalLlmToolBridge();      // the in-process presentation, same catalog
     services.AddWorkspaceTools(workspaceRoot);
 }

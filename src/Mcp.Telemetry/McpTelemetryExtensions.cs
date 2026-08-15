@@ -1,0 +1,39 @@
+using Mcp.Contracts;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
+
+namespace Mcp.Telemetry;
+
+/// <summary>Registration for the spool sink. Opt-in by configuration: a host that names no spool
+/// directory keeps the null sink, so telemetry is something an operator turns on rather than something
+/// that appears on disk because a package was referenced.</summary>
+public static class McpTelemetryExtensions
+{
+    /// <param name="spoolDirectory">Where spool files are written. Blank ⇒ nothing is registered and
+    /// the null sink stays in place.</param>
+    /// <param name="app">How this host names itself in every line.</param>
+    public static IServiceCollection AddTelemetrySpool(
+        this IServiceCollection services,
+        string? spoolDirectory,
+        string app)
+    {
+        if (string.IsNullOrWhiteSpace(spoolDirectory))
+        {
+            return services;
+        }
+
+        services.TryAddSingleton(TimeProvider.System);
+
+        // Not TryAdd: naming a spool directory IS the instruction to replace the null floor, and a
+        // silent no-op here would be a host that looks configured and records nothing.
+        services.AddSingleton(new SpoolOptions { Directory = spoolDirectory, App = app });
+        services.AddSingleton<SpoolUsageSink>(sp => new SpoolUsageSink(
+            sp.GetRequiredService<SpoolOptions>(),
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<ILogger<SpoolUsageSink>>()));
+        services.AddSingleton<IUsageSink>(sp => sp.GetRequiredService<SpoolUsageSink>());
+
+        return services;
+    }
+}

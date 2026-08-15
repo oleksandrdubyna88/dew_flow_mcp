@@ -36,6 +36,10 @@ public sealed class WorkspaceToolProvider(ISandboxedFileReader reader) : IToolPr
         },
     ];
 
+    /// <summary>Which workspace these reads are confined to — the answer to "a file was read, but
+    /// where".</summary>
+    public string Scope => reader.Sandbox;
+
     public async Task<ToolResult> InvokeAsync(ToolCall call, CancellationToken cancellationToken)
     {
         if (call.Name != ReadLocalFile)
@@ -43,9 +47,11 @@ public sealed class WorkspaceToolProvider(ISandboxedFileReader reader) : IToolPr
             return ToolResult.Failure($"'{call.Name}' is not served by {nameof(WorkspaceToolProvider)}.");
         }
 
+        // A missing argument is the CALLER being told no, not this tool breaking — the same reading a
+        // sandbox denial gets below.
         if (!TryReadPath(call.Arguments, out var path))
         {
-            return ToolResult.Failure("Argument 'path' is required.");
+            return ToolResult.Refusal("Argument 'path' is required.");
         }
 
         var request = new FileReadRequest(path, ReadInt(call.Arguments, "startLine"), ReadInt(call.Arguments, "lineCount"));
@@ -54,7 +60,10 @@ public sealed class WorkspaceToolProvider(ISandboxedFileReader reader) : IToolPr
         return outcome switch
         {
             FileReadOutcome.Ok ok => ToolResult.Success(Describe(ok)),
-            FileReadOutcome.Refused refused => ToolResult.Failure(refused.Reason),
+            // A sandbox denial is a REFUSAL, not a failure: the tool understood the request and
+            // answered "no". Recording it as an error would put a working guard in the same bucket as
+            // a broken disk, and the guard is the thing anyone auditing this surface wants to count.
+            FileReadOutcome.Refused refused => ToolResult.Refusal(refused.Reason),
             _ => throw new InvalidOperationException("unreachable"),
         };
     }

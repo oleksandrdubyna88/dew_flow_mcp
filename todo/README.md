@@ -13,7 +13,13 @@ Definition of Done.
 
 | plan | status | scope |
 |---|---|---|
-| [PLAN_mcp_product.md](PLAN_mcp_product.md) | inversion and both transports built and parity-tested; the tool set is one placeholder | the three tool families, auth, usage metering, public-repository hygiene |
+| [PLAN_mcp_product.md](PLAN_mcp_product.md) | inversion and both transports built and parity-tested; the tool set is one placeholder | the three tool families, auth, public-repository hygiene (usage metering now shipped — see below) |
+
+Implemented plans live in [`../research/`](../research/) — most recently
+[PLAN_usage_telemetry.md](../research/PLAN_usage_telemetry.md) (`ToolResult.Refused`, caller identity
+read from the protocol session, byte-budgeted payload capture, and a spool sink emitting the
+benchmark-owned `telemetry/v0` schema; 2026-08-15). Its open tail: the product host's registration
+line, and the ingest side that lives in `dew_flow_benchmark`.
 
 ## This repository is public
 

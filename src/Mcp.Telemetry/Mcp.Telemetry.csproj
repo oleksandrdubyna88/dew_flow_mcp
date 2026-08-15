@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The spool sink: one JSON line per tool call, on local disk, drained by whoever owns the schema.
+       References CONTRACTS ONLY. That is the whole reason telemetry can leave this public repository
+       without the repository learning where it lands — a sink that knew its destination would put a
+       product's database address in a public checkout. -->
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Mcp.Contracts\Mcp.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

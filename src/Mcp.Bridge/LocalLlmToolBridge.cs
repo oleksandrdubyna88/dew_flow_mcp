@@ -10,16 +10,24 @@ namespace Mcp.Bridge;
 /// <para>It declares no tool of its own: <see cref="ToolDefinitions"/> is a projection of
 /// <see cref="ToolCatalog.Advertised"/> and <see cref="InvokeAsync"/> forwards to the same catalog, so
 /// the bridge and the protocol server cannot advertise different surfaces.</para></summary>
-public sealed class LocalLlmToolBridge(ToolCatalog catalog)
+public sealed class LocalLlmToolBridge(ToolCatalog catalog, AmbientCallerContext callers, BridgeCaller caller)
 {
     /// <summary>The catalog rendered as function definitions for a chat-completions request.</summary>
     public IReadOnlyList<LocalLlmToolDefinition> ToolDefinitions =>
         [.. catalog.Advertised.Select(t => new LocalLlmToolDefinition(
             new LocalLlmFunction(t.Name, t.Description, t.InputSchema)))];
 
-    /// <summary>Runs one tool call requested by the model.</summary>
-    public Task<ToolResult> InvokeAsync(string name, JsonElement arguments, CancellationToken cancellationToken) =>
-        catalog.InvokeAsync(new ToolCall(name, arguments), cancellationToken);
+    /// <summary>Runs one tool call requested by the model.
+    /// <para>This is the one presentation whose caller identity is fully knowable: the host drives the
+    /// model in-process, so it can say which one — and a benchmark leg that declares its model is the
+    /// reason the telemetry's model column is ever populated at all.</para></summary>
+    public async Task<ToolResult> InvokeAsync(string name, JsonElement arguments, CancellationToken cancellationToken)
+    {
+        using (callers.Enter(caller.Identity))
+        {
+            return await catalog.InvokeAsync(new ToolCall(name, arguments), cancellationToken);
+        }
+    }
 
     /// <summary>Runs a tool call whose arguments arrived as the JSON STRING these APIs send.
     /// Malformed JSON is the model's mistake, so it comes back as a tool failure the model can read and

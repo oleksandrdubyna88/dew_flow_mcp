@@ -70,8 +70,12 @@ Two rules that are not negotiable, both learned the expensive way:
   someone binds it to a LAN, and someone will.
 - **A refusal is a refusal.** Already pinned by `ProtocolErrorFlagTests` after a live finding: a refused call
   reached the wire as ordinary content with no `isError`, so the model read the refusal as an answer.
-- **Usage metering.** [`IUsageSink`](../src/Mcp.Contracts/IUsageSink.cs) is a port with no implementation.
-  Per-call accounting is what makes cost visible before it is a surprise on a bill.
+- ~~**Usage metering.**~~ **Shipped 2026-08-15** — see
+  [research/PLAN_usage_telemetry.md](../research/PLAN_usage_telemetry.md).
+  [`IUsageSink`](../src/Mcp.Contracts/IUsageSink.cs) now has a real implementation (a local spool
+  emitting the benchmark-owned `telemetry/v0` schema), every call records its caller, its scope, its
+  byte-budgeted arguments and its three-state outcome, and `NullUsageSink` remains the default so a
+  host opts in. Open tail there: the private product host's registration line, and the ingest side.
 - **Cancellation that reaches the work**, not just the request.
 
 ### Phase 3 — being a public repository
@@ -102,6 +106,6 @@ back later.
       effect is non-obvious says what it actually costs.
 - [ ] Reads take a line window; responses carry freshness; refusals set `isError`.
 - [ ] The HTTP transport authenticates.
-- [ ] `IUsageSink` has an implementation and per-call usage is recorded.
+- [x] `IUsageSink` has an implementation and per-call usage is recorded.
 - [ ] README, LICENSE, notices and a version policy exist before the repository is advertised.
 - [ ] No editing tool has appeared in this repository.

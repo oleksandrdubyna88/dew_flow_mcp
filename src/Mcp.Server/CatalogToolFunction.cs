@@ -30,14 +30,18 @@ internal sealed class CatalogToolFunction(ToolSchema schema, ToolCatalog catalog
         // "refused" from "returned nothing" is the exact failure this union exists to prevent — a
         // sandbox denial would read as an empty file. Returning CallToolResult keeps it a value rather
         // than a thrown transport fault, so the model can read the reason and correct itself.
+        //
+        // Refused and Failed collapse to the same flag HERE, and only here: the protocol has one error
+        // state, so the third case is a distinction this server keeps for itself (telemetry, and any
+        // in-process consumer) rather than one it invents on the wire.
         return result.Match(
             ok => new CallToolResult { Content = [new TextContentBlock { Text = ok }] },
-            failed => new CallToolResult
-            {
-                IsError = true,
-                Content = [new TextContentBlock { Text = failed }],
-            });
+            refused => Error(refused),
+            failed => Error(failed));
     }
+
+    private static CallToolResult Error(string text) =>
+        new() { IsError = true, Content = [new TextContentBlock { Text = text }] };
 
     private static JsonElement ArgumentsToJson(AIFunctionArguments arguments) =>
         JsonSerializer.SerializeToElement(

@@ -9,6 +9,8 @@ namespace Workspace.Infrastructure;
 /// because <c>a/../../b</c> and a link both spell fine.</para></summary>
 public sealed class SandboxedFileReader(WorkspaceRoot root, ILogger<SandboxedFileReader> logger) : ISandboxedFileReader
 {
+    public string Sandbox => root.FullPath;
+
     public async Task<FileReadOutcome> ReadAsync(FileReadRequest request, CancellationToken cancellationToken)
     {
         if (!TryResolveInsideRoot(request.Path, out var fullPath))

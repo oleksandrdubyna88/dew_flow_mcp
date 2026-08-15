@@ -38,10 +38,26 @@ public sealed class ArchitectureTests
     [Fact]
     public void Every_shipped_project_is_covered_by_the_rule()
     {
-        // 8 = Contracts, Application, Server, Bridge, Api, Ui, Workspace.Application, Workspace.Infrastructure.
-        // A new src project referenced by this test project lands in the output folder and is picked up
-        // automatically; this floor only catches the graph silently shrinking.
-        EnumerateShippedAssemblyFiles().Should().HaveCountGreaterThanOrEqualTo(8);
+        // 9 = Contracts, Application, Telemetry, Server, Bridge, Api, Ui, Workspace.Application,
+        // Workspace.Infrastructure. A new src project referenced by this test project lands in the
+        // output folder and is picked up automatically; this floor only catches the graph silently
+        // shrinking.
+        EnumerateShippedAssemblyFiles().Should().HaveCountGreaterThanOrEqualTo(9);
+    }
+
+    [Fact]
+    public void The_telemetry_sink_knows_only_the_contracts()
+    {
+        // The reason telemetry can leave a PUBLIC repository at all: the sink writes a local file and
+        // has no idea who drains it. A reference to anything but the contracts here would be a
+        // destination compiled into a public checkout.
+        Assembly
+            .LoadFrom(Path.Combine(AppContext.BaseDirectory, "Mcp.Telemetry.dll"))
+            .GetReferencedAssemblies()
+            .Select(r => r.Name!)
+            .Where(name => name.StartsWith("Mcp.", StringComparison.Ordinal)
+                        || name.StartsWith("Workspace.", StringComparison.Ordinal))
+            .Should().Equal("Mcp.Contracts");
     }
 
     private static IEnumerable<string> EnumerateShippedAssemblyFiles() =>

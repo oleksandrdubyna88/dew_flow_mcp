@@ -12,6 +12,9 @@ public static class McpApplicationExtensions
     {
         // TryAdd so a host that ships a real telemetry sink keeps it; the null sink is only a floor.
         services.TryAddSingleton<IUsageSink, NullUsageSink>();
+        services.TryAddSingleton<AmbientCallerContext>();
+        services.TryAddSingleton<ICallerContext>(sp => sp.GetRequiredService<AmbientCallerContext>());
+        services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<ToolCatalog>();
         return services;
     }

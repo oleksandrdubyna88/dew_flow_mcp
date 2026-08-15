@@ -16,6 +16,7 @@
     <ProjectReference Include="..\Mcp.Server\Mcp.Server.csproj" />
     <ProjectReference Include="..\Mcp.Api\Mcp.Api.csproj" />
     <ProjectReference Include="..\Mcp.Bridge\Mcp.Bridge.csproj" />
+    <ProjectReference Include="..\Mcp.Telemetry\Mcp.Telemetry.csproj" />
     <ProjectReference Include="..\Workspace.Infrastructure\Workspace.Infrastructure.csproj" />
   </ItemGroup>
 

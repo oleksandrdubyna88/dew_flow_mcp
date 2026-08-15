@@ -3,6 +3,10 @@ namespace Workspace.Application;
 /// <summary>Reads a file from inside the workspace sandbox. The port; the adapter enforces the root.</summary>
 public interface ISandboxedFileReader
 {
+    /// <summary>The sandbox these reads are confined to. Part of the port because "which workspace"
+    /// is half of what a read means — a call recorded without it says a file was read and not which.</summary>
+    string Sandbox { get; }
+
     Task<FileReadOutcome> ReadAsync(FileReadRequest request, CancellationToken cancellationToken);
 }
 

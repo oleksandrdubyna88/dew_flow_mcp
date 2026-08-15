@@ -59,9 +59,11 @@ public sealed class WorkspaceToolTests
 
         var result = await Invoke(provider, $$"""{"path":"{{path}}"}""");
 
-        // A refusal, never an empty read — the failure mode that makes a breach look like a missing file.
-        result.Should().BeOfType<ToolResult.Failed>()
-            .Which.Message.Should().Contain("outside the workspace");
+        // A refusal, never an empty read — the failure mode that makes a breach look like a missing
+        // file. And a REFUSAL rather than a failure: the guard worked, which is the opposite of the
+        // disk breaking, and a ledger that files both under "error" cannot count either.
+        result.Should().BeOfType<ToolResult.Refused>()
+            .Which.Reason.Should().Contain("outside the workspace");
     }
 
     [Fact]
@@ -71,18 +73,27 @@ public sealed class WorkspaceToolTests
 
         var result = await Invoke(provider, $$"""{"path":"{{Path.GetTempPath().Replace("\\", "\\\\")}}"}""");
 
-        result.Should().BeOfType<ToolResult.Failed>();
+        result.Should().BeOfType<ToolResult.Refused>();
     }
 
     [Fact]
-    public async Task A_missing_path_argument_is_a_readable_failure()
+    public async Task A_missing_path_argument_is_a_readable_refusal()
     {
         var (provider, _) = Build();
 
         var result = await Invoke(provider, """{}""");
 
-        result.Should().BeOfType<ToolResult.Failed>()
-            .Which.Message.Should().Contain("'path' is required");
+        result.Should().BeOfType<ToolResult.Refused>()
+            .Which.Reason.Should().Contain("'path' is required");
+    }
+
+    [Fact]
+    public void The_provider_reports_which_workspace_it_is_scoped_to()
+    {
+        var (provider, root) = Build();
+
+        // "A file was read" is half a fact; the other half is which tree it was read from.
+        provider.Scope.Should().Be(root);
     }
 
     private static Task<ToolResult> Invoke(WorkspaceToolProvider provider, string argumentsJson) =>
