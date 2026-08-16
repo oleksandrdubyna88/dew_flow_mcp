@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -16,6 +17,24 @@ public static class McpLogging
 {
     /// <summary>Where a run's file lands, relative to the content root.</summary>
     public const string LogFolder = "logs";
+
+    /// <summary>How long a day-folder survives when configuration names no window.
+    /// <para>
+    /// This repository's named retention owner is <b>the host, at startup</b> — the first of the two the
+    /// shared logging rule allows. A file per run with no reaper is a disk that eventually fills, and on a
+    /// machine running 24/7 the "eventually" is a date. Override with <c>Serilog:RetentionDays</c>; set it
+    /// to zero to keep everything, which is only correct when an operator job owns the folder instead.
+    /// </para>
+    /// <para>
+    /// The same key, the same default and the same shape as <c>dew_flow_rag_qln</c>'s <c>RagLogging</c> and
+    /// <c>dew_flow_benchmark</c>'s <c>BenchLogging</c> — deliberately, and the hard way: this repository
+    /// first shipped its own answer (a <c>Mcp:Logs:RetentionDays</c> key, a 30-day window, a separate class)
+    /// without looking at what the family had already decided. A second answer to one question is a mirror
+    /// that has already drifted, which is precisely what these three files exist to prevent.
+    /// </para></summary>
+    public const int DefaultRetentionDays = 14;
+
+    private const string DayFormat = "yyyy-MM-dd";
 
     /// <summary>
     /// The template. Short enough to read in a terminal, structured enough to grep: the level is fixed-width
@@ -44,16 +63,6 @@ public static class McpLogging
             builder.Configuration, builder.Environment.ContentRootPath, appName, consoleToStdErr);
         builder.Logging.ClearProviders();
         builder.Services.AddSerilog(Log.Logger, dispose: true);
-
-        // AFTER the logger exists, so the sweep can say what it did — and here rather than inside
-        // CreateLogger, which returns a logger and has no business deleting anything. A host that builds
-        // its logger through the factory directly (an orchestrator's builder is not an
-        // IHostApplicationBuilder) calls LogRetention.Prune itself.
-        LogRetention.Prune(
-            builder.Environment.ContentRootPath,
-            LogRetention.WindowFrom(builder.Configuration),
-            DateTimeOffset.UtcNow,
-            Log.Logger);
     }
 
     /// <summary>
@@ -91,7 +100,84 @@ public static class McpLogging
         configuration.WriteTo.Sink(
             new DailyRunFileSink(contentRoot, appName, Template, DateTimeOffset.UtcNow));
 
-        return configuration.CreateLogger();
+        var logger = configuration.CreateLogger();
+        Retire(logger, contentRoot, RetentionDays(appConfiguration));
+        return logger;
+    }
+
+    /// <summary>
+    /// Retires day-folders past the window, at startup, best effort.
+    ///
+    /// <para>Startup is the right moment and not merely a convenient one: it is cheap, it is idempotent, and a
+    /// host that never restarts is not producing new files either. Best effort because a folder another host
+    /// still holds open is a reason to skip it, never a reason to fail the run that was about to start.</para>
+    ///
+    /// <para>It is the OTHER half of the never-restarting problem. <see cref="DailyRunFileSink"/> bounds any
+    /// one file to a day; without this, nothing bounds the total, and a disk fills with text while the
+    /// failure arrives disguised as something else.</para>
+    ///
+    /// <para><b>The telemetry spool is deliberately not covered here.</b> It looks like the same problem and
+    /// is not: a spool file is DRAINED by a consumer, and this process cannot know which records that
+    /// consumer has taken. Its retention owner is the ingester, named rather than assumed.</para>
+    /// </summary>
+    public static IReadOnlyList<string> PruneLogFolders(string contentRoot, int retentionDays, DateTimeOffset now)
+    {
+        var root = Path.Combine(contentRoot, LogFolder);
+
+        if (retentionDays <= 0 || !Directory.Exists(root))
+        {
+            return [];
+        }
+
+        var cutoff = now.UtcDateTime.Date.AddDays(-retentionDays);
+
+        return [.. Directory.EnumerateDirectories(root).Where(folder => Expired(folder, cutoff) && Delete(folder))
+            .Select(Path.GetFileName)!];
+    }
+
+    /// <summary>Whether this folder is a day-folder old enough to retire.
+    /// <para>
+    /// A name that does not parse as a day is never expired, and therefore never deleted. That is the whole
+    /// safety property: this method decides to remove a directory tree, so anything it does not positively
+    /// recognise stays where it is.
+    /// </para></summary>
+    private static bool Expired(string folder, DateTime cutoff) =>
+        DateTime.TryParseExact(
+            Path.GetFileName(folder),
+            DayFormat,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out var day)
+        && day < cutoff;
+
+    private static bool Delete(string folder)
+    {
+        try
+        {
+            Directory.Delete(folder, recursive: true);
+            return true;
+        }
+        catch (Exception failure) when (failure is IOException or UnauthorizedAccessException)
+        {
+            // Another host is writing in there, or the file system said no. Retention is not worth failing
+            // a startup over — the next run tries again.
+            return false;
+        }
+    }
+
+    private static int RetentionDays(IConfiguration configuration) =>
+        int.TryParse(configuration["Serilog:RetentionDays"], out var days) ? days : DefaultRetentionDays;
+
+    private static void Retire(Serilog.ILogger logger, string contentRoot, int retentionDays)
+    {
+        var pruned = PruneLogFolders(contentRoot, retentionDays, DateTimeOffset.UtcNow);
+
+        if (pruned.Count > 0)
+        {
+            logger.Information(
+                "Retired {Count} log day-folder(s) older than {RetentionDays} day(s): {Folders}",
+                pruned.Count, retentionDays, string.Join(", ", pruned));
+        }
     }
 
     /// <summary>

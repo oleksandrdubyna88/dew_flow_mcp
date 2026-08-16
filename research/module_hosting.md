@@ -109,7 +109,7 @@ Two different problems, two different owners, and conflating them would destroy 
 
 | Artefact | Bound on one file | Bound on the total | Owner |
 |---|---|---|---|
-| `logs/` | a UTC-midnight segment | `LogRetention.Prune` deletes day folders older than `Mcp:Logs:RetentionDays` (default **30**), once, at startup | this host |
+| `logs/` | a UTC-midnight segment | `McpLogging.PruneLogFolders` deletes day folders older than `Serilog:RetentionDays` (default **14**), once, at startup | this host |
 | the telemetry spool | the same midnight segment | **not this process** | the ingester — `bench telemetry ingest` / `bench telemetry prune` in `dew_flow_benchmark` |
 
 **The spool is deliberately not pruned here.** It looks like the same problem and is not: a spool file is
@@ -119,15 +119,19 @@ asked for; deleting on its behalf would be a worse bug than the unbounded growth
 
 Three properties of the log sweep worth knowing:
 
-- **Zero or negative keeps everything.** An explicit off switch, because a misread config that silently
-  deleted a month of logs is the worst possible failure of a retention feature.
+- **Zero or negative keeps everything.** An explicit off switch, correct only when an operator job owns
+  the folder instead — the second of the two owners the shared rule allows.
+- **The key, the default and the signature are the family's**, shared with `RagLogging` and `BenchLogging`.
+  This repository first shipped its own answer to the same question — a `Mcp:Logs:RetentionDays` key, a
+  30-day window, a separate class — and was brought back: a second answer is a mirror that has already
+  drifted.
 - **Only folders whose name parses as `yyyy-MM-dd` are candidates.** Anything else under `logs/` was put
   there by a person. `2026-13-45` is not a date and survives.
 - **A folder that will not delete is counted, never thrown.** A log viewer holding a file open is the
   ordinary case and must not stop a host from starting.
 
-Startup, not a timer: a background sweep is a second thing that can fail silently in a process nobody is
-watching, and the window is measured in days. Pinned by `LogRetentionTests`.
+Startup, not a timer: it is cheap, idempotent, and a host that never restarts is not producing new files
+either. Pinned by `LogRetentionTests`.
 
 `logs/` is git-ignored. The rule lives at `.claude/rules/shared/common/logging-serilog.md` — **one shared
 copy, not a mirror**: since 2026-08-16 every `dew_flow_*` repository mounts `dew_flow_conventions` as a
