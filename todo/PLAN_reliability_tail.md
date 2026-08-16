@@ -2,9 +2,9 @@
 
 > Status: **open; every item shipped 2026-08-16 on this side. What holds the plan here is item 6's
 > consuming half — `dew_flow_rag_qln` must move its `external/dew_flow_mcp` submodule pin, which needs
-> a push — and two things deliberately named rather than folded in: nothing prunes old day folders,
-> and the midnight segment makes this repository log differently from the shared rule and its two
-> sibling repos.** Scope:
+> a push — and one thing deliberately named rather than folded in: the midnight segment makes this
+> repository log differently from the shared rule in `dew_flow_conventions` and from its two sibling
+> repos.** Scope:
 > `src/Mcp.Application`, `src/Mcp.Bridge`, `src/Mcp.Host`, `src/Mcp.Telemetry`, `src/ServiceDefaults`.
 > The CRITICAL/HIGH defects of the same audit — the overflowing read window, the silently dying spool
 > writer, the unguarded dispatch chain, the missing per-call ceiling and the constant health answer —
@@ -233,11 +233,26 @@ What shipped:
 `A_spool_that_outlives_the_day_continues_in_a_midnight_segment`. All watched failing against the old
 shape before being trusted — "found 1" file where two were expected.
 
-**Still open, and NOT what was asked for here: total disk is still unbounded.** Segmenting caps any one
-file at a day; nothing deletes day folders. The plan's other half — *prune day folders older than the
-window at startup* — was not part of the operator's answer and has not been built. Whether this needs a
-retention window is a separate decision. `A_day_folder_older_than_the_window_is_pruned_at_startup`
-remains unwritten.
+**The other half — a retention window — shipped too**, after the operator asked for it separately.
+`LogRetention.Prune` deletes day folders older than `Mcp:Logs:RetentionDays` (default 30), once, at
+startup rather than on a timer: a background sweep is a second thing that can fail silently in a process
+nobody is watching, and the window is measured in days. Zero or negative keeps everything — an explicit
+off switch, because a misread config that silently deleted a month of logs would be the worst possible
+failure of a retention feature. Only folders whose name parses as `yyyy-MM-dd` are candidates, and one
+that will not delete is counted rather than thrown, because a log viewer holding a file open must not
+stop a host from starting.
+
+**The spool is deliberately NOT pruned here, and that is the answer rather than an omission.** It looks
+like the same problem and is not: a spool file is *drained* by a consumer, and this process cannot know
+which records that consumer has taken. `dew_flow_benchmark` already owns `bench telemetry prune --spool
+<dir> --older-than <days>` beside its ingester. Deleting on its behalf would destroy telemetry nobody
+ingested — a worse bug than the growth it fixes. The owner is named; that is what the audit asked for.
+
+**Tests:** `A_day_folder_older_than_the_window_is_pruned_at_startup` — the name this plan reserved —
+plus the boundary day, the off switch, a non-date folder, a missing `logs/`, and a folder held open.
+Watched failing against a sweep that expires nothing: *"Expected removed to be 1, but found 0"*. Verified
+live: a planted `logs/2020-01-01` was gone after one start, with
+*"Log retention: removed 1 day folder(s) older than 30 day(s), 0 refused"* in the log.
 
 **And this changes a rule shared by four repositories.**
 `.claude/rules/shared/common/logging-serilog.md` (the `dew_flow_conventions` submodule) says *"A file per
@@ -384,19 +399,20 @@ binaries ~60 s apart without rebuilding.
       consuming half — the nav entry, the router slice, the AppHost URL — lives in `dew_flow_rag_qln`
       and is gated on the submodule pin.
 - [x] Item 5's answer came from the operator, and it was neither candidate the plan offered: a file per
-      run, segmented at UTC midnight. Its unasked-for half — pruning day folders — is named as still
-      open rather than quietly folded in.
+      run, segmented at UTC midnight. Its other half — pruning day folders — shipped after, on a second
+      instruction, and the spool's owner is named rather than assumed.
 - [x] Each implemented behavioural item has a RED-then-GREEN test, both observations quoted — items 3,
-      5 and 7. Items 4 and 6 have no observable behaviour of their own, said so explicitly.
-- [x] Timeouts live in `appsettings.json`, not in code (three values, each with its reasoning beside it).
-      A retention **window** does not exist: see the item-5 note.
-- [x] The never-restarting case is answered — a midnight segment, in both the log and the spool. **A
-      retention owner is still not named**: nothing deletes an old day folder, so total disk remains
-      unbounded. Deliberately left open rather than decided here.
+      5 (segments and retention) and 7. Item 4 has no observable behaviour without an ASP.NET test host,
+      and item 6's markup none without a bUnit harness; both said so explicitly rather than skipped.
+- [x] Timeouts **and the retention window** live in `appsettings.json`, not in code — four values, each
+      with its reasoning beside it.
+- [x] `logs/` and the spool have a named retention owner, and the never-restarting case is answered. The
+      log: a midnight segment plus a 30-day startup sweep, both here. The spool: a midnight segment here,
+      and its total owned by the INGESTER, because only the consumer knows which records it has taken.
 - [x] Nothing writes to stdout in the stdio host — verified by running it: the surface probe puts JSON
       there and every log line goes to stderr.
 - [ ] On completion the plan is promoted to `research/` with its deviations recorded, and the
       *Currently open* table in [README.md](README.md) is updated in the same task.
-      *(Not yet. Every item is built here, but item 6 is only half-connected until the sibling repo
-      mounts the page, and the retention and shared-rule questions above are still open decisions.
-      Promoting now would file open work as documentation.)*
+      *(Not yet — one thing is genuinely unfinished: the midnight segment makes this repository log
+      differently from the shared rule and from its two sibling repos, and that reconciliation is real
+      work in four repositories. Promoting now would file it as documentation.)*

@@ -44,6 +44,16 @@ public static class McpLogging
             builder.Configuration, builder.Environment.ContentRootPath, appName, consoleToStdErr);
         builder.Logging.ClearProviders();
         builder.Services.AddSerilog(Log.Logger, dispose: true);
+
+        // AFTER the logger exists, so the sweep can say what it did — and here rather than inside
+        // CreateLogger, which returns a logger and has no business deleting anything. A host that builds
+        // its logger through the factory directly (an orchestrator's builder is not an
+        // IHostApplicationBuilder) calls LogRetention.Prune itself.
+        LogRetention.Prune(
+            builder.Environment.ContentRootPath,
+            LogRetention.WindowFrom(builder.Configuration),
+            DateTimeOffset.UtcNow,
+            Log.Logger);
     }
 
     /// <summary>

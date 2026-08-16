@@ -103,6 +103,32 @@ nothing to say about it.
 | A stdio host logs to **stderr** | stdout carries the JSON-RPC. One log line there corrupts the stream and looks like a protocol bug rather than a logging one |
 | Levels from `appsettings.json` | Verbosity is a config edit and a restart, never an edited call site. Defaults: `Information`, with `Microsoft.AspNetCore` and `System.Net.Http.HttpClient` at `Warning` |
 
+### Retention
+
+Two different problems, two different owners, and conflating them would destroy data.
+
+| Artefact | Bound on one file | Bound on the total | Owner |
+|---|---|---|---|
+| `logs/` | a UTC-midnight segment | `LogRetention.Prune` deletes day folders older than `Mcp:Logs:RetentionDays` (default **30**), once, at startup | this host |
+| the telemetry spool | the same midnight segment | **not this process** | the ingester — `bench telemetry ingest` / `bench telemetry prune` in `dew_flow_benchmark` |
+
+**The spool is deliberately not pruned here.** It looks like the same problem and is not: a spool file is
+*drained* by a consumer, and this process cannot know which records that consumer has taken. Deleting one
+on a schedule would destroy telemetry nobody ingested. Naming the owner is the whole answer the audit
+asked for; deleting on its behalf would be a worse bug than the unbounded growth.
+
+Three properties of the log sweep worth knowing:
+
+- **Zero or negative keeps everything.** An explicit off switch, because a misread config that silently
+  deleted a month of logs is the worst possible failure of a retention feature.
+- **Only folders whose name parses as `yyyy-MM-dd` are candidates.** Anything else under `logs/` was put
+  there by a person. `2026-13-45` is not a date and survives.
+- **A folder that will not delete is counted, never thrown.** A log viewer holding a file open is the
+  ordinary case and must not stop a host from starting.
+
+Startup, not a timer: a background sweep is a second thing that can fail silently in a process nobody is
+watching, and the window is measured in days. Pinned by `LogRetentionTests`.
+
 `logs/` is git-ignored. The rule lives at `.claude/rules/shared/common/logging-serilog.md` — **one shared
 copy, not a mirror**: since 2026-08-16 every `dew_flow_*` repository mounts `dew_flow_conventions` as a
 submodule at `.claude/rules/shared/`, which is what ended the era of fixing the same timestamp bug in three
