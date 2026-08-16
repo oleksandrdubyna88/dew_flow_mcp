@@ -1,6 +1,6 @@
 # Architecture — dew_flow_mcp
 
-> The system **as it is**, 2026-08-15. Everything below is in the repository today; what is planned but
+> The system **as it is**, 2026-08-16. Everything below is in the repository today; what is planned but
 > absent is listed in [What does not exist yet](#what-does-not-exist-yet) rather than described as if it
 > did. Open work lives in [../todo/](../todo/).
 

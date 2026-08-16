@@ -23,13 +23,18 @@
 >    (`ProtocolCallerIdentityTests`: a real `McpClient` against a real `McpServer` over an in-memory
 >    stream pair), not through a hand-made context — the claim is about what the transport carries.
 >
-> **Open tail (not done here).** The Daemon registration line in the private product repo
-> (`dew_flow_rag_qln · hosts/Daemon/Program.cs`) is NOT yet added, so real product traffic is still
-> unmetered; and the ingest half lives in the benchmark, which has not been built yet — no spool has
-> been drained end to end. Both are tracked by the benchmark's plan.
+> **Open tail — the registration half closed 2026-08-16.** The product host now registers the sink:
+> `dew_flow_rag_qln · hosts/Daemon/Program.cs:120-121` calls `AddTelemetrySpool(spoolDirectory, "daemon")`
+> from the config key `Rag:Telemetry:SpoolDirectory`, with `hosts/Daemon/Daemon.csproj:29` referencing
+> `Mcp.Telemetry`. The opt-in semantics survived the crossing intact — a blank directory registers nothing
+> and `NullUsageSink` stays — which was the point of making the spool a configuration value rather than a
+> package reference. What remains is the *evidence*: the ingest half now exists in the benchmark
+> (`bench telemetry ingest`), but no spool from a REAL product run has been drained through it end to end,
+> so the path is proven from the emitter's own output rather than from live traffic. Tracked by the
+> benchmark's plan.
 >
 > This is the emitter half of a cross-repository contract. The schema (`telemetry/v0`), the ingest
-> and the report live in the benchmark: `dew_flow_benchmark · todo/PLAN_tool_telemetry_v0.md`. The
+> and the report live in the benchmark: `dew_flow_benchmark · research/PLAN_tool_telemetry_v0.md`. The
 > owner of the contract is the benchmark repository (operator decision, 2026-08-15); this plan
 > implements Phase 2's "usage metering" bullet of [PLAN_mcp_product.md](PLAN_mcp_product.md) against
 > that schema.
@@ -129,9 +134,10 @@ more than the budget, which is the retention decision made before the first writ
       for real sessions and self-declared for benchmark legs — never guessed.
 - [x] Arguments and response bodies are byte-budgeted at emit; truncation is recorded exactly.
 - [x] The spool sink never blocks, never fails a call, and flushes on shutdown.
-- [ ] **A spool file produced here ingests cleanly by `bench telemetry ingest`** — the ingest side
-      does not exist yet, so this is the one item the emitter cannot close alone.
+- [ ] **A spool file produced here ingests cleanly by `bench telemetry ingest`** — the ingest side now
+      exists (2026-08-16), but no spool from a real product run has been drained through it, so this is
+      still the one item the emitter cannot close alone.
 - [x] `NullUsageSink` remains the default; hosts opt in by configuration (`--spool <path>`).
 - [x] Both `todo/README.md` tables and the product plan's Phase 2 bullet reflect this plan.
-- [ ] **The product host registers the sink** (`dew_flow_rag_qln · hosts/Daemon/Program.cs`), so real
-      traffic is recorded and not only the standalone host's.
+- [x] **The product host registers the sink** (`dew_flow_rag_qln · hosts/Daemon/Program.cs:120-121`,
+      2026-08-16), so real traffic is recorded and not only the standalone host's.

@@ -1,6 +1,6 @@
 # Module — telemetry
 
-> `src/Mcp.Telemetry`, and the `IUsageSink` half of `src/Mcp.Contracts`. The system as it is, 2026-08-15.
+> `src/Mcp.Telemetry`, and the `IUsageSink` half of `src/Mcp.Contracts`. The system as it is, 2026-08-16.
 
 ## Purpose
 
@@ -29,7 +29,7 @@ flowchart LR
     BROKEN -->|yes| DROP
     BROKEN -->|no| APPEND["append one JSON line"]
     APPEND -->|"ANY exception"| TRIP["log once, trip breaker"]
-    APPEND --> FILE[("logs/{day}/{app}-{time}-{pid}.jsonl")]
+    APPEND --> FILE[("{spoolRoot}/{day}/{app}-{time}-{pid}.jsonl")]
     TRIP --> DROP
     TRIP --> HEALTH["Check() ⇒ degraded<br/>with the drop count"]
 ```
@@ -43,7 +43,7 @@ flowchart LR
 | `SpoolOptions` | `Directory` (required), `App`, `Capacity` (default 4096) |
 | `SpoolUsageSink` | The implementation. Exposes `Path` (the file this run writes), `Dropped` (records the spool refused), `Broken` (breaker tripped **or** the writer task faulted) and `Check()` — it is an `IHealthContributor` as well as an `IUsageSink` |
 | `IHealthContributor` / `ComponentHealth` | The health port, in `Mcp.Contracts`. How a dead writer becomes visible from outside the process without `Mcp.Api` learning what a spool is |
-| `TelemetryRecord` + `EmitterWire`, `CallerWire`, `CapturedTextWire`, `CapturedNumberWire`, `StageFixture`-free wire records | The `telemetry/v0` line |
+| `TelemetryRecord` + `EmitterWire`, `CallerWire`, `CapturedTextWire`, `CapturedNumberWire` | The `telemetry/v0` line |
 | `TelemetryJson` | The one serializer for the spool, so the emitted bytes have a single definition |
 
 ## Entry points

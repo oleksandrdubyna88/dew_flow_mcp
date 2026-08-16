@@ -1,6 +1,6 @@
 # Module — hosting
 
-> `src/Mcp.Host`, `src/Mcp.Api`, `src/Mcp.Ui`, `src/ServiceDefaults`. The system as it is, 2026-08-15.
+> `src/Mcp.Host`, `src/Mcp.Api`, `src/Mcp.Ui`, `src/ServiceDefaults`. The system as it is, 2026-08-16.
 
 ## Purpose
 
@@ -58,8 +58,10 @@ nothing to say about it.
 | A stdio host logs to **stderr** | stdout carries the JSON-RPC. One log line there corrupts the stream and looks like a protocol bug rather than a logging one |
 | Levels from `appsettings.json` | Verbosity is a config edit and a restart, never an edited call site. Defaults: `Information`, with `Microsoft.AspNetCore` and `System.Net.Http.HttpClient` at `Warning` |
 
-`logs/` is git-ignored. The rule is mirrored in every `dew_flow_*` repository at
-`.claude/rules/common/logging-serilog.md`.
+`logs/` is git-ignored. The rule lives at `.claude/rules/shared/common/logging-serilog.md` — **one shared
+copy, not a mirror**: since 2026-08-16 every `dew_flow_*` repository mounts `dew_flow_conventions` as a
+submodule at `.claude/rules/shared/`, which is what ended the era of fixing the same timestamp bug in three
+places.
 
 ## Health
 
@@ -90,15 +92,22 @@ than a retrofit.
 - `ServiceDefaults` → Serilog only. It configures sinks; libraries take `ILogger<T>` and say nothing
   about them.
 - **The real product host is elsewhere.** `dew_flow_rag_qln` vendors this repository under
-  `external/dew_flow_mcp/` and composes it with retrieval tools in its own daemon. `Mcp.Host` is the
-  minimal public standalone equivalent.
+  `external/dew_flow_mcp/` and composes it with the **workspace tool set and a telemetry spool** in its own
+  daemon — since 2026-08-16 it calls `AddTelemetrySpool(…, "daemon")` from the config key
+  `Rag:Telemetry:SpoolDirectory` (`dew_flow_rag_qln · hosts/Daemon/Program.cs:120-121`), with the same opt-in
+  semantics as `--spool` here: a blank directory registers nothing and the `NullUsageSink` stays, so a spool
+  is something an operator turns on rather than something that appears on disk because a package was
+  referenced. Retrieval tools are open work (`dew_flow_rag_qln · todo/PLAN_search_variant_axes.md` §3.6). That
+  daemon serves exactly one MCP tool today, `rt_read_local_file`, which comes from here — there is no
+  `IToolProvider` implementation in that repository yet. Said precisely because the looser sentence, "composes
+  it with retrieval tools", was corrected on the *other* side of the boundary on 2026-08-15 and survived on
+  this one: a claim about a neighbour repository is only as good as the last time somebody opened it.
+  `Mcp.Host` is the minimal public standalone equivalent.
 
 ## What is missing
 
 - **Authentication.** The HTTP transport is open. Fine on localhost; not fine the first time somebody
   binds it to a LAN, and somebody will.
-- **The product host does not register the spool sink yet**, so real product traffic is still unmetered —
-  only this standalone host emits.
 - **Explicit Kestrel and request timeouts.** The web host relies on framework defaults, which the shared
   rule counts as an unnamed decision. Tracked as item 4 of
   [../todo/PLAN_reliability_tail.md](../todo/PLAN_reliability_tail.md), where it composes with the
