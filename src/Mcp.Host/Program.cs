@@ -79,7 +79,22 @@ builder.AddDewFlowLogging("mcp");
 AddToolStack(builder.Services, workspaceRoot, spool, "mcp", surface, correlation);
 builder.Services.AddMcpServer().WithHttpTransport().WithCatalogTools("http");
 
+// Every wait has a ceiling, and a framework default you rely on is still a decision — so the transport's
+// numbers are NAMED, in appsettings.json under Kestrel:Limits (keep-alive and request headers) where an
+// operator can change them without a rebuild.
+//
+// There is deliberately NO default request-timeout policy. MapMcp() serves a Server-Sent Events stream
+// that is meant to stay open, and a blanket timeout would sever it on a schedule; what bounds a tool
+// call is the catalog's own ToolCatalogOptions.CallTimeout (2 minutes), which sits at the one dispatch
+// chokepoint. Only the management API — which answers in milliseconds — gets a transport ceiling, and
+// the two numbers are chosen against each other rather than each on its own.
+builder.Services.AddRequestTimeouts(timeouts => timeouts.AddPolicy(
+    McpApiEndpoints.TimeoutPolicy,
+    builder.Configuration.GetValue<TimeSpan?>("Mcp:Api:RequestTimeout") ?? TimeSpan.FromSeconds(30)));
+
 var app = builder.Build();
+
+app.UseRequestTimeouts();
 
 app.MapMcp();
 app.MapMcpApi();

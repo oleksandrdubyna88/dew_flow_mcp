@@ -73,33 +73,31 @@ public static class McpLogging
         configuration.WriteTo.Sink(new AnsiConsoleSink(formatProvider: null, toStandardError: consoleToStdErr));
 
         // No theme on the file: escape codes in a file are noise to every reader, grep included.
-        configuration.WriteTo.File(
-            RunFilePath(contentRoot, appName),
-            outputTemplate: Template,
-            shared: false,
-            flushToDiskInterval: TimeSpan.FromSeconds(2));
+        //
+        // Through DailyRunFileSink rather than WriteTo.File directly, because a file per run and a
+        // process that never restarts are one file growing for months. It segments at UTC midnight and
+        // delegates the writing to Serilog's own file sink — see that class for why the boundary is the
+        // clock rather than elapsed time.
+        configuration.WriteTo.Sink(
+            new DailyRunFileSink(contentRoot, appName, Template, DateTimeOffset.UtcNow));
 
         return configuration.CreateLogger();
     }
 
     /// <summary>
-    /// This RUN's file: a folder per day, a file per run.
+    /// Where a run starting NOW writes its first file: a folder per day, a file per run.
     ///
-    /// <para>Not a rolling sink, and that is the requirement rather than a preference. Rolling by day appends
-    /// every run into one file, while the question actually asked is almost always "what did THAT run do".
-    /// The timestamp is taken once, here; the pid disambiguates two hosts started in the same second, which
-    /// an orchestrator launching several children does on every start.</para>
+    /// <para>Not a rolling-by-day sink, and that is the requirement rather than a preference: rolling by
+    /// day appends every run into one file, while the question actually asked is almost always "what did
+    /// THAT run do". The timestamp is taken once, here; the pid disambiguates two hosts started in the
+    /// same second, which an orchestrator launching several children does on every start.</para>
+    ///
+    /// <para>A run that outlives the day continues in a <c>00-00-00</c> segment under the next day's
+    /// folder — same pid, so the run is still one thing. <see cref="DailyRunFileSink"/> owns that, and
+    /// owns the path shape this method delegates to.</para>
     /// </summary>
-    public static string RunFilePath(string contentRoot, string appName)
-    {
-        // UTC, and it has to be for a reason that only shows up at the boundary: the Rust sidecar has no
-        // timezone library and names its folder from a unix timestamp, so a local-time .NET host and a UTC
-        // sidecar put the same evening's logs in two different day folders. One clock, everywhere.
-        var now = DateTimeOffset.UtcNow;
-        var folder = Path.Combine(contentRoot, LogFolder, now.ToString("yyyy-MM-dd"));
-        Directory.CreateDirectory(folder);
-        return Path.Combine(folder, $"{appName}-{now:HH-mm-ss}-{Environment.ProcessId}.log");
-    }
+    public static string RunFilePath(string contentRoot, string appName) =>
+        DailyRunFileSink.RunFilePath(contentRoot, appName, DateTimeOffset.UtcNow);
 
     /// <summary>
     /// The floor, and the two sources that drown everything else at Information.

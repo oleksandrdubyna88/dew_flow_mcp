@@ -20,8 +20,20 @@ namespace Mcp.Diagnostics;
 ///
 /// <para>The colours are deliberately few: the level is the only thing coloured strongly, because a line
 /// where everything is coloured is a line where nothing stands out.</para>
+///
+/// <para><b>One write per event, and the line is built before the lock is taken.</b> It used to render
+/// directly into the console writer — five to seven separate <c>Write</c> calls plus the formatter plus
+/// an explicit flush, all inside a global lock, on every event. <c>Console.Out</c> auto-flushes, so that
+/// was five to seven flushes per line held against every other thread. Invisible at Information volume
+/// and a contention point exactly when somebody raises the level to debug a live problem, which is the
+/// moment it must not be. The lock stays, because a line is only atomic if something makes it so; what
+/// it now guards is a single <c>Write</c> of an already-finished string.</para>
 /// </summary>
-public sealed class AnsiConsoleSink(IFormatProvider? formatProvider, bool toStandardError) : ILogEventSink
+/// <param name="output">Where lines go. Null — the default — resolves <see cref="Console"/> at each
+/// event, so a host that redirects its streams after startup is still honoured. A writer supplied here
+/// is used as given, which is what makes the sink testable without touching process-global state.</param>
+public sealed class AnsiConsoleSink(
+    IFormatProvider? formatProvider, bool toStandardError, TextWriter? output = null) : ILogEventSink
 {
     private const string Reset = "[0m";
     private const string Dim = "[38;5;245m";
@@ -41,32 +53,45 @@ public sealed class AnsiConsoleSink(IFormatProvider? formatProvider, bool toStan
 
     public void Emit(LogEvent logEvent)
     {
-        var writer = toStandardError ? Console.Error : Console.Out;
-        var level = LevelToken(logEvent.Level);
-        var source = logEvent.Properties.TryGetValue("SourceContext", out var context)
-            ? Shorten(context.ToString().Trim('"'))
-            : "";
+        // Rendered first, outside the lock. MessageTemplateTextFormatter holds only its parsed template
+        // and is safe to call concurrently — which is the contract Serilog states for every
+        // ITextFormatter, because sinks call them from whichever thread logged.
+        var line = Render(logEvent);
+        var writer = output ?? (toStandardError ? Console.Error : Console.Out);
 
         // One lock, one write: two hosts logging into one captured stream interleave mid-line otherwise, and
         // a half-line with an escape sequence in it colours everything after it.
         lock (_gate)
         {
-            writer.Write($"{Dim}[{logEvent.Timestamp.UtcDateTime:HH:mm:ss}{Reset} {level}{Dim}]{Reset} ");
-            writer.Write($"{Context}{Property(logEvent, "App")}/{Property(logEvent, "Pid")}{Reset} ");
-            if (source.Length > 0)
-            {
-                writer.Write($"{Dim}{source}:{Reset} ");
-            }
-
-            _message.Format(logEvent, writer);
-            writer.Write(Environment.NewLine);
-            if (logEvent.Exception is not null)
-            {
-                writer.Write($"{LevelColour(LogEventLevel.Error)}{logEvent.Exception}{Reset}{Environment.NewLine}");
-            }
-
+            writer.Write(line);
             writer.Flush();
         }
+    }
+
+    /// <summary>The finished line, escapes and newline included. Pure apart from reading the event.
+    /// </summary>
+    private string Render(LogEvent logEvent)
+    {
+        var source = logEvent.Properties.TryGetValue("SourceContext", out var context)
+            ? Shorten(context.ToString().Trim('"'))
+            : "";
+
+        var line = new StringWriter();
+        line.Write($"{Dim}[{logEvent.Timestamp.UtcDateTime:HH:mm:ss}{Reset} {LevelToken(logEvent.Level)}{Dim}]{Reset} ");
+        line.Write($"{Context}{Property(logEvent, "App")}/{Property(logEvent, "Pid")}{Reset} ");
+        if (source.Length > 0)
+        {
+            line.Write($"{Dim}{source}:{Reset} ");
+        }
+
+        _message.Format(logEvent, line);
+        line.Write(Environment.NewLine);
+        if (logEvent.Exception is not null)
+        {
+            line.Write($"{LevelColour(LogEventLevel.Error)}{logEvent.Exception}{Reset}{Environment.NewLine}");
+        }
+
+        return line.ToString();
     }
 
     private static string LevelToken(LogEventLevel level) =>

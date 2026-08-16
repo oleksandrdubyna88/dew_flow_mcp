@@ -76,7 +76,11 @@ flowchart LR
   puts it on `/api/mcp/health` — a log line written at 03:00 is not a thing an orchestrator can poll.
 - **One file per run**, under a day folder, UTC throughout — the same shape as the logging rule, for the
   same reason: the question asked of a spool is always "hand me what this host produced", and a file
-  shared across runs cannot be handed over while it is being written.
+  shared across runs cannot be handed over while it is being written. **Segmented at UTC midnight** for
+  a run that outlives the day, because a file per run and a process that never restarts are one file
+  growing for months; the continuation is `…/00-00-00-<pid>.jsonl` under the next day's folder, same pid.
+  The segment is keyed on the RECORD's timestamp, not the writer's clock — a call at 23:59:59 drained at
+  00:00:01 belongs to the day it happened, which is the day anyone looking for it will search.
 - **Retention is decided at emit.** Payload budgets are applied by `ToolCatalog` before the record
   arrives, so no line ever exceeds them and there is no clean-up job to write later.
 - **Correlation is declared, never inferred, and refused where it would be a lie.** The value comes from

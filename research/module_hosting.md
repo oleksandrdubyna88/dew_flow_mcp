@@ -68,6 +68,26 @@ question and exits must not start a telemetry writer.
 process-level stamp is truthful only where the process serves a single unit of work, and one value
 across concurrent callers would invent an attribution. The refusal happens before anything is built.
 
+## Transport timeouts
+
+Named rather than inherited — a framework default you rely on is still a decision, and an unnamed one
+can be neither changed by an operator nor reviewed by anyone. All of it lives in
+[appsettings.json](../src/Mcp.Host/appsettings.json), never in code.
+
+| Setting | Value | Why this number |
+|---|---|---|
+| `Kestrel:Limits:KeepAliveTimeout` | 2 min | Bounds an IDLE connection between requests. It does not touch an open SSE stream, which is why the MCP transport is unaffected |
+| `Kestrel:Limits:RequestHeadersTimeout` | 30 s | The slowloris bound: a client that opens a socket and never finishes its headers costs a connection for exactly this long |
+| `Mcp:Api:RequestTimeout` | 30 s | Applies to `/api/mcp/*` **only**, through the named policy `McpApiEndpoints.TimeoutPolicy` |
+
+**There is deliberately no global request-timeout policy**, and this is the trap worth knowing before
+adding one: `MapMcp()` serves a Server-Sent Events stream meant to stay open, and a blanket timeout
+would sever it on a schedule. What bounds a tool call is `ToolCatalogOptions.CallTimeout` (2 minutes) at
+the one dispatch chokepoint. The management API is the only surface with a transport ceiling, and 30 s
+against the catalog's 2 min is the pair chosen against each other: those endpoints answer in
+milliseconds, and raising the transport past the catalog's ceiling would only mean waiting on a call the
+server has already given up on.
+
 ## Logging
 
 One `AddDewFlowLogging` for the repository, in `ServiceDefaults`, called **before** `Build()` — a host
@@ -77,8 +97,9 @@ nothing to say about it.
 | Decision | Why |
 |---|---|
 | A hand-written `AnsiConsoleSink` instead of Serilog's console theme | Measured on Serilog.Sinks.Console 6.1.1: with `AnsiConsoleTheme.Code` **and** `applyThemeToRedirectedOutput: true`, redirected stdout received **zero** escape bytes. A control writing one escape by hand in the same process produced four. An orchestrator capturing a child's output redirects stdout by definition |
+| That sink renders OUTSIDE its lock and writes once | It used to hold the global lock across the formatter and five to seven separate `Write` calls plus an explicit flush. `Console.Out` auto-flushes, so that was five to seven flushes per line held against every other thread — invisible at Information volume, and a contention point exactly when somebody raises the level to debug a live problem. The lock stays (a line is only atomic if something makes it so); it now guards one write of a finished string. Pinned by `AnsiConsoleSinkTests`, whose concurrency case tore a line into 801 when the old shape was restored to check it had teeth |
 | `{Utc}` via `UtcTimestampEnricher`, not Serilog's `{Timestamp}` | The file is NAMED in UTC; `{Timestamp}` is a `DateTimeOffset` carrying the machine's local offset and renders local. That put `mcp-10-39-32.log` full of lines stamped `12:39:32` — two clocks in one artefact with nothing saying so |
-| A file per RUN under a day folder | Rolling by day appends every run into one file, and the question actually asked is "what did THAT run do" |
+| A file per RUN under a day folder, **segmented at UTC midnight** | Rolling by day appends every run into one file, and the question actually asked is "what did THAT run do". But a file per run and a process that never restarts are one file growing for months — the rule's mitigating rotation IS the restart, and the 24/7 premise is that there is none. `DailyRunFileSink` reconciles them: a run starting 15:00 writes `…-15-00-00-<pid>.log` and continues in `…/00-00-00-<pid>.log` under tomorrow's folder. Same pid, so the run is still one thing — which is what keeps this from being the rolling-by-day sink the rule forbids. The boundary is the CLOCK, not 24h of elapsed time, so files keep lining up with the folders they live in |
 | A stdio host logs to **stderr** | stdout carries the JSON-RPC. One log line there corrupts the stream and looks like a protocol bug rather than a logging one |
 | Levels from `appsettings.json` | Verbosity is a config edit and a restart, never an edited call site. Defaults: `Information`, with `Microsoft.AspNetCore` and `System.Net.Http.HttpClient` at `Warning` |
 

@@ -83,6 +83,32 @@ public sealed class SpoolUsageSinkTests
     }
 
     [Fact]
+    public async Task A_spool_that_outlives_the_day_continues_in_a_midnight_segment()
+    {
+        var (sink, root) = Build();
+        var firstFile = sink.Path;
+
+        await sink.RecordAsync(Usage(), TestContext.Current.CancellationToken);
+        await sink.RecordAsync(
+            Usage() with { At = new DateTimeOffset(2026, 8, 16, 0, 0, 1, TimeSpan.Zero) },
+            TestContext.Current.CancellationToken);
+        await sink.DisposeAsync();
+
+        // Same pair of rules as the log: a file per RUN is right, but its mitigating rotation IS the
+        // restart, and this deployment's premise is that there is none. Keyed on the RECORD's timestamp,
+        // not the writer's clock — a call at 23:59:59 drained at 00:00:01 belongs to the day it happened.
+        var files = Directory.GetFiles(root, "*.jsonl", SearchOption.AllDirectories)
+            .Select(f => System.IO.Path.GetRelativePath(root, f).Replace('\\', '/'))
+            .Order(StringComparer.Ordinal).ToList();
+
+        files.Should().HaveCount(2);
+        files[0].Should().Be(System.IO.Path.GetRelativePath(root, firstFile).Replace('\\', '/'));
+        files[1].Should().Be($"2026-08-16/mcp-test-00-00-00-{Environment.ProcessId}.jsonl");
+        (await File.ReadAllLinesAsync(System.IO.Path.Combine(root, files[1]), TestContext.Current.CancellationToken))
+            .Should().ContainSingle("the second day's record went to the second day's file");
+    }
+
+    [Fact]
     public async Task Recording_never_blocks_the_caller_and_a_full_spool_drops_rather_than_waits()
     {
         var (sink, _) = Build(capacity: 1);

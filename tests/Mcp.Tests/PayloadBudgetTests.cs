@@ -71,6 +71,43 @@ public sealed class PayloadBudgetTests
     }
 
     [Fact]
+    public void A_payload_the_cheap_check_accepts_is_returned_whole_and_reports_no_loss()
+    {
+        // Under budget/3 the length ALONE proves it fits, so the hot path returns without counting a
+        // byte. "It did not count" is not observable from outside; what is observable — and what a
+        // wrong bound would break — is that the answer is still exactly right.
+        var text = new string('z', 100);
+
+        var (kept, dropped) = PayloadBudget.Apply(text, 4096);
+
+        kept.Should().Be(text);
+        dropped.Should().Be(0);
+    }
+
+    [Fact]
+    public void A_payload_is_never_returned_over_its_budget_whatever_it_is_made_of()
+    {
+        // The safety property the cheap accept could break, and the reason the bound must be the UPPER
+        // one: characters bound bytes from below, which would prove the wrong thing entirely. Widths
+        // 1, 2, 3 and 4 bytes, across budgets that land inside every one of them.
+        string[] alphabets = ["ascii-only", "яяяяяяяяяя", "。。。。。。。。。。", "😀😀😀😀😀😀😀😀😀😀", "aя。😀aя。😀"];
+
+        foreach (var alphabet in alphabets)
+        {
+            foreach (var budget in Enumerable.Range(1, 45))
+            {
+                var (kept, dropped) = PayloadBudget.Apply(alphabet, budget);
+
+                Encoding.UTF8.GetByteCount(kept).Should()
+                    .BeLessThanOrEqualTo(budget, "'{0}' at budget {1} must not overflow", alphabet, budget);
+                (Encoding.UTF8.GetByteCount(kept) + dropped).Should()
+                    .Be(Encoding.UTF8.GetByteCount(alphabet), "every byte is either kept or counted");
+                kept.Should().Be(alphabet[..kept.Length], "the cut is a prefix, never a re-encoding");
+            }
+        }
+    }
+
+    [Fact]
     public void A_zero_budget_keeps_nothing_and_still_counts_what_it_dropped()
     {
         var (text, dropped) = PayloadBudget.Apply("anything at all", 0);

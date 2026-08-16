@@ -24,6 +24,11 @@
     <ProjectReference Include="..\..\src\Mcp.Ui\Mcp.Ui.csproj" />
     <ProjectReference Include="..\..\src\Workspace.Application\Workspace.Application.csproj" />
     <ProjectReference Include="..\..\src\Workspace.Infrastructure\Workspace.Infrastructure.csproj" />
+    <!-- ServiceDefaults had no tests at all, which is how the console sink's per-line flush and the
+         log's unbounded run file both survived to the 24/7 audit. Referenced deliberately, not
+         incidentally: the two sinks below have real behaviour — where a line goes, and how many writes
+         it costs — and neither is observable from any other project. -->
+    <ProjectReference Include="..\..\src\ServiceDefaults\ServiceDefaults.csproj" />
   </ItemGroup>
 
 </Project>

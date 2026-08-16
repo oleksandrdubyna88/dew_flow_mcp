@@ -44,7 +44,13 @@ public sealed class SpoolUsageSink : IUsageSink, IHealthContributor, IAsyncDispo
     private readonly TelemetryCorrelation correlation;
     private readonly ILogger<SpoolUsageSink> logger;
     private readonly Task writer;
-    private readonly string path;
+    private readonly string root;
+    private readonly string app;
+
+    // Written by the single-reader drain loop when the day turns; read by the health probe from
+    // whichever thread asks. A reference assignment is atomic; volatile is what makes it VISIBLE.
+    private volatile string path;
+    private DateTime day;
 
     private int dropped;
 
@@ -69,6 +75,9 @@ public sealed class SpoolUsageSink : IUsageSink, IHealthContributor, IAsyncDispo
             SingleReader = true,
         });
 
+        root = options.Directory;
+        app = options.App;
+        day = clock.GetUtcNow().UtcDateTime.Date;
         path = SpoolPath(options.Directory, options.App, clock.GetUtcNow());
         writer = Task.Run(DrainAsync);
     }
@@ -158,12 +167,38 @@ public sealed class SpoolUsageSink : IUsageSink, IHealthContributor, IAsyncDispo
     {
         try
         {
-            await File.AppendAllTextAsync(path, TelemetryJson.Line(record) + System.Environment.NewLine);
+            await File.AppendAllTextAsync(
+                PathFor(record.At), TelemetryJson.Line(record) + System.Environment.NewLine);
         }
         catch (Exception ex)
         {
             Break(ex);
         }
+    }
+
+    /// <summary>The file this record belongs in, rolling the spool forward at UTC midnight.
+    /// <para>Same reasoning as the log's <c>DailyRunFileSink</c>, and the same pair of rules that had
+    /// never been held against each other: a file per RUN is right, but its mitigating rotation is the
+    /// restart, and this deployment's premise is that there is none. A run that outlives the day
+    /// continues in a <c>00-00-00</c> segment under the next day's folder, same pid.</para>
+    /// <para>Keyed on the RECORD's timestamp, not the writer's clock: a record queued at 23:59:59 and
+    /// drained at 00:00:01 belongs to the day the call happened, which is the day anyone looking for it
+    /// will search. Only the single-reader drain loop calls this, so the roll needs no lock; the field
+    /// is volatile because the health probe reads it from whichever thread asks.</para>
+    /// <para>Forward only, for the same reason the log sink is: an out-of-order older record lands in
+    /// the open file rather than reopening yesterday's and orphaning today's.</para></summary>
+    private string PathFor(DateTimeOffset at)
+    {
+        var utc = at.UtcDateTime;
+        if (utc.Date <= day)
+        {
+            return path;
+        }
+
+        day = utc.Date;
+        path = System.IO.Path.Combine(root, utc.ToString("yyyy-MM-dd"), $"{app}-00-00-00-{System.Environment.ProcessId}.jsonl");
+        System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+        return path;
     }
 
     /// <summary>One line, once. A disk that has stopped accepting writes will not start because we

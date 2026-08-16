@@ -12,9 +12,22 @@ namespace Mcp.Api;
 /// <see cref="MapMcpApi"/> once and never learns individual routes.</summary>
 public static class McpApiEndpoints
 {
+    /// <summary>The request-timeout policy this group runs under. The NAME lives here because the routes
+    /// do; the VALUE lives in the host's <c>appsettings.json</c>, because an operator changing a timeout
+    /// must not need a rebuild.
+    /// <para>Scoped to this group deliberately, never applied as a global default: <c>MapMcp()</c> serves
+    /// a Server-Sent Events stream meant to stay open, and a blanket request timeout would sever it on a
+    /// schedule. These endpoints answer in milliseconds and have no long-lived shape.</para></summary>
+    public const string TimeoutPolicy = "mcp-management-api";
+
     public static IEndpointRouteBuilder MapMcpApi(this IEndpointRouteBuilder endpoints)
     {
         var group = endpoints.MapGroup("/api/mcp");
+
+        // Applied to the group, return discarded: WithRequestTimeout hands back an
+        // IEndpointConventionBuilder, and chaining it would lose the RouteGroupBuilder the routes below
+        // need. The convention reaches every endpoint in the group either way.
+        group.WithRequestTimeout(TimeoutPolicy);
 
         // Health is COMPUTED, from whatever registered itself as a contributor. It used to be the
         // constant "ok", which meant an orchestrator polling it could not see the dead telemetry
