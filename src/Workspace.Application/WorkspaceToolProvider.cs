@@ -19,7 +19,9 @@ public sealed class WorkspaceToolProvider(ISandboxedFileReader reader) : IToolPr
             Description =
                 "Read a file from the workspace, whole or as a line window. "
                 + "startLine is 1-based inclusive; omit lineCount to read to the end. "
-                + "Every result reports startLine/endLine/totalLines, so paging is a number, not a guess.",
+                + "Every result reports startLine/endLine/totalLines, so paging is a number, not a guess. "
+                + "A read too large for this server's caps comes back marked TRUNCATED, still carrying "
+                + "the true totalLines and the startLine to continue from.",
             InputSchema = ToolSchema.ParseSchema(
                 """
                 {
@@ -69,7 +71,16 @@ public sealed class WorkspaceToolProvider(ISandboxedFileReader reader) : IToolPr
     }
 
     private static string Describe(FileReadOutcome.Ok ok) =>
-        $"lines {ok.StartLine}-{ok.EndLine} of {ok.TotalLines}\n{ok.Content}";
+        $"lines {ok.StartLine}-{ok.EndLine} of {ok.TotalLines}{Clipped(ok)}\n{ok.Content}";
+
+    /// <summary>Renders the truncation into the answer itself, where the MODEL reading the output can
+    /// see it — on the header line it already reads the span from.
+    /// <para>A cap whose effect is invisible is worse than no cap: the caller reads the end of a
+    /// clipped window as the end of the file and stops paging. So the word is shouted, and it sits
+    /// beside the real total. What to do next comes from the reader, which is the only layer that
+    /// knows whether paging can reach the rest at all.</para></summary>
+    private static string Clipped(FileReadOutcome.Ok ok) =>
+        ok.Truncation.Clipped ? $" — TRUNCATED: {ok.Truncation.Reason}" : string.Empty;
 
     private static bool TryReadPath(JsonElement arguments, out string path)
     {

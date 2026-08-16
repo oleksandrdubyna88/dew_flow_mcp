@@ -1,5 +1,6 @@
 using Mcp.Contracts;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Workspace.Application;
 
 namespace Workspace.Infrastructure;
@@ -12,6 +13,10 @@ public static class WorkspaceExtensions
     public static IServiceCollection AddWorkspaceTools(this IServiceCollection services, string rootPath)
     {
         services.AddSingleton(new WorkspaceRoot(rootPath));
+
+        // TryAdd: a host whose workspace holds legitimately huge files registers its own caps BEFORE
+        // this and keeps them. What a host that says nothing gets is the default ceiling — never none.
+        services.TryAddSingleton(new SandboxedFileReaderOptions());
         services.AddSingleton<ISandboxedFileReader, SandboxedFileReader>();
         services.AddSingleton<IToolProvider, WorkspaceToolProvider>();
         return services;

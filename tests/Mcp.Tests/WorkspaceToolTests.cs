@@ -92,6 +92,139 @@ public sealed class WorkspaceToolTests
             .Which.Reason.Should().Contain("startLine");
     }
 
+    [Fact]
+    public async Task A_read_of_a_file_larger_than_the_cap_says_it_was_truncated_and_names_the_real_total()
+    {
+        var (provider, root) = Build();
+        await File.WriteAllLinesAsync(
+            Path.Combine(root, "big.txt"), Numbered(6_000), TestContext.Current.CancellationToken);
+
+        var result = await Invoke(provider, """{"path":"big.txt"}""");
+
+        // "Omit lineCount to read to the end" cannot mean "hand back whatever is on disk": one large
+        // file in the workspace is then a multi-hundred-megabyte allocation AND an equally large single
+        // content block over stdio. The cap alone is only half the fix — a truncation the caller cannot
+        // SEE is worse than no cap at all, because a short answer reads as a short file and paging
+        // stops there. So the answer must carry the TRUE total and the number to page from.
+        var content = result.Should().BeOfType<ToolResult.Ok>().Which.Content;
+        content.Should().StartWith("lines 1-5000 of 6000");
+        content.Should().Contain("TRUNCATED").And.Contain("5001");
+        content.Should().EndWith("line 5000");
+    }
+
+    [Fact]
+    public async Task A_single_line_longer_than_the_byte_cap_is_clipped_instead_of_going_out_whole()
+    {
+        var (provider, root) = Build();
+
+        // A line cap alone bounds nothing: minified JavaScript, a one-line JSON document and a base64
+        // blob are all ONE line, and one line of two megabytes is two megabytes on the wire.
+        await File.WriteAllTextAsync(
+            Path.Combine(root, "minified.js"), new string('x', 2 * 1024 * 1024), TestContext.Current.CancellationToken);
+
+        var result = await Invoke(provider, """{"path":"minified.js"}""");
+
+        var content = result.Should().BeOfType<ToolResult.Ok>().Which.Content;
+        content.Should().Contain("TRUNCATED");
+        content.Length.Should().BeLessThan(2 * 1024 * 1024);
+
+        // The one case where "ask for the next window" would be a lie — the rest is INSIDE a line, and
+        // no startLine reaches it. Saying so is the difference between a contract and advice.
+        content.Should().StartWith(
+            "lines 1-1 of 1 — TRUNCATED: line 1 alone is longer than this server's 1048576-byte read "
+            + "cap, and 1048576 further byte(s) of that one line were dropped. Paging cannot reach "
+            + "them — narrow the request another way.\n");
+    }
+
+    [Fact]
+    public async Task A_window_that_reaches_the_byte_cap_first_stops_on_a_whole_line_and_says_where()
+    {
+        var (provider, root) = Build(new SandboxedFileReaderOptions { MaxLines = 100, MaxBytes = 20 });
+        await File.WriteAllLinesAsync(
+            Path.Combine(root, "a.txt"), Numbered(10), TestContext.Current.CancellationToken);
+
+        var result = await Invoke(provider, """{"path":"a.txt"}""");
+
+        // Two caps, and the tighter one wins. Stopping BEFORE the line that would cross the budget is
+        // what keeps the next startLine a whole line — a byte cap that cut mid-line would hand back a
+        // number that skips the remainder of the line it cut.
+        result.Should().BeOfType<ToolResult.Ok>()
+            .Which.Content.Should().Be(
+                "lines 1-2 of 10 — TRUNCATED: the window stops at this server's 20-byte read cap. "
+                + "Ask again with startLine 3 to continue.\nline 1\nline 2");
+    }
+
+    [Fact]
+    public async Task A_ten_line_window_is_ten_lines_however_many_lines_the_file_has()
+    {
+        var (provider, root) = Build();
+        await File.WriteAllLinesAsync(
+            Path.Combine(root, "huge.txt"), Numbered(200_000), TestContext.Current.CancellationToken);
+
+        var result = await Invoke(provider, """{"path":"huge.txt","startLine":100,"lineCount":10}""");
+
+        // What this DOES pin: a window the caller asked for is served whole out of a file two hundred
+        // thousand lines long, with the real total, and is NOT reported as truncated — the caps must
+        // bound the runaway read without clipping an ordinary one.
+        // What it does NOT prove: that the reader streamed rather than materialized the file. That
+        // difference is peak LIVE memory during an async read, and the only faithful assertion for it
+        // is a sampling one. Said plainly here rather than dressed up as a guarantee.
+        var content = result.Should().BeOfType<ToolResult.Ok>().Which.Content;
+        content.Should().Be("lines 100-109 of 200000\n" + string.Join('\n', Numbered(109).Skip(99)));
+        content.Should().NotContain("TRUNCATED");
+    }
+
+    [Fact]
+    public async Task A_host_may_lower_the_caps_and_the_truncated_answer_still_pages_by_number()
+    {
+        var (provider, root) = Build(new SandboxedFileReaderOptions { MaxLines = 3 });
+        await File.WriteAllLinesAsync(
+            Path.Combine(root, "a.txt"), Numbered(10), TestContext.Current.CancellationToken);
+
+        var first = await Invoke(provider, """{"path":"a.txt"}""");
+        var next = await Invoke(provider, """{"path":"a.txt","startLine":4}""");
+
+        // The point of naming the next startLine: following it must actually WORK. A truncation marker
+        // that recommends a window the reader then refuses would be advice, not a contract.
+        first.Should().BeOfType<ToolResult.Ok>()
+            .Which.Content.Should().Be(
+                "lines 1-3 of 10 — TRUNCATED: the window stops at this server's 3-line read cap. "
+                + "Ask again with startLine 4 to continue.\nline 1\nline 2\nline 3");
+        next.Should().BeOfType<ToolResult.Ok>()
+            .Which.Content.Should().StartWith("lines 4-6 of 10").And.EndWith("line 6");
+    }
+
+    [Fact]
+    public async Task A_window_the_caller_asked_for_is_never_reported_as_truncated()
+    {
+        var (provider, root) = Build(new SandboxedFileReaderOptions { MaxLines = 3 });
+        await File.WriteAllLinesAsync(
+            Path.Combine(root, "a.txt"), Numbered(10), TestContext.Current.CancellationToken);
+
+        var result = await Invoke(provider, """{"path":"a.txt","startLine":2,"lineCount":3}""");
+
+        // Three of ten lines, because three is what was ASKED for. Marking that "truncated" would cry
+        // wolf on every ordinary paged read, and a marker that fires always tells a reader nothing.
+        result.Should().BeOfType<ToolResult.Ok>()
+            .Which.Content.Should().Be("lines 2-4 of 10\nline 2\nline 3\nline 4");
+    }
+
+    [Fact]
+    public void A_cap_that_could_never_return_anything_stops_the_host_instead_of_every_read()
+    {
+        // At composition, where one message is read once — not as an empty answer on every read for
+        // the life of a process nobody is watching.
+        var build = () => new SandboxedFileReader(
+            new WorkspaceRoot(Path.GetTempPath()),
+            new SandboxedFileReaderOptions { MaxBytes = 0 },
+            NullLogger<SandboxedFileReader>.Instance);
+
+        build.Should().Throw<InvalidOperationException>().WithMessage("*MaxBytes*");
+    }
+
+    private static IEnumerable<string> Numbered(int count) =>
+        Enumerable.Range(1, count).Select(i => $"line {i}");
+
     [Theory]
     [InlineData("../outside.txt")]
     [InlineData("sub/../../outside.txt")]
@@ -145,11 +278,12 @@ public sealed class WorkspaceToolTests
             new ToolCall(WorkspaceToolProvider.ReadLocalFile, JsonDocument.Parse(argumentsJson).RootElement.Clone()),
             TestContext.Current.CancellationToken);
 
-    private static (WorkspaceToolProvider Provider, string Root) Build()
+    private static (WorkspaceToolProvider Provider, string Root) Build(SandboxedFileReaderOptions? caps = null)
     {
         var root = Directory.CreateTempSubdirectory("mcp-workspace").FullName;
         Directory.CreateDirectory(Path.Combine(root, "sub"));
-        var reader = new SandboxedFileReader(new WorkspaceRoot(root), NullLogger<SandboxedFileReader>.Instance);
+        var reader = new SandboxedFileReader(
+            new WorkspaceRoot(root), caps ?? new SandboxedFileReaderOptions(), NullLogger<SandboxedFileReader>.Instance);
         return (new WorkspaceToolProvider(reader), root);
     }
 }

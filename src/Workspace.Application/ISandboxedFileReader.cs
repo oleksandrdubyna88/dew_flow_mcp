@@ -23,7 +23,28 @@ public abstract record FileReadOutcome
 {
     private FileReadOutcome() { }
 
-    public sealed record Ok(string Content, int StartLine, int EndLine, int TotalLines) : FileReadOutcome;
+    /// <summary><paramref name="TotalLines"/> is always the file's REAL total, whatever the window
+    /// contains — it is the number the caller pages by, so a capped read that shrank it would send the
+    /// caller looking for the end of a file it had already been told it reached.</summary>
+    public sealed record Ok(
+        string Content,
+        int StartLine,
+        int EndLine,
+        int TotalLines,
+        ReadTruncation Truncation) : FileReadOutcome;
 
     public sealed record Refused(string Reason) : FileReadOutcome;
+}
+
+/// <summary>Whether a server cap cut the window short, and which one.
+/// <para>The flag-and-reason shape of the family's <c>Captured</c>, for the same reason: a silent
+/// truncation is WORSE than an unbounded read. The caller cannot tell a short file from a clipped one,
+/// so it reads the end of the window as the end of the file and stops paging — a wrong answer that
+/// looks exactly like a right one. Carrying the fact is what makes the cap safe to have.</para></summary>
+public sealed record ReadTruncation(bool Clipped, string Reason)
+{
+    /// <summary>The ordinary case: the caller got the whole window it asked for.</summary>
+    public static ReadTruncation None { get; } = new(false, string.Empty);
+
+    public static ReadTruncation By(string reason) => new(true, reason);
 }

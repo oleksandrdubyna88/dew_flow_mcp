@@ -1,6 +1,6 @@
 # Module — tool dispatch
 
-> `src/Mcp.Contracts`, `src/Mcp.Application`. The system as it is, 2026-08-15.
+> `src/Mcp.Contracts`, `src/Mcp.Application`. The system as it is, 2026-08-16.
 
 ## Purpose
 
@@ -72,7 +72,7 @@ fabricated failure, because the client is gone and a record of it would be a cal
 | `ToolCatalog.Advertised` | Every tool, name-ordered so the surface is stable across restarts |
 | `ToolCatalog.InvokeAsync(ToolCall, ct)` | The dispatch point. Called by every presentation |
 | `McpApplicationExtensions.AddMcpApplication()` | Registers the catalog, `AmbientCallerContext`, `TimeProvider.System`, `ToolCatalogOptions` and `NullUsageSink` as floors (`TryAdd`, so a host's real sink and its own ceiling survive) |
-| `PayloadBudget.Apply(text, budgetBytes)` | Cuts a payload to a byte budget and reports the exact loss |
+| `PayloadBudget.Apply(text, budgetBytes)` | Cuts a payload to a byte budget and reports the exact loss. Lives in `Mcp.Contracts` since 2026-08-16, not `Mcp.Application`: the sandboxed reader needs the same clipper for its byte cap and may not reference the catalog, so the shared half moved to their common ancestor rather than being written twice |
 
 ## Rules worth knowing before changing this
 
@@ -90,7 +90,9 @@ fabricated failure, because the client is gone and a record of it would be a cal
   sink loses the record, not the session the guard above just saved.
 - **Budgets are bytes, not characters**, and the cut never splits a surrogate pair. `ToolCatalog`
   applies `DefaultPayloadBudgetBytes` (4096) to the arguments and to the response body; the response
-  *size* is always exact even when the body was cut.
+  *size* is always exact even when the body was cut. This budget governs the TELEMETRY copy only —
+  what a provider hands back to the caller is that provider's own ceiling to impose
+  ([module_workspace_tools.md](module_workspace_tools.md) for the read caps).
 - **Retention is decided at emit.** The spool never holds more than the budget, so there is no later
   clean-up job to forget.
 - **The clock is injected** (`TimeProvider`), so a record's timestamp is testable.

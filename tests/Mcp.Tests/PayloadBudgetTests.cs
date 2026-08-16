@@ -1,6 +1,6 @@
 using System.Text;
 using FluentAssertions;
-using Mcp.Application;
+using Mcp.Contracts;
 using Xunit;
 
 namespace Mcp.Tests;

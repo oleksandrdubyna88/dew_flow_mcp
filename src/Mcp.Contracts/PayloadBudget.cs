@@ -1,8 +1,14 @@
 using System.Text;
 
-namespace Mcp.Application;
+namespace Mcp.Contracts;
 
 /// <summary>Cuts a payload to a byte budget and says exactly how much it dropped.
+/// <para>
+/// It lives in the contracts — the one project every other one can see — because two unrelated
+/// modules need exactly this: <c>ToolCatalog</c> bounds what telemetry STORES, and the sandboxed
+/// reader bounds what one read HANDS BACK. Neither may reference the other, so the shared half
+/// belongs in their common ancestor rather than being written twice and drifting.
+/// </para>
 /// <para>
 /// The budget is applied at EMIT, not by a later clean-up job: full arguments and full responses
 /// across all traffic is the largest table in any system that keeps them, and a retention policy

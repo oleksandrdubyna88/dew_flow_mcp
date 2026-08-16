@@ -26,8 +26,8 @@ asserts the same rule from its side.
 
 | Project | Kind | Role |
 |---|---|---|
-| `Mcp.Contracts` | class library, **zero package references** | The whole contract: `IToolProvider`, `ToolSchema`, `ToolCall`/`ToolResult`, `IUsageSink`/`ToolUsage`, `IHealthContributor`/`ComponentHealth`, `CallerIdentity`, `Captured` |
-| `Mcp.Application` | class library | `ToolCatalog` — the one dispatch point; `PayloadBudget`; `AmbientCallerContext` |
+| `Mcp.Contracts` | class library, **zero package references** | The whole contract: `IToolProvider`, `ToolSchema`, `ToolCall`/`ToolResult`, `IUsageSink`/`ToolUsage`, `IHealthContributor`/`ComponentHealth`, `CallerIdentity`, `Captured`, `PayloadBudget` |
+| `Mcp.Application` | class library | `ToolCatalog` — the one dispatch point; `AmbientCallerContext` |
 | `Mcp.Server` | class library | The MCP protocol presentation: `CatalogToolFunction`, `CatalogToolRegistration`, `CallerContextFilter` |
 | `Mcp.Bridge` | class library | The in-process presentation for OpenAI-style function calling: `LocalLlmToolBridge` |
 | `Mcp.Telemetry` | class library, **contracts only** | `SpoolUsageSink` — one JSON line per call, on local disk |
@@ -35,9 +35,9 @@ asserts the same rule from its side.
 | `Mcp.Ui` | Razor class library | Console pages. Scaffold only — `_Imports.razor` and the csproj |
 | `Mcp.Host` | web exe | The standalone server: clone, run, and a CLI has workspace tools |
 | `Workspace.Application` | class library | `ISandboxedFileReader` port; `WorkspaceToolProvider` — the one real tool |
-| `Workspace.Infrastructure` | class library | `SandboxedFileReader` adapter; DI registration |
+| `Workspace.Infrastructure` | class library | `SandboxedFileReader` adapter (streaming, capped); `SandboxedFileReaderOptions`; DI registration |
 | `ServiceDefaults` | class library | Serilog wiring, the ANSI console sink, the UTC enricher |
-| `tests/Mcp.Tests` | xUnit v3 exe | 65 tests, including the layering guard |
+| `tests/Mcp.Tests` | xUnit v3 exe | 72 tests, including the layering guard |
 
 ## Containers and dependencies
 
@@ -141,6 +141,14 @@ structural here: every wait has a ceiling (above), a detached task ends in a cat
 spool writer), client numbers are range-checked before arithmetic (the read window), and `/health`
 computes from live state so a component that died at 03:00 is visible to whatever polls at 03:05.
 
+**Everything that grows has an owner**, and on this surface the thing that grows per call is the answer.
+A file read is STREAMED and bounded by two caps — lines and bytes
+(`SandboxedFileReaderOptions`) — so neither the memory this process holds nor the block it puts on the
+wire scales with what happens to be sitting in the workspace. The cap is only half of it: a capped
+answer SAYS it was capped, carries the file's true total, and names the `startLine` to continue from,
+because a truncation the caller cannot see is worse than no cap at all — the caller reads the end of a
+clipped window as the end of the file and stops paging.
+
 ### Outcomes are three-state
 
 `ToolResult` is `Ok | Refused | Failed`. A **refusal** is a tool that understood and declined — a path
@@ -223,9 +231,7 @@ Stated because a knowledge base that only describes what is there reads like a c
 - **`Mcp.Ui`** has no pages: `_Imports.razor` and a csproj.
 - **Tokens** are never counted; `ToolUsage.Tokens` is always *not captured* on this surface.
 - **A LICENSE, THIRD-PARTY-NOTICES and a version policy** — required before the repository is advertised.
-- **A size ceiling on a read.** `PayloadBudget` bounds the telemetry copy, not the wire response; capping
-  the read itself is a contract decision, tracked in
-  [../todo/PLAN_reliability_tail.md](../todo/PLAN_reliability_tail.md).
-- **Explicit HTTP timeouts and a retention owner for `logs/` and the spool** — the rest of the same plan.
+- **Explicit HTTP timeouts and a retention owner for `logs/` and the spool** —
+  [../todo/PLAN_reliability_tail.md](../todo/PLAN_reliability_tail.md), items 4 and 5.
 - **A bound on a provider that ignores its cancellation token.** The catalog cancels and answers the
   caller at the ceiling; work that never observes the token keeps running behind that answer.

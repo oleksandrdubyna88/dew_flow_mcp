@@ -104,6 +104,7 @@ public sealed class SurfaceParityTests
         root = Directory.CreateTempSubdirectory("mcp-parity").FullName;
         var reader = new Workspace.Infrastructure.SandboxedFileReader(
             new Workspace.Infrastructure.WorkspaceRoot(root),
+            new Workspace.Infrastructure.SandboxedFileReaderOptions(),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<Workspace.Infrastructure.SandboxedFileReader>.Instance);
         return ToolCatalogTests.Build(new WorkspaceToolProvider(reader));
     }
