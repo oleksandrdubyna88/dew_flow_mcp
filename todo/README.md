@@ -14,6 +14,7 @@ Definition of Done.
 | plan | status | scope |
 |---|---|---|
 | [PLAN_mcp_product.md](PLAN_mcp_product.md) | inversion and both transports built and parity-tested; the tool set is one placeholder | the three tool families, auth, public-repository hygiene (usage metering now shipped — see below) |
+| [PLAN_reliability_tail.md](PLAN_reliability_tail.md) | plan only, 2026-08-16 | what the 24/7 audit found and the same-day fixes did not take: the read cap that is only a telemetry budget, an undisposed JsonDocument, explicit HTTP timeouts, and what a never-restarting process does about its log and spool |
 
 Implemented plans live in [`../research/`](../research/) — most recently
 [PLAN_usage_telemetry.md](../research/PLAN_usage_telemetry.md) (`ToolResult.Refused`, caller identity
