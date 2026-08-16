@@ -36,7 +36,7 @@
 > This is the emitter half of a cross-repository contract. The schema (`telemetry/v0`), the ingest
 > and the report live in the benchmark: `dew_flow_benchmark · research/PLAN_tool_telemetry_v0.md`. The
 > owner of the contract is the benchmark repository (operator decision, 2026-08-15); this plan
-> implements Phase 2's "usage metering" bullet of [PLAN_mcp_product.md](PLAN_mcp_product.md) against
+> implements Phase 2's "usage metering" bullet of [PLAN_mcp_product.md](../todo/PLAN_mcp_product.md) against
 > that schema.
 
 ## Symptom
