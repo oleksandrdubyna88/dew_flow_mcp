@@ -9,6 +9,9 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Components.Web" />
+    <!-- The one call a host makes is AddMcpUi(); the abstractions are what lets this library register
+         its own services without knowing which container it lands in. -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
   </ItemGroup>
 
   <ItemGroup>

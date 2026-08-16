@@ -26,18 +26,18 @@ asserts the same rule from its side.
 
 | Project | Kind | Role |
 |---|---|---|
-| `Mcp.Contracts` | class library, **zero package references** | The whole contract: `IToolProvider`, `ToolSchema`, `ToolCall`/`ToolResult`, `IUsageSink`/`ToolUsage`, `IHealthContributor`/`ComponentHealth`, `CallerIdentity`, `Captured`, `PayloadBudget`, `SurfaceFingerprint` |
+| `Mcp.Contracts` | class library, **zero package references** | The whole contract: `IToolProvider`, `ToolSchema`, `ToolCall`/`ToolResult`, `IUsageSink`/`ToolUsage`, `IHealthContributor`/`ComponentHealth`, `CallerIdentity`, `Captured`, `PayloadBudget`, `SurfaceFingerprint`, `McpApiHealth` |
 | `Mcp.Application` | class library | `ToolCatalog` — the one dispatch point; `AmbientCallerContext`; the configurable surface (`ToolSurfaceOptions`, `ToolDescriptionCatalog`, `ToolSurfaceProvider`) and its echo (`SurfaceFingerprintReader`) |
 | `Mcp.Server` | class library | The MCP protocol presentation: `CatalogToolFunction`, `CatalogToolRegistration`, `CallerContextFilter` |
 | `Mcp.Bridge` | class library | The in-process presentation for OpenAI-style function calling: `LocalLlmToolBridge` |
 | `Mcp.Telemetry` | class library, **contracts only** | `SpoolUsageSink` — one JSON line per call, on local disk |
 | `Mcp.Api` | class library (minimal API) | Management surface: `GET /api/mcp/health`, computed from the registered `IHealthContributor`s; `GET /api/mcp/surface`, the tool-surface echo |
-| `Mcp.Ui` | Razor class library | Console pages. Scaffold only — `_Imports.razor` and the csproj |
+| `Mcp.Ui` | Razor class library | The console slice: `/mcp`, the human-readable face of the `SurfaceFingerprint` — every tool with the exact description text served, the hashes, the build, the components. Mounted by the product console in `dew_flow_rag_qln`, never by `Mcp.Host`; see [src/Mcp.Ui/README.md](../src/Mcp.Ui/README.md) |
 | `Mcp.Host` | web exe | The standalone server: clone, run, and a CLI has workspace tools |
 | `Workspace.Application` | class library | `ISandboxedFileReader` port; `WorkspaceToolProvider` — the one real tool |
 | `Workspace.Infrastructure` | class library | `SandboxedFileReader` adapter (streaming, capped); `SandboxedFileReaderOptions`; DI registration |
 | `ServiceDefaults` | class library | Serilog wiring, the ANSI console sink, the UTC enricher |
-| `tests/Mcp.Tests` | xUnit v3 exe | 105 tests, including the layering guard |
+| `tests/Mcp.Tests` | xUnit v3 exe | 123 tests, including the layering guard |
 
 ## Containers and dependencies
 
@@ -255,7 +255,6 @@ Stated because a knowledge base that only describes what is there reads like a c
 - **The `rag_` and `graf_` tool families.** One real tool exists (`rt_read_local_file`), deliberately —
   the tool set was always going to change completely.
 - **Authentication** on the HTTP transport.
-- **`Mcp.Ui`** has no pages: `_Imports.razor` and a csproj.
 - **Tokens** are never counted; `ToolUsage.Tokens` is always *not captured* on this surface.
 - **A LICENSE, THIRD-PARTY-NOTICES and a version policy** — required before the repository is advertised.
 - **Explicit HTTP timeouts and a retention owner for `logs/` and the spool** —

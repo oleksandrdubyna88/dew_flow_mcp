@@ -1,6 +1,10 @@
 # PLAN — the reliability tail the 24/7 audit left open
 
-> Status: **open; items 1, 2, 3, 4, 5 and 7 shipped 2026-08-16. Item 6 is the only one left.** Scope:
+> Status: **open; every item shipped 2026-08-16 on this side. What holds the plan here is item 6's
+> consuming half — `dew_flow_rag_qln` must move its `external/dew_flow_mcp` submodule pin, which needs
+> a push — and two things deliberately named rather than folded in: nothing prunes old day folders,
+> and the midnight segment makes this repository log differently from the shared rule and its two
+> sibling repos.** Scope:
 > `src/Mcp.Application`, `src/Mcp.Bridge`, `src/Mcp.Host`, `src/Mcp.Telemetry`, `src/ServiceDefaults`.
 > The CRITICAL/HIGH defects of the same audit — the overflowing read window, the silently dying spool
 > writer, the unguarded dispatch chain, the missing per-call ceiling and the constant health answer —
@@ -257,7 +261,43 @@ folders older than the window at startup, **and** decide what a genuinely months
 a size-based rollover within the run, or a planned periodic restart recorded in the README. This is
 the one item on this list that needs an operator decision rather than a patch.
 
-### 6. `Mcp.Ui` is built and shipped but wired to nothing — LOW
+### 6. `Mcp.Ui` is built and shipped but wired to nothing — LOW, **DONE 2026-08-16**
+
+**Wired, not removed** — the operator's call. What shipped on this side:
+
+- **`Pages/McpSurface.razor` (+ `.razor.cs`), route `/mcp`** — what this server is actually advertising:
+  every tool with the exact description text served, the schema hashes, the surface hashes, the build,
+  and the components behind it. It is the human-readable face of the `SurfaceFingerprint` that
+  [PLAN_tool_surface_config.md](../research/PLAN_tool_surface_config.md) shipped the same day; before
+  this page, "declare and echo" meant curling an endpoint and reading JSON.
+- **`Services/McpConsoleApi`** — the read side, where every failure becomes a value. `Read<T>` carries
+  the value, whether it arrived, and why it did not, so "the daemon could not be reached" and "this
+  server advertises no tools" render as two different messages rather than one blank table.
+- **`AddMcpUi(apiBaseAddress)`** — one registration call. The address is NOT defaulted: a WASM client and
+  a server-rendered one reach the same API by different addresses, and a console guessing `localhost`
+  reads a different server's surface than the one on screen.
+- **`src/Mcp.Ui/README.md`** — who mounts it, and why `Mcp.Host` deliberately does not.
+
+**Deviation:** the item offered "either wire it or remove it from the shipped set". Neither happened
+*inside this repository*, and that is the point — `Mcp.Host` is the standalone server, and giving it a
+Blazor console would make the clone-and-run bar heavier for a screen no CLI user opens. The mount point
+is the product console in `dew_flow_rag_qln`, whose `Daemon.Client.csproj` already referenced this
+project and whose comment already said *"Mcp.Ui from the public MCP package"*. The wiring was waiting on
+this project having a page.
+
+**Tests:** `McpConsoleApiTests` — the absent-versus-empty distinction in both directions, an unreachable
+daemon, an unparseable body, a timeout, and "nothing asked yet" as its own state. **The markup is not
+covered**: this repository has no bUnit harness and adding one is its own decision, said here and in the
+project's README rather than left as an assumed gap.
+
+**The consuming half is NOT done and cannot be from here.** `dew_flow_rag_qln` needs its `Routes.razor`
+slice list, its `NavMenu` entry, its `AddMcpUi` call and the AppHost's named URL — and, before any of
+that, its `external/dew_flow_mcp` submodule pin moved to a commit that contains this page. The pin
+tracks a public GitHub remote, so it needs a push.
+
+The original finding, kept for the record:
+
+### 6-original. `Mcp.Ui` is built and shipped but wired to nothing
 
 `dew_flow_mcp.slnx:10` includes it, `Mcp.Ui.csproj` builds it, and `Mcp.Host.csproj` does not
 reference it. `ArchitectureTests.Every_shipped_project_is_covered_by_the_rule` already treats it as
@@ -311,7 +351,8 @@ than per line. Listed so the next person debugging a hot server does not discove
    (a global policy would have severed the SSE stream).
 4. ~~**(5) retention**~~ (done) — the operator's answer was a midnight segment, not either candidate.
    Its *other* half, pruning old day folders, was not asked for and is not built.
-5. **(6) `Mcp.Ui`** — the only item left; ~~**(7) the sink**~~ is done.
+5. ~~**(6) `Mcp.Ui`**~~ and ~~**(7) the sink**~~ (done). Every item of this plan is now shipped on
+   this side; item 6's consuming half lives in `dew_flow_rag_qln` and is gated on a submodule pin.
 
 ## Test plan
 
@@ -339,8 +380,9 @@ binaries ~60 s apart without rebuilding.
 
 - [x] Item 1 is confirmed either closed by the fix task or implemented here — not assumed.
       *(Implemented here, 2026-08-16; suite 65 → 72 tests, 0 failed.)*
-- [x] Items 2, 3, 4, 5 and 7 are implemented, with their deviations recorded above. **Item 6 is not** —
-      it is the last one open.
+- [x] Items 2, 3, 4, 5, 6 and 7 are implemented, with their deviations recorded above. Item 6's
+      consuming half — the nav entry, the router slice, the AppHost URL — lives in `dew_flow_rag_qln`
+      and is gated on the submodule pin.
 - [x] Item 5's answer came from the operator, and it was neither candidate the plan offered: a file per
       run, segmented at UTC midnight. Its unasked-for half — pruning day folders — is named as still
       open rather than quietly folded in.
@@ -355,4 +397,6 @@ binaries ~60 s apart without rebuilding.
       there and every log line goes to stderr.
 - [ ] On completion the plan is promoted to `research/` with its deviations recorded, and the
       *Currently open* table in [README.md](README.md) is updated in the same task.
-      *(Not yet — item 6 is still open, so the plan stays in `todo/`.)*
+      *(Not yet. Every item is built here, but item 6 is only half-connected until the sibling repo
+      mounts the page, and the retention and shared-rule questions above are still open decisions.
+      Promoting now would file open work as documentation.)*

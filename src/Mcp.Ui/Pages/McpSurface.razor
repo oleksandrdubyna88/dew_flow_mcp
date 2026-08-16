@@ -1,0 +1,131 @@
+@page "/mcp"
+
+<PageTitle>MCP</PageTitle>
+
+<div class="d-flex align-items-center justify-content-between mb-3">
+    <h1 class="h3 mb-0">MCP</h1>
+    <div class="d-flex align-items-center gap-2">
+        @if (Health.Available)
+        {
+            <span class="badge @(Health.Value!.Status == McpApiHealth.Ok ? "text-bg-success" : "text-bg-warning")">
+                @Health.Value.Status
+            </span>
+        }
+        else
+        {
+            @* Not "degraded": nobody has answered, which is a different fact from a bad answer. *@
+            <span class="badge text-bg-secondary">unknown</span>
+        }
+        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@Loading" @onclick="ReloadAsync">
+            @(Loading ? "Reading…" : "Refresh")
+        </button>
+    </div>
+</div>
+
+@if (!Surface.Available)
+{
+    <div class="alert alert-secondary">
+        @(Detail.Length > 0 ? Detail : "Nothing has been read yet.")
+    </div>
+}
+else
+{
+    var surface = Surface.Value!;
+
+    <dl class="row small mb-4">
+        <dt class="col-sm-3">Serving</dt>
+        <dd class="col-sm-9">
+            <span class="font-monospace">@surface.App</span>
+            <span class="text-body-secondary">pid @surface.Pid</span>
+        </dd>
+
+        <dt class="col-sm-3">Build</dt>
+        <dd class="col-sm-9">
+            @* The version is a captured/reason pair for a measured reason: deterministic builds leave no
+               honest build timestamp, so a value that could not be read says so instead of showing a blank. *@
+            @if (surface.Version.WasCaptured)
+            {
+                <span class="font-monospace">@surface.Version.Value</span>
+            }
+            else
+            {
+                <span class="text-body-secondary">not captured — @surface.Version.Reason</span>
+            }
+        </dd>
+
+        <dt class="col-sm-3">Description set</dt>
+        <dd class="col-sm-9">
+            @(surface.DescriptionSet.Length > 0
+                ? surface.DescriptionSet
+                : "none — every description is the literal compiled into its provider")
+        </dd>
+
+        <dt class="col-sm-3">Tools hash</dt>
+        <dd class="col-sm-9 font-monospace text-truncate">@surface.ToolsHash</dd>
+
+        <dt class="col-sm-3">Descriptions hash</dt>
+        <dd class="col-sm-9 font-monospace text-truncate">@surface.DescriptionsHash</dd>
+
+        <dt class="col-sm-3">Read at</dt>
+        <dd class="col-sm-9">
+            <time datetime="@surface.TakenAt.ToString("o")">@surface.TakenAt.ToLocalTime().ToString("g")</time>
+        </dd>
+    </dl>
+
+    <h2 class="h5">Advertised tools <span class="text-body-secondary">(@surface.Tools.Count)</span></h2>
+
+    @if (surface.Tools.Count == 0)
+    {
+        @* Read successfully, and genuinely empty. The alert above covers "could not read"; this one is
+           the opposite fact and must not look the same. *@
+        <div class="alert alert-warning">
+            This server advertises no tools. A subset was configured that excludes everything, or no
+            provider is registered.
+        </div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-sm align-middle">
+                <thead>
+                    <tr>
+                        <th scope="col">Tool</th>
+                        <th scope="col">Description as served</th>
+                        <th scope="col">Schema</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var tool in surface.Tools)
+                    {
+                        <tr>
+                            <td class="font-monospace text-nowrap align-top">@tool.Name</td>
+                            @* The TEXT, in full, not a hash: a hash answers "did it change" and never
+                               "to what", and the wording is the thing an agent routes on. *@
+                            <td class="small">@tool.Description</td>
+                            <td class="font-monospace small text-body-secondary align-top">
+                                @tool.SchemaHash[..12]
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+@if (Health.Available && Health.Value!.Components.Count > 0)
+{
+    <h2 class="h5 mt-4">Components</h2>
+    <ul class="list-group list-group-flush small">
+        @foreach (var component in Health.Value.Components)
+        {
+            <li class="list-group-item d-flex justify-content-between align-items-start">
+                <span class="font-monospace">@component.Component</span>
+                <span class="text-body-secondary text-end ms-3">@component.Detail</span>
+                <span class="badge ms-2 @(component.Healthy ? "text-bg-success" : "text-bg-danger")">
+                    @(component.Healthy ? "alive" : "broken")
+                </span>
+            </li>
+        }
+    </ul>
+}
