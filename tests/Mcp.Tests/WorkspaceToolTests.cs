@@ -48,6 +48,50 @@ public sealed class WorkspaceToolTests
             .Which.Content.Should().Contain("of 2");
     }
 
+    [Fact]
+    public async Task A_line_count_of_int_max_reads_to_the_end_instead_of_overflowing_into_a_crash()
+    {
+        var (provider, root) = Build();
+        await File.WriteAllTextAsync(Path.Combine(root, "a.txt"), "1\n2\n3\n4\n5", TestContext.Current.CancellationToken);
+
+        // The window arithmetic is `start + count - 1`. In int, with the count any client may send in
+        // ONE call, that wraps NEGATIVE, Math.Min picks the negative, and the range indexer throws
+        // where nothing above catches. "Everything from line 2" is a legitimate request — a pager
+        // sends it — so the answer is the rest of the file, not a refusal and never an exception.
+        var result = await Invoke(provider, """{"path":"a.txt","startLine":2,"lineCount":2147483647}""");
+
+        result.Should().BeOfType<ToolResult.Ok>()
+            .Which.Content.Should().Be("lines 2-5 of 5\n2\n3\n4\n5");
+    }
+
+    [Fact]
+    public async Task A_negative_line_count_is_refused_with_the_legal_range_rather_than_read_as_to_the_end()
+    {
+        var (provider, root) = Build();
+        await File.WriteAllTextAsync(Path.Combine(root, "a.txt"), "1\n2\n3", TestContext.Current.CancellationToken);
+
+        var result = await Invoke(provider, """{"path":"a.txt","startLine":1,"lineCount":-5}""");
+
+        // Nonsense is answered with the legal range, not folded into the documented meaning of 0.
+        // Reading -5 as "to the end" tells the caller their number was accepted when it was discarded.
+        result.Should().BeOfType<ToolResult.Refused>()
+            .Which.Reason.Should().Contain("lineCount").And.Contain("2147483647");
+    }
+
+    [Fact]
+    public async Task A_start_line_too_large_for_an_int32_is_refused_rather_than_silently_read_from_the_top()
+    {
+        var (provider, root) = Build();
+        await File.WriteAllTextAsync(Path.Combine(root, "a.txt"), "1\n2\n3", TestContext.Current.CancellationToken);
+
+        var result = await Invoke(provider, """{"path":"a.txt","startLine":999999999999}""");
+
+        // The JSON boundary must not read a number it cannot hold as the DEFAULT: "from the top" is
+        // the one answer that looks successful while being the opposite of what was asked.
+        result.Should().BeOfType<ToolResult.Refused>()
+            .Which.Reason.Should().Contain("startLine");
+    }
+
     [Theory]
     [InlineData("../outside.txt")]
     [InlineData("sub/../../outside.txt")]

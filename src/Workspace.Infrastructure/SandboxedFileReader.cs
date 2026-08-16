@@ -19,6 +19,17 @@ public sealed class SandboxedFileReader(WorkspaceRoot root, ILogger<SandboxedFil
             return new FileReadOutcome.Refused($"Path '{request.Path}' is outside the workspace.");
         }
 
+        // The client's numbers are checked BEFORE any arithmetic touches them. They arrive straight
+        // from a JSON body, and the window below used to add them in int: `startLine + lineCount`
+        // wrapped negative and threw out of an unguarded range indexer, which any caller could reach
+        // in one call.
+        var illegal = OutOfRange(request);
+        if (illegal.Length > 0)
+        {
+            logger.LogWarning("Refused a read with an out-of-range window for {RequestedPath}: {Reason}", request.Path, illegal);
+            return new FileReadOutcome.Refused(illegal);
+        }
+
         if (!File.Exists(fullPath))
         {
             return new FileReadOutcome.Refused($"File '{request.Path}' does not exist.");
@@ -28,18 +39,33 @@ public sealed class SandboxedFileReader(WorkspaceRoot root, ILogger<SandboxedFil
         return Window(lines, request);
     }
 
+    /// <summary>The reason this window is nonsense, or empty when it is legal.
+    /// <para>Only NEGATIVES are refused. A huge count is not nonsense — "everything from line 2" is
+    /// what a pager sends — so it is clamped to the file below rather than declined.</para></summary>
+    private static string OutOfRange(FileReadRequest request) =>
+        (request.StartLine, request.LineCount) switch
+        {
+            ( < 0, _) => $"'startLine' must be a whole number between 0 and {int.MaxValue}; 0 starts at the top.",
+            (_, < 0) => $"'lineCount' must be a whole number between 0 and {int.MaxValue}; 0 reads to the end.",
+            _ => string.Empty,
+        };
+
     /// <summary>Slices the requested window. A start past the end is not an error — it returns empty
     /// content with the real total, so the caller can correct the offset instead of guessing.</summary>
     private static FileReadOutcome Window(string[] lines, FileReadRequest request)
     {
-        var start = Math.Max(1, request.StartLine == 0 ? 1 : request.StartLine);
+        var start = Math.Max(1, request.StartLine);
         if (start > lines.Length)
         {
             return new FileReadOutcome.Ok(string.Empty, start, start - 1, lines.Length);
         }
 
-        var count = request.LineCount <= 0 ? lines.Length - start + 1 : request.LineCount;
-        var end = Math.Min(lines.Length, start + count - 1);
+        // long, deliberately. `start + count - 1` with the count a client may legally send
+        // (int.MaxValue, meaning "the rest of it") overflows int, wraps NEGATIVE, and Math.Min then
+        // picks the negative — which is how a range indexer three lines later became the one
+        // unhandled exception reachable from the wire.
+        long count = request.LineCount == 0 ? lines.Length - start + 1 : request.LineCount;
+        var end = (int)Math.Min(lines.Length, start + count - 1);
         var slice = lines[(start - 1)..end];
         return new FileReadOutcome.Ok(string.Join('\n', slice), start, end, lines.Length);
     }

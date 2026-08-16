@@ -20,7 +20,9 @@ flowchart TD
     NAME -->|no| WRONG["Failed — not served here"]
     NAME -->|yes| PATH{"'path' present?"}
     PATH -->|no| MISSING["Refused — 'path' is required"]
-    PATH -->|yes| ROOTED{"rooted path?"}
+    PATH -->|yes| NUMBERS{"startLine/lineCount<br/>whole and ≥ 0?"}
+    NUMBERS -->|no| RANGE["Refused — names the argument<br/>and the legal range"]
+    NUMBERS -->|yes| ROOTED{"rooted path?"}
     ROOTED -->|yes| OUT["Refused — outside the workspace"]
     ROOTED -->|no| RESOLVE["GetFullPath(root + path)"]
     RESOLVE --> INSIDE{"starts with root + separator?"}
@@ -60,6 +62,15 @@ flowchart TD
   megabytes to see forty lines — and it will, every time.
 - **A start past the end is not an error.** It returns empty content with the real total, so the caller
   corrects the offset by number.
+- **Client numbers are range-checked before any arithmetic, and the window is computed in `long`.** The
+  window used to be `start + count - 1` in `int`: with `{"startLine":2,"lineCount":2147483647}` — one
+  call, any client — it wrapped negative, `Math.Min` picked the negative, and the range indexer threw an
+  unhandled `ArgumentOutOfRangeException` out of a chain with no `catch` in it. A NEGATIVE is now refused
+  naming the argument and the legal range; a count larger than the file is CLAMPED, because "everything
+  from line 2" is what a pager sends and refusing it would be wrong.
+- **A number the boundary cannot hold is refused, never defaulted.** `{"startLine": 999999999999}` read
+  as 0 would answer with the top of the file — a wrong window that looks like a success, which is the one
+  failure a caller cannot detect.
 - **Scope is reported.** `Scope` answers "a file was read, but *where*" — the other half of the fact,
   and what telemetry records per call.
 
@@ -71,8 +82,17 @@ flowchart TD
 - No file is ever written. The surface reads; the write path lives in the private product, and that
   boundary is what lets this repository be public at all.
 
+## Known gap
+
+`File.ReadAllLinesAsync` reads the whole file into memory whatever its size, and `PayloadBudget` bounds
+only the TELEMETRY copy — nothing bounds what goes back over the wire. Capping it is a contract decision
+(a truncated read must say so and name the real total, or the caller pages blindly), so it is tracked as
+item 1 of [../todo/PLAN_reliability_tail.md](../todo/PLAN_reliability_tail.md) rather than patched.
+
 ## Tests
 
-`tests/Mcp.Tests/WorkspaceToolTests.cs` — the line window by number, a start past the end, two shapes of
-escape (`../` and `sub/../../`), an absolute path, a missing argument, and that the provider reports its
-workspace.
+`tests/Mcp.Tests/WorkspaceToolTests.cs` — the line window by number, a start past the end, a
+`lineCount` of `int.MaxValue` that reads to the end instead of overflowing into a crash, a negative
+count refused with the legal range, a `startLine` too large for an `int32` refused rather than read from
+the top, two shapes of escape (`../` and `sub/../../`), an absolute path, a missing argument, and that
+the provider reports its workspace.

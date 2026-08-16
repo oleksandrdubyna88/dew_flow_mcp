@@ -40,7 +40,7 @@ flowchart TD
 |---|---|
 | stdio transport | `--stdio` |
 | HTTP transport | default; `app.MapMcp()` |
-| Management API | `GET /api/mcp/health` → `{ "status": "ok" }` |
+| Management API | `GET /api/mcp/health` → `{ "status": "ok" \| "degraded", "components": [ { "component", "healthy", "detail" } ] }` |
 | Workspace root | `--root <path>`, defaults to the current directory |
 | Telemetry | `--spool <path>`; absent ⇒ nothing is written |
 
@@ -60,6 +60,22 @@ nothing to say about it.
 
 `logs/` is git-ignored. The rule is mirrored in every `dew_flow_*` repository at
 `.claude/rules/common/logging-serilog.md`.
+
+## Health
+
+`GET /api/mcp/health` is **computed**, from whatever registered itself as an `IHealthContributor`
+(`Mcp.Contracts`). It used to return the constant `"ok"`, which answered for the ROUTE and said nothing
+about the server behind it — an orchestrator polling it could not see a dead telemetry writer.
+
+| Decision | Why |
+|---|---|
+| A port, not a reference to the telemetry sink | The API must be able to report a dead spool without learning what a spool is, and a component added later reaches the probe by registering itself — no edit inside `Mcp.Api` |
+| Every contributor answers from live state, with no lock and no IO | A probe that blocks turns one slow component into an outage for every orchestrator polling it, which is the opposite of what it is for |
+| A degraded server still answers **200** | The status code says the process is serving; the body says how well. A 503 for a broken spool would tell a supervisor to restart a server that is answering every tool call correctly |
+| The components travel with the verdict | "degraded" without the numbers behind it moves the diagnosis somewhere else instead of answering it. An empty list says nothing was checked — it never reads as a check that passed |
+
+Today the one contributor is `SpoolUsageSink` (registered only when `--spool` is given), reporting the
+file it writes, whether the breaker tripped or the writer task faulted, and the drop count.
 
 ## Mcp.Ui
 
@@ -83,4 +99,12 @@ than a retrofit.
   binds it to a LAN, and somebody will.
 - **The product host does not register the spool sink yet**, so real product traffic is still unmetered —
   only this standalone host emits.
-- **Cancellation that reaches the work**, rather than only the request.
+- **Explicit Kestrel and request timeouts.** The web host relies on framework defaults, which the shared
+  rule counts as an unnamed decision. Tracked as item 4 of
+  [../todo/PLAN_reliability_tail.md](../todo/PLAN_reliability_tail.md), where it composes with the
+  catalog's own 2-minute per-call ceiling.
+- **Retention for `logs/` and the spool.** One file per run is correct, but the rotation that rule relies
+  on IS the restart, and this deployment's premise is a process that does not restart (item 5 of the same
+  plan).
+- **A bound on a provider that ignores its token.** The catalog's ceiling cancels the token and answers
+  the caller; a provider that never observes it keeps running behind the answer.

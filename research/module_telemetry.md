@@ -24,13 +24,14 @@ flowchart LR
     TRY -->|full| DROP["Interlocked drop count"]
     RECORD -->|returns immediately| CATALOG
 
-    QUEUE --> WRITER["background writer"]
+    QUEUE --> WRITER["background writer<br/>catch-all at the detached edge"]
     WRITER --> BROKEN{"breaker tripped?"}
     BROKEN -->|yes| DROP
     BROKEN -->|no| APPEND["append one JSON line"]
-    APPEND -->|IO error| TRIP["log once, trip breaker"]
+    APPEND -->|"ANY exception"| TRIP["log once, trip breaker"]
     APPEND --> FILE[("logs/{day}/{app}-{time}-{pid}.jsonl")]
     TRIP --> DROP
+    TRIP --> HEALTH["Check() ⇒ degraded<br/>with the drop count"]
 ```
 
 ## Core types
@@ -40,7 +41,8 @@ flowchart LR
 | `IUsageSink` | The port. A port on purpose: this repository is public and must not carry a hardcoded telemetry destination |
 | `NullUsageSink` | The default. Forgetting to register a sink loses telemetry rather than breaking tool calls |
 | `SpoolOptions` | `Directory` (required), `App`, `Capacity` (default 4096) |
-| `SpoolUsageSink` | The implementation. Exposes `Path` (the file this run writes) and `Dropped` (records the spool refused) |
+| `SpoolUsageSink` | The implementation. Exposes `Path` (the file this run writes), `Dropped` (records the spool refused), `Broken` (breaker tripped **or** the writer task faulted) and `Check()` — it is an `IHealthContributor` as well as an `IUsageSink` |
+| `IHealthContributor` / `ComponentHealth` | The health port, in `Mcp.Contracts`. How a dead writer becomes visible from outside the process without `Mcp.Api` learning what a spool is |
 | `TelemetryRecord` + `EmitterWire`, `CallerWire`, `CapturedTextWire`, `CapturedNumberWire`, `StageFixture`-free wire records | The `telemetry/v0` line |
 | `TelemetryJson` | The one serializer for the spool, so the emitted bytes have a single definition |
 
@@ -48,7 +50,7 @@ flowchart LR
 
 | Member | Purpose |
 |---|---|
-| `McpTelemetryExtensions.AddTelemetrySpool(services, spoolDirectory, app)` | Opt-in. A blank directory registers nothing and the null floor stays |
+| `McpTelemetryExtensions.AddTelemetrySpool(services, spoolDirectory, app)` | Opt-in. A blank directory registers nothing and the null floor stays. When it does register, the SAME instance is added as an `IHealthContributor` |
 | `TelemetryRecord.V0` | `"telemetry/v0"` — stamped on every line |
 | `TelemetryRecord.From(usage, emitter)` | The domain record as the wire shape |
 
@@ -62,6 +64,14 @@ flowchart LR
   counted.** That is the defect the counter exists to make impossible, and it was in the sink itself.
 - **A broken disk trips a breaker.** One error log, recording stops for the run, later records count as
   dropped. A failing disk will not start working because we logged about it once per call.
+- **The writer's catch is a catch-ALL, at the detached edge.** It used to name two IO types. The third —
+  an `ArgumentException` from a malformed spool path — killed the drain loop for the life of the process
+  with not one line in the log: the channel filled, every later record was refused, and the server looked
+  healthy throughout. The task is awaited only in `DisposeAsync`, i.e. at a shutdown that may never come,
+  so this catch is the last frame that can report anything at all. A list of anticipated types is a bet
+  that the fourth type never comes.
+- **The state is exposed, not just logged.** `Broken` also reports a faulted writer task, and `Check()`
+  puts it on `/api/mcp/health` — a log line written at 03:00 is not a thing an orchestrator can poll.
 - **One file per run**, under a day folder, UTC throughout — the same shape as the logging rule, for the
   same reason: the question asked of a spool is always "hand me what this host produced", and a file
   shared across runs cannot be handed over while it is being written.
@@ -96,7 +106,9 @@ vocabulary, and renaming the C# enum must not silently rename them.
 
 `tests/Mcp.Tests/SpoolUsageSinkTests.cs` — one line per record, the three outcome names, an uncaptured
 field shipping its reason, the file's path shape, non-blocking recording with every record either
-written or counted, and an unwritable directory that never fails a call.
+written or counted, an unwritable directory that never fails a call, and an **unexpected** writer fault
+(a spool path the filesystem refuses with neither anticipated IO type) that is logged once and never
+surfaces as a throw at shutdown. `HealthTests.cs` covers the probe side.
 
 ## What is not recorded
 

@@ -1,10 +1,10 @@
 # PLAN — the reliability tail the 24/7 audit left open
 
-> Status: **plan only, nothing implemented yet, 2026-08-16.** Scope: `src/Mcp.Application`,
-> `src/Mcp.Bridge`, `src/Mcp.Host`, `src/Mcp.Telemetry`, `src/ServiceDefaults`. The CRITICAL/HIGH
-> defects of the same audit — the overflowing read window, the silently dying spool writer, the
-> unguarded dispatch chain, the missing per-call ceiling and the constant health answer — are being
-> fixed in a separate task and are **not** in this plan.
+> Status: **open; item 2 shipped 2026-08-16, items 1 and 3–7 outstanding.** Scope:
+> `src/Mcp.Application`, `src/Mcp.Bridge`, `src/Mcp.Host`, `src/Mcp.Telemetry`, `src/ServiceDefaults`.
+> The CRITICAL/HIGH defects of the same audit — the overflowing read window, the silently dying spool
+> writer, the unguarded dispatch chain, the missing per-call ceiling and the constant health answer —
+> were fixed in a separate task on 2026-08-16 and are **not** in this plan.
 >
 > Related: `.claude/rules/shared/common/reliability.md` (the doctrine this audit produced).
 
@@ -18,7 +18,7 @@ listed here so it is tracked work rather than a paragraph in a chat log that exp
 
 ## The symptom, per item
 
-### 1. The size ceiling that isn't — HIGH, if not already closed by the fix task
+### 1. The size ceiling that isn't — HIGH, **still open** (checked 2026-08-16)
 
 `src/Workspace.Infrastructure/SandboxedFileReader.cs:27` reads with `File.ReadAllLinesAsync` — the
 whole file, whatever its size — and when a client omits `lineCount` the documented default is "read
@@ -29,14 +29,27 @@ goes back over stdio or HTTP.
 
 This was handed to the fix task as an optional item, because capping it is a **contract** decision
 rather than a patch: a truncated read must say it was truncated and name the real total, or the
-caller will page blindly. **Check whether it landed there before starting.** If it did, strike this
-item and record it here.
+caller will page blindly. **It did NOT land there** — the fix task declined it for exactly that
+reason and reported it instead. What it found, so this does not have to be rediscovered: a size
+refusal alone is self-defeating, because the paging it would tell the caller to use goes through the
+same `ReadAllLinesAsync`. Honouring the "page by number" contract on a file too large to hold means
+reading it as a STREAM — skip to `startLine`, take `lineCount`, count the total on the way past —
+which is a rewrite of the read path rather than a guard in front of it. The one line the fix task did
+change here is the arithmetic that overflowed; the volume of a read is untouched.
 
 **Fix:** cap lines and bytes in the reader itself; return an explicit truncation marker with the true
 line count, so a caller can request the next window by number — the family's established read-window
 contract.
 
-### 2. `JsonDocument` is never disposed on the bridge's hot path — MEDIUM
+### 2. `JsonDocument` is never disposed on the bridge's hot path — MEDIUM, **DONE 2026-08-16**
+
+Closed by the fix task, in the same pass as the five CRITICAL/HIGH defects: `LocalLlmToolBridge`
+parses into a `using var` and clones out of it, so the pooled buffers are returned. The `.Clone()`
+stays — the element must outlive the document, which is what the clone is for; what was missing was
+the `using`, not the copy. The identical shape at `src/Mcp.Contracts/ToolSchema.cs:23-24` is
+untouched: it runs once at startup, as this plan already noted.
+
+The original finding, kept for the record:
 
 `src/Mcp.Bridge/LocalLlmToolBridge.cs:38-41`:
 
@@ -50,8 +63,8 @@ returned and the pool's purpose is defeated on every bridge-driven call. The `.C
 an independent copy that a `using` would make unnecessary. The same shape, once at startup and
 therefore harmless, is at `src/Mcp.Contracts/ToolSchema.cs:23-24`.
 
-**Fix:** `using var document = JsonDocument.Parse(...)`, keeping the document alive for the call
-instead of cloning out of it. Given as an optional item to the fix task — check first.
+**Fix (shipped):** `using var parsed = JsonDocument.Parse(...)`, cloning the root element out of it
+before the document is disposed.
 
 ### 3. The payload budget pays an O(n log n) cost on every call — MEDIUM
 
@@ -68,9 +81,10 @@ bounds bytes from below), and avoid re-counting from zero inside the search.
 
 `src/Mcp.Host/Program.cs:36-47` builds the web host with no `KestrelServerOptions` and no
 `RequestTimeouts` middleware, relying entirely on framework defaults. The shared rule is explicit
-that a framework default you rely on is still a decision, and must be named. This compounds whatever
-per-call ceiling the fix task adds inside the catalog: between "the client disconnects" and "the call
-finishes" there should be no unnamed gap.
+that a framework default you rely on is still a decision, and must be named. This compounds with the
+catalog's ceiling, which the fix task shipped as `ToolCatalogOptions.CallTimeout` — **2 minutes**,
+`TryAdd`-registered so a host may override it: between "the client disconnects" and "the call
+finishes" there should be no unnamed gap, and these two numbers have to be chosen against each other.
 
 **Fix:** configure keep-alive, request-header and request-body timeouts explicitly, in
 `appsettings.json` rather than in code, so an operator can change them without a rebuild.
@@ -110,8 +124,8 @@ than per line. Listed so the next person debugging a hot server does not discove
 
 ## Build order
 
-1. **(1) the read cap** — if the fix task did not close it, it is the only HIGH here.
-2. **(2) `JsonDocument`** and **(3) budget cost** — small, same hot path, one pass.
+1. **(1) the read cap** — the fix task did not close it, so it is the only HIGH here.
+2. ~~**(2) `JsonDocument`**~~ (done) and **(3) budget cost** — small, same hot path.
 3. **(4) explicit HTTP timeouts** — configuration, no behaviour change expected.
 4. **(5) retention** — needs the operator decision; start the conversation early.
 5. **(6) `Mcp.Ui`** and **(7) the sink note** — hygiene, any time.
@@ -124,7 +138,7 @@ the guarantee, observed failing for the real symptom:
 | item | test name |
 |---|---|
 | 1 | `A_read_larger_than_the_cap_says_it_was_truncated_and_names_the_real_total` |
-| 2 | `A_bridge_call_returns_its_pooled_buffers` |
+| 2 | *(shipped without one)* — `ArrayPool.Shared` exposes no rent/return count, so the guarantee has no observable assertion short of instrumenting the pool; the change is `using` on a parse whose result is already cloned, and `SurfaceParityTests` covers the bridge path it sits on |
 | 3 | `A_payload_already_within_budget_is_not_re_measured` |
 | 5 | `A_day_folder_older_than_the_window_is_pruned_at_startup` |
 

@@ -37,8 +37,11 @@ public sealed class LocalLlmToolBridge(ToolCatalog catalog, AmbientCallerContext
         JsonElement arguments;
         try
         {
-            arguments = JsonDocument.Parse(
-                string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson).RootElement.Clone();
+            // `using`: the Clone() is what outlives the document, and an undisposed JsonDocument never
+            // returns its pooled buffers — on a server that runs for weeks, one leak per model call.
+            using var parsed = JsonDocument.Parse(
+                string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson);
+            arguments = parsed.RootElement.Clone();
         }
         catch (JsonException ex)
         {

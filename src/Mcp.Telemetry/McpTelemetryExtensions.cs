@@ -34,6 +34,11 @@ public static class McpTelemetryExtensions
             sp.GetRequiredService<ILogger<SpoolUsageSink>>()));
         services.AddSingleton<IUsageSink>(sp => sp.GetRequiredService<SpoolUsageSink>());
 
+        // The same instance as a health contributor: a spool whose writer has stopped is invisible
+        // from outside the process otherwise, and "the server is up" is not the question an
+        // orchestrator is asking.
+        services.AddSingleton<IHealthContributor>(sp => sp.GetRequiredService<SpoolUsageSink>());
+
         return services;
     }
 }

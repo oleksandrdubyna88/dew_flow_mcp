@@ -15,6 +15,11 @@ public static class McpApplicationExtensions
         services.TryAddSingleton<AmbientCallerContext>();
         services.TryAddSingleton<ICallerContext>(sp => sp.GetRequiredService<AmbientCallerContext>());
         services.TryAddSingleton(TimeProvider.System);
+
+        // TryAdd again: a host whose providers have legitimately slow calls registers its own
+        // ToolCatalogOptions BEFORE this and keeps it. The default ceiling is what a host that says
+        // nothing gets — never no ceiling at all.
+        services.TryAddSingleton(new ToolCatalogOptions());
         services.TryAddSingleton<ToolCatalog>();
         return services;
     }

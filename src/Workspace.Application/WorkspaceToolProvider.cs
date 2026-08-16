@@ -85,10 +85,23 @@ public sealed class WorkspaceToolProvider(ISandboxedFileReader reader) : IToolPr
         return path.Length > 0;
     }
 
-    private static int ReadInt(JsonElement arguments, string name) =>
-        arguments.ValueKind == JsonValueKind.Object
-        && arguments.TryGetProperty(name, out var value)
-        && value.TryGetInt32(out var number)
-            ? number
-            : 0;
+    /// <summary>The value a present-but-unreadable number takes: deliberately out of range, so the
+    /// reader's window guard refuses it by name.</summary>
+    private const int Unreadable = -1;
+
+    /// <summary>Reads an optional window number. Absent means the documented default (0 — from the top
+    /// / to the end); present but not a whole 32-bit number (<c>1e12</c>, <c>"5"</c>, <c>3.5</c>)
+    /// means <see cref="Unreadable"/>, never 0.
+    /// <para>That distinction is the whole point: reading <c>{"startLine": 999999999999}</c> as 0
+    /// answers with the top of the file and looks like a success, which is the one failure a caller
+    /// cannot detect. Out of range, they are told which argument and what the legal range is.</para></summary>
+    private static int ReadInt(JsonElement arguments, string name)
+    {
+        if (arguments.ValueKind != JsonValueKind.Object || !arguments.TryGetProperty(name, out var value))
+        {
+            return 0;
+        }
+
+        return value.TryGetInt32(out var number) ? number : Unreadable;
+    }
 }

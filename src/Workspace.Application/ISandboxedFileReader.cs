@@ -11,7 +11,10 @@ public interface ISandboxedFileReader
 }
 
 /// <summary>What to read. <paramref name="StartLine"/> is 1-based inclusive; 0 means "from the top",
-/// and a <paramref name="LineCount"/> of 0 means "to the end".</summary>
+/// and a <paramref name="LineCount"/> of 0 means "to the end".
+/// <para>Both are client numbers, so both are range-checked by the adapter before any arithmetic: a
+/// NEGATIVE is refused naming the legal range, while a count larger than the file is clamped to it —
+/// "everything from line 2" is a legitimate request, not a nonsense one.</para></summary>
 public sealed record FileReadRequest(string Path, int StartLine = 0, int LineCount = 0);
 
 /// <summary>The read's result. A closed union: a refusal carries its reason instead of arriving as an

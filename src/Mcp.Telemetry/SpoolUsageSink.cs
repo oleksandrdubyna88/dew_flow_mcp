@@ -30,8 +30,11 @@ public sealed record SpoolOptions
 /// One file per run under a day folder, UTC throughout, mirroring the logging convention — a spool
 /// that appends every run into one file is a file nobody can hand over while the host is up.
 /// </para></summary>
-public sealed class SpoolUsageSink : IUsageSink, IAsyncDisposable
+public sealed class SpoolUsageSink : IUsageSink, IHealthContributor, IAsyncDisposable
 {
+    /// <summary>How this sink names itself on the health probe.</summary>
+    public const string Component = "telemetry-spool";
+
     private readonly Channel<TelemetryRecord> queue;
     private readonly EmitterWire emitter;
     private readonly ILogger<SpoolUsageSink> logger;
@@ -39,7 +42,9 @@ public sealed class SpoolUsageSink : IUsageSink, IAsyncDisposable
     private readonly string path;
 
     private int dropped;
-    private bool broken;
+
+    // volatile: written by the background writer, read by the health probe on whichever thread asks.
+    private volatile bool broken;
 
     public SpoolUsageSink(SpoolOptions options, TimeProvider clock, ILogger<SpoolUsageSink> logger)
     {
@@ -67,6 +72,19 @@ public sealed class SpoolUsageSink : IUsageSink, IAsyncDisposable
     /// <summary>The file this sink is writing. Fixed at construction — one file per run.</summary>
     public string Path => path;
 
+    /// <summary>True once this sink has stopped recording for the run — the breaker tripped, or the
+    /// writer task itself faulted. The second half matters: the drain loop is awaited only in
+    /// <see cref="DisposeAsync"/>, which on a server that runs for weeks is a report nobody is there
+    /// to read, so the state is exposed for a health probe to ask about instead.</summary>
+    public bool Broken => broken || writer.IsFaulted;
+
+    /// <summary>The probe's answer, from two volatile reads and a counter — no lock, no IO, nothing
+    /// lazy. A spool that stopped recording is exactly the degradation a constant "ok" hid.</summary>
+    public ComponentHealth Check() =>
+        Broken
+            ? ComponentHealth.Broken(Component, $"stopped accepting writes at {path}; {Dropped} record(s) dropped")
+            : ComponentHealth.Alive(Component, $"writing {path}; {Dropped} record(s) dropped");
+
     public Task RecordAsync(ToolUsage usage, CancellationToken cancellationToken)
     {
         if (!queue.Writer.TryWrite(TelemetryRecord.From(usage, emitter)))
@@ -90,22 +108,28 @@ public sealed class SpoolUsageSink : IUsageSink, IAsyncDisposable
         }
     }
 
+    /// <summary>The detached edge: nothing above this frame is awaited until shutdown, so this is the
+    /// last place an exception can be reported at all.
+    /// <para>It catches EVERYTHING deliberately. It used to name two IO types, and the third —
+    /// an <see cref="ArgumentException"/> from a malformed spool path — killed the drain loop for the
+    /// life of the process with not one line in the log: the channel then filled, every later record
+    /// was refused, and the server looked healthy throughout. A list of anticipated types is a bet
+    /// that the fourth type never comes.</para></summary>
     private async Task DrainAsync()
     {
         try
         {
-            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+            await PumpAsync();
         }
-        catch (IOException ex)
+        catch (Exception ex)
         {
             Break(ex);
-            return;
         }
-        catch (UnauthorizedAccessException ex)
-        {
-            Break(ex);
-            return;
-        }
+    }
+
+    private async Task PumpAsync()
+    {
+        System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
 
         await foreach (var record in queue.Reader.ReadAllAsync())
         {
@@ -119,17 +143,15 @@ public sealed class SpoolUsageSink : IUsageSink, IAsyncDisposable
         }
     }
 
+    /// <summary>One record is one unit: a fault here trips the breaker and the loop keeps draining and
+    /// counting, so a single unserializable record cannot end the writer.</summary>
     private async Task WriteAsync(TelemetryRecord record)
     {
         try
         {
             await File.AppendAllTextAsync(path, TelemetryJson.Line(record) + System.Environment.NewLine);
         }
-        catch (IOException ex)
-        {
-            Break(ex);
-        }
-        catch (UnauthorizedAccessException ex)
+        catch (Exception ex)
         {
             Break(ex);
         }

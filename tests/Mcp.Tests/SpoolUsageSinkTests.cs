@@ -118,6 +118,29 @@ public sealed class SpoolUsageSinkTests
         sink.Dropped.Should().BeGreaterThan(0, "and the loss is counted rather than silent");
     }
 
+    [Fact]
+    public async Task An_unexpected_writer_fault_is_logged_and_never_surfaces_as_a_throw_at_shutdown()
+    {
+        // A spool path the filesystem refuses with something OTHER than the two IO types the writer
+        // anticipates — the NUL stands in for every third type (a malformed --spool argument, a
+        // serialization fault). A list of anticipated types is a bet that the fourth never comes, and
+        // the writer this bet loses is one nobody awaits until shutdown, so it dies silently for the
+        // life of the process.
+        var logger = new RecordingLogger<SpoolUsageSink>();
+        var sink = new SpoolUsageSink(
+            new SpoolOptions { Directory = Directory.CreateTempSubdirectory("mcp-spool-fault").FullName + "\0x", App = "mcp-test", Capacity = 64 },
+            new FakeTimeProvider(new DateTimeOffset(2026, 8, 15, 9, 30, 0, TimeSpan.Zero)),
+            logger);
+
+        await sink.RecordAsync(Usage(), TestContext.Current.CancellationToken);
+        var shutdown = async () => await sink.DisposeAsync();
+
+        await shutdown.Should().NotThrowAsync("a dead spool is a lost record, never a fault the host meets at shutdown");
+        logger.Errors.Should().ContainSingle("one line, once — a broken writer is reported before it is needed, not diagnosed after")
+            .Which.Should().Contain("stopped accepting writes");
+        sink.Dropped.Should().BeGreaterThan(0, "and the loss is counted rather than silent");
+    }
+
     private static async Task<int> CountLines(string path) =>
         File.Exists(path) ? (await File.ReadAllLinesAsync(path)).Length : 0;
 

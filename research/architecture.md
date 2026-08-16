@@ -26,18 +26,18 @@ asserts the same rule from its side.
 
 | Project | Kind | Role |
 |---|---|---|
-| `Mcp.Contracts` | class library, **zero package references** | The whole contract: `IToolProvider`, `ToolSchema`, `ToolCall`/`ToolResult`, `IUsageSink`/`ToolUsage`, `CallerIdentity`, `Captured` |
+| `Mcp.Contracts` | class library, **zero package references** | The whole contract: `IToolProvider`, `ToolSchema`, `ToolCall`/`ToolResult`, `IUsageSink`/`ToolUsage`, `IHealthContributor`/`ComponentHealth`, `CallerIdentity`, `Captured` |
 | `Mcp.Application` | class library | `ToolCatalog` — the one dispatch point; `PayloadBudget`; `AmbientCallerContext` |
 | `Mcp.Server` | class library | The MCP protocol presentation: `CatalogToolFunction`, `CatalogToolRegistration`, `CallerContextFilter` |
 | `Mcp.Bridge` | class library | The in-process presentation for OpenAI-style function calling: `LocalLlmToolBridge` |
 | `Mcp.Telemetry` | class library, **contracts only** | `SpoolUsageSink` — one JSON line per call, on local disk |
-| `Mcp.Api` | class library (minimal API) | Management surface: `GET /api/mcp/health` |
+| `Mcp.Api` | class library (minimal API) | Management surface: `GET /api/mcp/health`, computed from the registered `IHealthContributor`s |
 | `Mcp.Ui` | Razor class library | Console pages. Scaffold only — `_Imports.razor` and the csproj |
 | `Mcp.Host` | web exe | The standalone server: clone, run, and a CLI has workspace tools |
 | `Workspace.Application` | class library | `ISandboxedFileReader` port; `WorkspaceToolProvider` — the one real tool |
 | `Workspace.Infrastructure` | class library | `SandboxedFileReader` adapter; DI registration |
 | `ServiceDefaults` | class library | Serilog wiring, the ANSI console sink, the UTC enricher |
-| `tests/Mcp.Tests` | xUnit v3 exe | 54 tests, including the layering guard |
+| `tests/Mcp.Tests` | xUnit v3 exe | 65 tests, including the layering guard |
 
 ## Containers and dependencies
 
@@ -61,7 +61,7 @@ graph TD
         EXT["Any external provider<br/>(implemented outside this repo)"]
     end
 
-    CONTRACTS["Mcp.Contracts<br/>IToolProvider · IUsageSink · ToolResult"]
+    CONTRACTS["Mcp.Contracts<br/>IToolProvider · IUsageSink<br/>IHealthContributor · ToolResult"]
     SPOOL[("Spool files<br/>JSONL on local disk")]
 
     CLI -->|"stdio or HTTP"| SERVER
@@ -72,6 +72,7 @@ graph TD
     CATALOG --> EXT
     CATALOG --> TELEMETRY
     TELEMETRY --> SPOOL
+    TELEMETRY -.health.-> API
 
     SERVER -.implements.-> CONTRACTS
     BRIDGE -.implements.-> CONTRACTS
@@ -99,13 +100,19 @@ sequenceDiagram
     F->>A: enter caller context, then continue
     A->>T: InvokeAsync(ToolCall)
     alt tool is advertised
-        T->>P: InvokeAsync
-        P-->>T: Ok | Refused | Failed
+        T->>T: link the caller's token, CancelAfter(CallTimeout)
+        T->>P: InvokeAsync(call, budget token)
+        alt returned
+            P-->>T: Ok | Refused | Failed
+        else threw, or passed the ceiling
+            P--)T: exception
+            T->>T: log it, then Failed(reason)
+        end
     else unknown tool
         T-->>T: Failed("Unknown tool")
     end
     T->>T: budget arguments and body, classify outcome
-    T->>S: RecordAsync(ToolUsage)
+    T->>S: RecordAsync(ToolUsage) — guarded
     T-->>A: ToolResult
     A-->>C: CallToolResult (isError set for Refused and Failed)
     F->>F: restore the previous caller
@@ -119,6 +126,20 @@ Every presentation reaches tools through `ToolCatalog.InvokeAsync` and nowhere e
 names stop the host at construction, naming both providers. `SurfaceParityTests` fails the build if
 either presentation grows tool logic of its own, or if the two advertise different names or
 byte-different schemas.
+
+Because it is the one chokepoint, it is also where the server's own limits live, and every present and
+future provider inherits them without knowing: a **per-call ceiling** (`ToolCatalogOptions.CallTimeout`,
+2 minutes by default, configurable per host) on a token linked to the caller's, and a **guard** that
+turns anything thrown into a logged, metered `ToolResult.Failed`. Neither belongs in a provider, and a
+copy of either in a second dispatch path is the drift this repository is shaped to prevent.
+
+### Nothing unattended fails silently
+
+The mission is 24/7 operation, so the rules from
+[`.claude/rules/shared/common/reliability.md`](../.claude/rules/shared/common/reliability.md) are
+structural here: every wait has a ceiling (above), a detached task ends in a catch-all that LOGS (the
+spool writer), client numbers are range-checked before arithmetic (the read window), and `/health`
+computes from live state so a component that died at 03:00 is visible to whatever polls at 03:05.
 
 ### Outcomes are three-state
 
@@ -146,7 +167,9 @@ bridge declares its own identity, including the model when the host names one.
 Off by default. A host that names a spool directory replaces `NullUsageSink` with `SpoolUsageSink`,
 which writes one `telemetry/v0` JSON line per call. It may never block, delay or fail a tool call: a
 bounded channel feeds a background writer, a full channel drops and **counts**, and a disk that stops
-accepting writes trips a breaker with one log line. Details:
+accepting writes trips a breaker with one log line — as does anything else the writer meets, since the
+loop nobody awaits until shutdown ends in a catch-all. The same instance answers the health probe, so a
+stopped spool is visible from outside the process. Details:
 [telemetry_v0_wire.md](telemetry_v0_wire.md).
 
 ### Logging
@@ -160,9 +183,15 @@ via `UtcTimestampEnricher` — the file is named in UTC, and its lines must not 
 ### Error handling
 
 Tool failures are values. Malformed JSON from a model is a tool failure it can read and retry, never an
-exception that ends the loop. Path escapes are refusals with a reason. Only the duplicate-tool-name guard
-throws, and deliberately: it stops the host at startup rather than letting a surface lie about what it
-runs.
+exception that ends the loop. Path escapes are refusals with a reason. The guards that throw do it at
+**construction**, deliberately — a duplicate tool name and a ceiling that cannot be applied both stop the
+host at startup rather than lying about what runs, or throwing once per call for the life of a process
+nobody is watching.
+
+`try`/`catch` sits on three boundaries and nowhere else: per dispatched call (the catalog), around the
+whole unit including its setup (metering, budgeting included), and as a catch-**all** at every detached
+edge (the spool writer's drain loop). Everywhere else, an unexpected exception is left to fly to one of
+those three.
 
 ### Authentication
 
@@ -194,4 +223,9 @@ Stated because a knowledge base that only describes what is there reads like a c
 - **`Mcp.Ui`** has no pages: `_Imports.razor` and a csproj.
 - **Tokens** are never counted; `ToolUsage.Tokens` is always *not captured* on this surface.
 - **A LICENSE, THIRD-PARTY-NOTICES and a version policy** — required before the repository is advertised.
-- **Cancellation that reaches the work** rather than only the request.
+- **A size ceiling on a read.** `PayloadBudget` bounds the telemetry copy, not the wire response; capping
+  the read itself is a contract decision, tracked in
+  [../todo/PLAN_reliability_tail.md](../todo/PLAN_reliability_tail.md).
+- **Explicit HTTP timeouts and a retention owner for `logs/` and the spool** — the rest of the same plan.
+- **A bound on a provider that ignores its cancellation token.** The catalog cancels and answers the
+  caller at the ceiling; work that never observes the token keeps running behind that answer.
