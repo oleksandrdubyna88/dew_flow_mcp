@@ -125,8 +125,10 @@ count from the hot path's common case.
 
 ### 4. No explicit Kestrel or request timeouts on the HTTP transport — MEDIUM
 
-`src/Mcp.Host/Program.cs:36-47` builds the web host with no `KestrelServerOptions` and no
-`RequestTimeouts` middleware, relying entirely on framework defaults. The shared rule is explicit
+`src/Mcp.Host/Program.cs:76-87` builds the web host with no `KestrelServerOptions` and no
+`RequestTimeouts` middleware, relying entirely on framework defaults. *(Was `:36-47` when this was
+written; the surface-configuration work of 2026-08-16 added a `--print-surface` branch above it. The
+finding is unchanged — those twelve lines still name no timeout.)* The shared rule is explicit
 that a framework default you rely on is still a decision, and must be named. This compounds with the
 catalog's ceiling, which the fix task shipped as `ToolCatalogOptions.CallTimeout` — **2 minutes**,
 `TryAdd`-registered so a host may override it: between "the client disconnects" and "the call
