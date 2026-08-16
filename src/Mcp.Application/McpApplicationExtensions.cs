@@ -32,8 +32,22 @@ public static class McpApplicationExtensions
         // nothing gets — never no ceiling at all.
         services.TryAddSingleton(new ToolCatalogOptions());
 
+        // The surface travels in the container too, so the echo can report which set a running process
+        // was configured with — a fact no consumer can recover from the advertised list alone.
+        services.TryAddSingleton(surface);
+
         GuardAgainstASetWithNowhereToReadItFrom(surface);
         RegisterCatalog(services, surface);
+        return services;
+    }
+
+    /// <summary>Registers the surface echo — <c>--print-surface</c> and <c>GET /api/mcp/surface</c> read
+    /// the same object. The app name is the host's to declare, because only the host knows which of its
+    /// shapes is running.</summary>
+    public static IServiceCollection AddSurfaceFingerprint(this IServiceCollection services, string app)
+    {
+        services.TryAddSingleton(new SurfaceIdentity(app));
+        services.TryAddSingleton<SurfaceFingerprintReader>();
         return services;
     }
 

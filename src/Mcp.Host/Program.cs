@@ -2,6 +2,7 @@ using Mcp.Api;
 using Mcp.Diagnostics;
 using Mcp.Application;
 using Mcp.Bridge;
+using Mcp.Contracts;
 using Mcp.Server;
 using Mcp.Telemetry;
 using Microsoft.Extensions.Logging;
@@ -29,25 +30,53 @@ var surface = ToolSurfaceOptions.From(
     ReadOption(args, "--descriptions") ?? string.Empty,
     ReadOption(args, "--description-set") ?? string.Empty);
 
-if (args.Contains("--stdio"))
+var stdio = args.Contains("--stdio");
+var printSurface = args.Contains("--print-surface");
+
+// --correlation <leg[/phase]> stamps every telemetry record this PROCESS writes. Refused on the HTTP
+// transport rather than quietly applied: one value across concurrent callers would invent an
+// attribution, and an invented one is worse than none. The surface probe serves nobody, so it is not
+// the shared case either way.
+var correlation = TelemetryCorrelation.Declared(
+    ReadOption(args, "--correlation") ?? string.Empty,
+    sharedTransport: !stdio && !printSurface);
+
+// --print-surface answers "what is this build actually advertising" and exits. It needs no port, so it
+// works for the stdio shape too, and it is the natural instrument for a startup check or a CI
+// assertion. The JSON is the ONLY thing on stdout — logs go to stderr, the same contract stdio keeps.
+if (printSurface)
 {
-    var stdio = Host.CreateApplicationBuilder(args);
+    var probe = Host.CreateApplicationBuilder(args);
+    probe.AddDewFlowLogging("mcp-surface", consoleToStdErr: true);
+
+    // No spool: a process that answers one question and exits must not open a telemetry writer.
+    AddToolStack(probe.Services, workspaceRoot, spool: null, "mcp-surface", surface, correlation);
+
+    using var probed = probe.Build();
+    Console.Out.WriteLine(
+        SurfaceJson.Text(probed.Services.GetRequiredService<SurfaceFingerprintReader>().Read()));
+    return;
+}
+
+if (stdio)
+{
+    var stdioHost = Host.CreateApplicationBuilder(args);
 
     // stdio uses stdout for the protocol, so logs MUST go to stderr — never stdout. One log line on that
     // stream corrupts the JSON-RPC and looks like a protocol bug rather than a logging one.
-    stdio.AddDewFlowLogging("mcp-stdio", consoleToStdErr: true);
+    stdioHost.AddDewFlowLogging("mcp-stdio", consoleToStdErr: true);
 
-    AddToolStack(stdio.Services, workspaceRoot, spool, "mcp-stdio", surface);
-    stdio.Services.AddMcpServer().WithStdioServerTransport().WithCatalogTools("stdio");
+    AddToolStack(stdioHost.Services, workspaceRoot, spool, "mcp-stdio", surface, correlation);
+    stdioHost.Services.AddMcpServer().WithStdioServerTransport().WithCatalogTools("stdio");
 
-    await stdio.Build().RunAsync();
+    await stdioHost.Build().RunAsync();
     return;
 }
 
 var builder = WebApplication.CreateBuilder(args);
 builder.AddDewFlowLogging("mcp");
 
-AddToolStack(builder.Services, workspaceRoot, spool, "mcp", surface);
+AddToolStack(builder.Services, workspaceRoot, spool, "mcp", surface, correlation);
 builder.Services.AddMcpServer().WithHttpTransport().WithCatalogTools("http");
 
 var app = builder.Build();
@@ -58,10 +87,16 @@ app.MapMcpApi();
 app.Run();
 
 static void AddToolStack(
-    IServiceCollection services, string workspaceRoot, string? spool, string app, ToolSurfaceOptions surface)
+    IServiceCollection services,
+    string workspaceRoot,
+    string? spool,
+    string app,
+    ToolSurfaceOptions surface,
+    TelemetryCorrelation correlation)
 {
     services.AddMcpApplication(surface);   // the catalog + the null usage sink
-    services.AddTelemetrySpool(spool, app); // replaces the null sink ONLY when a spool was named
+    services.AddSurfaceFingerprint(app);   // the echo: --print-surface and GET /api/mcp/surface
+    services.AddTelemetrySpool(spool, app, correlation); // replaces the null sink ONLY with a spool
     services.AddLocalLlmToolBridge();      // the in-process presentation, same catalog
     services.AddWorkspaceTools(workspaceRoot);
 }

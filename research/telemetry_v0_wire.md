@@ -35,6 +35,10 @@ something that appears because a package was referenced.
     "model":         { "captured": false, "value": "",            "reason": "the MCP protocol carries no model identity for the caller" },
     "transport": "stdio"
   },
+  "correlation": {
+    "leg":   { "captured": true, "value": "cell-17", "reason": "" },
+    "phase": { "captured": true, "value": "Verify",  "reason": "" }
+  },
   "tool": "rt_read_local_file",
   "scope": "D:/work/repo",
   "argumentsJson": "{\"path\":\"a.txt\"}",
@@ -49,7 +53,11 @@ something that appears because a package was referenced.
 }
 ```
 
-## The five things a consumer must not get wrong
+`correlation` arrived **2026-08-16, additively within v0** — no version bump, because the consumer was
+built defaulting an absent object to unattributed and documents that it must. Every line an emitter
+wrote before that date still reads, as unattributed, which is what it truthfully is.
+
+## The six things a consumer must not get wrong
 
 1. **`outcome` has three values** — `answered` · `refused` · `error` — spelled out on the wire rather
    than taken from an enum's `ToString`, because they are a published vocabulary. A refusal is a guard
@@ -69,6 +77,16 @@ something that appears because a package was referenced.
 5. **`serverMs` is server-side processing, not the caller's latency.** It excludes transport and
    excludes any wait for an accelerator — that belongs in the consumer's infrastructure-wait bucket,
    and folding it in here would make a busy card read as a slow tool.
+6. **`correlation` is what the CALLER declared, never what this server inferred.** An MCP server has no
+   idea what a harness leg is; the value comes from `--correlation <leg[/phase]>` and is stamped
+   unchanged, case included. Two consequences a consumer must hold:
+   - **Unattributed is the normal reading.** Every real session declares nothing, so `leg` is
+     `captured: false` with the reason `"the caller declared no leg"` — deliberately the SAME string a
+     consumer substitutes for a line that carries no `correlation` object at all, so "predates the
+     field" and "declared nothing" do not read as two different facts.
+   - **It is honest only for a process serving ONE unit of work.** The flag is refused at startup on
+     the HTTP transport: one value stamped across concurrent callers would invent an attribution, and
+     an invented one cannot be told from a correct one by any report downstream.
 
 ## What is not in v0
 

@@ -63,6 +63,8 @@ fabricated failure, because the client is gone and a record of it would be a cal
 | `ToolSurfaceOptions` | `Tools` (empty = every tool), `DescriptionsDirectory`, `DescriptionSet` | Which tools this process serves and where their wording comes from. All three default to "nothing configured", and `IsEverything` then takes the untouched registration path — the shipped default is the same code, not merely equivalent behaviour |
 | `ToolDescriptionCatalog` | `Load(directory, set)`, `DescriptionFor(tool, builtIn)`, `NamedTools`, `Ignored` | Descriptions read once from `<directory>/<set>/<tool>.md`. The compiled literal is the FLOOR: a missing, blank or unreadable file yields it, and the reason is carried on `Ignored` rather than dropped |
 | `ToolSurfaceProvider` | `internal`, decorates one `IToolProvider` | Filters to the subset and applies the description override with `with { Description = … }`. Sits AHEAD of the catalog — see the rule below |
+| `SurfaceFingerprint` + `ToolDescriptionEcho` | in `Mcp.Contracts`: every tool name, the exact description text served, a per-tool schema hash, `ToolsHash`, `DescriptionsHash`, `App`, `Pid`, `Version` (a `Captured`), `TakenAt` | What this server is ACTUALLY advertising. Built from `Advertised`, never from the description files |
+| `SurfaceFingerprintReader` + `SurfaceIdentity` | the service behind `--print-surface` and `GET /api/mcp/surface` | The app name is the host's to declare — only it knows which of its shapes is running |
 | `ToolUsage` | tool, timestamp, caller, scope, budgeted arguments + truncation, outcome, error, response size + budgeted body + truncation, tokens, duration | The record `IUsageSink` receives |
 | `ToolOutcome` | `Answered` / `Refused` / `Error` | Three states, because a guard that worked and a component that broke have different remedies |
 | `CallerIdentity` | `ClientName`, `ClientVersion`, `Model` (each `Captured`), `Transport` | |
@@ -77,6 +79,8 @@ fabricated failure, because the client is gone and a record of it would be a cal
 | `McpApplicationExtensions.AddMcpApplication()` | Registers the catalog, `AmbientCallerContext`, `TimeProvider.System`, `ToolCatalogOptions` and `NullUsageSink` as floors (`TryAdd`, so a host's real sink and its own ceiling survive) |
 | `McpApplicationExtensions.AddMcpApplication(ToolSurfaceOptions)` | The same core over a configured surface: each registered provider is wrapped in a `ToolSurfaceProvider` before the catalog is built |
 | `ToolSurfaceOptions.From(tools, directory, set)` | The three command-line strings a host reads, parsed once. The tool list is comma-separated |
+| `McpApplicationExtensions.AddSurfaceFingerprint(app)` | Registers the echo. Called by the host, which supplies the app name |
+| `SurfaceFingerprintReader.Read()` | The fingerprint of this process, now |
 | `PayloadBudget.Apply(text, budgetBytes)` | Cuts a payload to a byte budget and reports the exact loss. Lives in `Mcp.Contracts` since 2026-08-16, not `Mcp.Application`: the sandboxed reader needs the same clipper for its byte cap and may not reference the catalog, so the shared half moved to their common ancestor rather than being written twice |
 
 ## Rules worth knowing before changing this
@@ -120,6 +124,15 @@ fabricated failure, because the client is gone and a record of it would be a cal
 - **Descriptions are read once, at startup.** A wording that changed mid-session would make one
   session's traffic two populations. Re-reading is a restart, which for a subprocess-per-task client is
   free.
+- **The echo reports what is SERVED, not what was configured.** `SurfaceFingerprintReader` reads
+  `catalog.Advertised`; asking the description files instead would report the request and call it the
+  answer, which is exactly the confusion the echo exists to end. The hashes are computed here and
+  quoted — a consumer stores and compares the string this server printed, never re-derives it, because
+  a second canonicalisation is two implementations that must agree byte for byte forever.
+- **The fingerprint carries no build timestamp, and that is a decision.** .NET's deterministic builds
+  replace the PE link timestamp with a content hash, so a `BuiltAt` would be unobtainable or invented.
+  What the assembly genuinely reports — its informational version, which here carries the commit SHA —
+  travels as a `Captured`, and the two hashes are the build-independent identity of what is served.
 
 ## Dependencies
 
@@ -130,7 +143,13 @@ fabricated failure, because the client is gone and a record of it would be a cal
 ## Tests
 
 `tests/Mcp.Tests/ToolCatalogTests.cs`, `PayloadBudgetTests.cs`, `ToolDescriptionCatalogTests.cs`,
-`ToolSurfaceTests.cs`, and the configured-surface case in `SurfaceParityTests.cs`.
+`ToolSurfaceTests.cs`, `SurfaceFingerprintTests.cs`, and the configured-surface case in
+`SurfaceParityTests.cs`.
+
+`SurfaceFingerprintTests` pins: the echo is the text the catalog advertises rather than the file it came
+from; the hashes are stable across two builds of one configuration; a changed wording moves the
+descriptions hash and leaves the tools hash and the schema hashes alone; a smaller subset moves the
+tools hash; the process names itself; and the version is never a blank value claiming to be captured.
 
 The surface tests pin: a named set overrides and a tool with no file keeps its literal; a blank file
 falls back *and says so*; an unknown set is refused naming the sets that exist; a set does not see the

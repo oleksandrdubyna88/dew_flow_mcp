@@ -14,14 +14,16 @@ Definition of Done.
 | plan | status | scope |
 |---|---|---|
 | [PLAN_mcp_product.md](PLAN_mcp_product.md) | inversion and both transports built and parity-tested; the tool set is one placeholder | the three tool families, auth, public-repository hygiene (usage metering now shipped — see below) |
-| [PLAN_tool_surface_config.md](PLAN_tool_surface_config.md) | open; steps 1–3 shipped 2026-08-16, steps 4–6 outstanding | the tool surface as configuration — descriptions resolved from a file catalog with the compiled literal as the floor, a tool subset chosen at process start, a `SurfaceFingerprint` a caller can read back (`--print-surface`, `GET /api/mcp/surface`), and an additive `correlation` on `telemetry/v0` whose reader already expects it. Makes [PLAN_mcp_product.md](PLAN_mcp_product.md)'s *"a tool's description is a measured artefact"* actually runnable: today a wording is a C# literal in the binary, so A/B-ing ten of them is a rebuild each. Deliberately touches nothing inside `ToolCatalog`/`ToolSchema`/`IToolProvider`/`CatalogToolFunction`/`LocalLlmToolBridge` — one decorator ahead of the catalog, so parity holds by construction. **Shipped:** descriptions from files, the subset, the three host flags, and the guards that refuse a configuration which does not fit. **Left:** `SurfaceFingerprint`/`--print-surface`/`GET /api/mcp/surface` and the `correlation` field. Consumer: `dew_flow_benchmark · todo/PLAN_tool_benchmark.md` |
 | [PLAN_reliability_tail.md](PLAN_reliability_tail.md) | open; items 1 and 2 shipped 2026-08-16, items 3–7 outstanding | what the 24/7 audit found and the same-day fixes did not take. The one HIGH — the read cap that was only a telemetry budget — is closed by the streaming rewrite (two caps in the reader, a legible truncation marker, the true total). What remains: the payload budget's per-call cost, explicit Kestrel and request timeouts, what a never-restarting process does about its log and spool (the one item needing an operator decision), the inert `Mcp.Ui`, and the console sink's per-line lock |
 
-Implemented plans live in [`../research/`](../research/) — most recently
-[PLAN_usage_telemetry.md](../research/PLAN_usage_telemetry.md) (`ToolResult.Refused`, caller identity
-read from the protocol session, byte-budgeted payload capture, and a spool sink emitting the
-benchmark-owned `telemetry/v0` schema; 2026-08-15). Its open tail: the product host's registration
-line, and the ingest side that lives in `dew_flow_benchmark`.
+## Promoted
+
+Implemented plans live in [`../research/`](../research/), newest first.
+
+| plan | landed | what it delivered |
+|---|---|---|
+| [PLAN_tool_surface_config.md](../research/PLAN_tool_surface_config.md) | 2026-08-16 | The tool surface as configuration: descriptions read from `<dir>/<set>/<tool>.md` with the compiled literal as the floor, a tool subset chosen at process start, guards that stop the host on a configuration that does not fit, a `SurfaceFingerprint` readable via `--print-surface` and `GET /api/mcp/surface`, and an additive `correlation` on `telemetry/v0` stamped from `--correlation` and refused on the shared HTTP transport. `ToolCatalog`, `ToolSchema`, `IToolProvider`, `CatalogToolFunction` and `LocalLlmToolBridge` are untouched — one decorator ahead of the catalog, so parity holds by construction. Open tail: its own §7 questions (a set-able argument schema; a version stamp inside a set), and one finding for `dew_flow_benchmark` — its spool fixture can no longer be both today's emitter output and a pre-`correlation` line, so that repository needs a second fixture rather than a replaced one |
+| [PLAN_usage_telemetry.md](../research/PLAN_usage_telemetry.md) | 2026-08-15 | `ToolResult.Refused`, caller identity read from the protocol session, byte-budgeted payload capture, and a spool sink emitting the benchmark-owned `telemetry/v0` schema. Open tail: the product host's registration line, and the ingest side that lives in `dew_flow_benchmark` |
 
 ## This repository is public
 

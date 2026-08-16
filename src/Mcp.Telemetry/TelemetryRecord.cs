@@ -16,6 +16,7 @@ public sealed record TelemetryRecord(
     [property: JsonPropertyName("at")] DateTimeOffset At,
     [property: JsonPropertyName("emitter")] EmitterWire Emitter,
     [property: JsonPropertyName("caller")] CallerWire Caller,
+    [property: JsonPropertyName("correlation")] CorrelationWire Correlation,
     [property: JsonPropertyName("tool")] string Tool,
     [property: JsonPropertyName("scope")] string Scope,
     [property: JsonPropertyName("argumentsJson")] string ArgumentsJson,
@@ -30,12 +31,13 @@ public sealed record TelemetryRecord(
 {
     public const string V0 = "telemetry/v0";
 
-    public static TelemetryRecord From(ToolUsage usage, EmitterWire emitter) =>
+    public static TelemetryRecord From(ToolUsage usage, EmitterWire emitter, TelemetryCorrelation correlation) =>
         new(
             V0,
             usage.At,
             emitter,
             CallerWire.From(usage.Caller),
+            CorrelationWire.From(correlation),
             usage.ToolName,
             usage.Scope,
             usage.ArgumentsJson,
@@ -66,6 +68,76 @@ public sealed record EmitterWire(
     [property: JsonPropertyName("app")] string App,
     [property: JsonPropertyName("pid")] int Pid,
     [property: JsonPropertyName("machine")] string Machine);
+
+/// <summary>What unit of work the CALLER declared this process to be serving. Never inferred: an MCP
+/// server has no idea what a harness leg is, and giving it one would make the surface unshippable to
+/// anyone not running that harness. A real session declares nothing and reads as unattributed, which is
+/// the truth about it.
+/// <para><b>Additive within <c>telemetry/v0</c>.</b> The consumer already defaults an absent
+/// <c>correlation</c> object to unattributed and documents that it must, so no version bump and no
+/// rewrite of anything already spooled. The two <c>Unavailable</c> reasons are deliberately the SAME
+/// strings that consumer uses for an absent object — otherwise "this line predates the field" and "this
+/// caller declared nothing" would read as two different facts downstream when they are one.</para>
+/// </summary>
+public sealed record TelemetryCorrelation(Captured Leg, Captured Phase)
+{
+    public const string NoLeg = "the caller declared no leg";
+
+    public const string NoPhase = "the caller declared no phase";
+
+    public static TelemetryCorrelation None { get; } =
+        new(Captured.Unavailable(NoLeg), Captured.Unavailable(NoPhase));
+
+    /// <summary>Reads a <c>--correlation &lt;leg[/phase]&gt;</c> declaration. Blank declares nothing;
+    /// a leg with no phase is legitimate, so only the phase goes unavailable.</summary>
+    public static TelemetryCorrelation Of(string declaration)
+    {
+        var declared = declaration.Trim();
+        if (declared.Length == 0)
+        {
+            return None;
+        }
+
+        var split = declared.IndexOf('/');
+        return split < 0
+            ? new TelemetryCorrelation(Captured.Text(declared), Captured.Unavailable(NoPhase))
+            : new TelemetryCorrelation(
+                Captured.Text(declared[..split].Trim()),
+                DeclaredPhase(declared[(split + 1)..].Trim()));
+    }
+
+    /// <summary>The same, refusing a declaration a shared transport cannot honestly make.
+    /// <para>A process-level stamp is truthful only for a process serving ONE unit of work — a stdio
+    /// server launched per task. Stamped across the concurrent callers of an HTTP transport it would
+    /// INVENT an attribution, and an invented one is worse than none: a report that averages over rows
+    /// it wrongly believes belong to a leg cannot be told from a correct one. So it is refused rather
+    /// than quietly applied.</para></summary>
+    public static TelemetryCorrelation Declared(string declaration, bool sharedTransport)
+    {
+        if (declaration.Trim().Length > 0 && sharedTransport)
+        {
+            throw new InvalidOperationException(
+                $"--correlation '{declaration.Trim()}' cannot be honoured on the shared HTTP transport: one "
+                + "value stamped across concurrent callers invents an attribution. Use --stdio, where the "
+                + "process serves a single unit of work.");
+        }
+
+        return Of(declaration);
+    }
+
+    private static Captured DeclaredPhase(string phase) =>
+        phase.Length > 0 ? Captured.Text(phase) : Captured.Unavailable(NoPhase);
+}
+
+/// <summary>The correlation as it goes on the wire — the same `captured / value / reason` shape every
+/// other uncertain fact in this record uses.</summary>
+public sealed record CorrelationWire(
+    [property: JsonPropertyName("leg")] CapturedTextWire Leg,
+    [property: JsonPropertyName("phase")] CapturedTextWire Phase)
+{
+    public static CorrelationWire From(TelemetryCorrelation correlation) =>
+        new(CapturedTextWire.From(correlation.Leg), CapturedTextWire.From(correlation.Phase));
+}
 
 public sealed record CallerWire(
     [property: JsonPropertyName("clientName")] CapturedTextWire ClientName,

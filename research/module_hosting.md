@@ -14,19 +14,23 @@ against a local checkout, with no product and no index anywhere.**
 
 ```mermaid
 flowchart TD
-    ARGS["args: --root, --spool, --stdio<br/>--tools, --descriptions, --description-set"] --> MODE{"--stdio?"}
+    ARGS["args: --root, --spool, --stdio, --print-surface<br/>--tools, --descriptions, --description-set, --correlation"] --> MODE{"which shape?"}
 
-    MODE -->|yes| STDIO["Host.CreateApplicationBuilder"]
-    MODE -->|no| WEB["WebApplication.CreateBuilder"]
+    MODE -->|--print-surface| PRINT["Host.CreateApplicationBuilder<br/>fingerprint to stdout, exit 0"]
+    MODE -->|--stdio| STDIO["Host.CreateApplicationBuilder"]
+    MODE -->|default| WEB["WebApplication.CreateBuilder"]
 
+    PRINT --> LOGP["AddDewFlowLogging('mcp-surface', consoleToStdErr: true)"]
     STDIO --> LOGS["AddDewFlowLogging('mcp-stdio', consoleToStdErr: true)"]
     WEB --> LOGW["AddDewFlowLogging('mcp')"]
 
+    LOGP --> STACK
     LOGS --> STACK
     LOGW --> STACK
 
     STACK["AddToolStack"] --> APP["AddMcpApplication(surface)<br/>catalog + null sink"]
-    STACK --> TEL["AddTelemetrySpool<br/>replaces the sink only if --spool"]
+    STACK --> FP["AddSurfaceFingerprint(app)<br/>the echo"]
+    STACK --> TEL["AddTelemetrySpool(spool, app, correlation)<br/>replaces the sink only if --spool"]
     STACK --> BRIDGE["AddLocalLlmToolBridge"]
     STACK --> WS["AddWorkspaceTools(root)"]
 
@@ -41,10 +45,12 @@ flowchart TD
 | stdio transport | `--stdio` |
 | HTTP transport | default; `app.MapMcp()` |
 | Management API | `GET /api/mcp/health` → `{ "status": "ok" \| "degraded", "components": [ { "component", "healthy", "detail" } ] }` |
+| Surface echo | `GET /api/mcp/surface` → the `SurfaceFingerprint`; or `--print-surface`, which writes the same JSON to stdout and exits 0 without binding a port |
 | Workspace root | `--root <path>`, defaults to the current directory |
 | Telemetry | `--spool <path>`; absent ⇒ nothing is written |
 | Tool subset | `--tools a,b,c`; absent ⇒ every registered tool is advertised |
 | Descriptions | `--descriptions <dir>` `--description-set <name>`; reads `<dir>/<set>/<tool>.md`, absent ⇒ the literals compiled into the providers stand |
+| Correlation | `--correlation <leg[/phase]>`; stamps every telemetry record this process writes. **Refused on the HTTP transport** |
 
 The three surface flags are parsed once by `ToolSurfaceOptions.From` and handed to `AddMcpApplication`;
 a configuration that does not fit — a subset naming a tool nobody offers, a description file for a tool
@@ -52,6 +58,15 @@ this surface does not serve, a set named with no directory — stops the host du
 both sides. On the stdio host that message goes to **stderr**, so stdout stays clean for the protocol.
 Why any of this is configurable at all: [module_tool_dispatch.md](module_tool_dispatch.md) § *Rules
 worth knowing*.
+
+Two shapes of the host deliberately keep stdout for one thing only. `--stdio` gives it to the JSON-RPC;
+`--print-surface` gives it to the fingerprint, so the output is what a CI assertion can pipe into `jq`.
+Both send every log line to stderr. `--print-surface` opens no spool — a process that answers one
+question and exits must not start a telemetry writer.
+
+`--correlation` is refused rather than applied when the transport is the shared HTTP one: a
+process-level stamp is truthful only where the process serves a single unit of work, and one value
+across concurrent callers would invent an attribution. The refusal happens before anything is built.
 
 ## Logging
 

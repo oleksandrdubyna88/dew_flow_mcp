@@ -13,6 +13,10 @@ public sealed record SpoolOptions
     /// <summary>How this host names itself in every line — one machine runs several.</summary>
     public string App { get; init; } = "mcp";
 
+    /// <summary>What unit of work the caller declared this process to be serving. Unattributed by
+    /// default, which is the truth about every real session.</summary>
+    public TelemetryCorrelation Correlation { get; init; } = TelemetryCorrelation.None;
+
     /// <summary>Records held in memory while the writer drains. Bounded on purpose: an unbounded queue
     /// in front of a disk turns a slow disk into a memory leak, and the failure arrives much later and
     /// somewhere else.</summary>
@@ -37,6 +41,7 @@ public sealed class SpoolUsageSink : IUsageSink, IHealthContributor, IAsyncDispo
 
     private readonly Channel<TelemetryRecord> queue;
     private readonly EmitterWire emitter;
+    private readonly TelemetryCorrelation correlation;
     private readonly ILogger<SpoolUsageSink> logger;
     private readonly Task writer;
     private readonly string path;
@@ -50,6 +55,10 @@ public sealed class SpoolUsageSink : IUsageSink, IHealthContributor, IAsyncDispo
     {
         this.logger = logger;
         emitter = new EmitterWire(options.App, System.Environment.ProcessId, System.Environment.MachineName);
+
+        // Fixed for the life of the process, like the emitter beside it: the flag is a statement about
+        // what this PROCESS is serving, and a per-call correlation would be a different mechanism.
+        correlation = options.Correlation;
         queue = Channel.CreateBounded<TelemetryRecord>(new BoundedChannelOptions(options.Capacity)
         {
             // Wait, paired with TryWrite — which does NOT wait, it refuses. The obvious-looking
@@ -87,7 +96,7 @@ public sealed class SpoolUsageSink : IUsageSink, IHealthContributor, IAsyncDispo
 
     public Task RecordAsync(ToolUsage usage, CancellationToken cancellationToken)
     {
-        if (!queue.Writer.TryWrite(TelemetryRecord.From(usage, emitter)))
+        if (!queue.Writer.TryWrite(TelemetryRecord.From(usage, emitter, correlation)))
         {
             Interlocked.Increment(ref dropped);
         }

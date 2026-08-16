@@ -40,19 +40,21 @@ flowchart LR
 |---|---|
 | `IUsageSink` | The port. A port on purpose: this repository is public and must not carry a hardcoded telemetry destination |
 | `NullUsageSink` | The default. Forgetting to register a sink loses telemetry rather than breaking tool calls |
-| `SpoolOptions` | `Directory` (required), `App`, `Capacity` (default 4096) |
+| `SpoolOptions` | `Directory` (required), `App`, `Capacity` (default 4096), `Correlation` (default unattributed) |
+| `TelemetryCorrelation` | `Leg` + `Phase`, each a `Captured`. `Of("leg/phase")` parses a `--correlation` declaration; `Declared(…, sharedTransport)` refuses one the HTTP transport cannot honestly make. Fixed for the life of the process, like the emitter |
 | `SpoolUsageSink` | The implementation. Exposes `Path` (the file this run writes), `Dropped` (records the spool refused), `Broken` (breaker tripped **or** the writer task faulted) and `Check()` — it is an `IHealthContributor` as well as an `IUsageSink` |
 | `IHealthContributor` / `ComponentHealth` | The health port, in `Mcp.Contracts`. How a dead writer becomes visible from outside the process without `Mcp.Api` learning what a spool is |
-| `TelemetryRecord` + `EmitterWire`, `CallerWire`, `CapturedTextWire`, `CapturedNumberWire` | The `telemetry/v0` line |
+| `TelemetryRecord` + `EmitterWire`, `CallerWire`, `CorrelationWire`, `CapturedTextWire`, `CapturedNumberWire` | The `telemetry/v0` line |
 | `TelemetryJson` | The one serializer for the spool, so the emitted bytes have a single definition |
 
 ## Entry points
 
 | Member | Purpose |
 |---|---|
-| `McpTelemetryExtensions.AddTelemetrySpool(services, spoolDirectory, app)` | Opt-in. A blank directory registers nothing and the null floor stays. When it does register, the SAME instance is added as an `IHealthContributor` |
-| `TelemetryRecord.V0` | `"telemetry/v0"` — stamped on every line |
-| `TelemetryRecord.From(usage, emitter)` | The domain record as the wire shape |
+| `McpTelemetryExtensions.AddTelemetrySpool(services, spoolDirectory, app, correlation?)` | Opt-in. A blank directory registers nothing and the null floor stays. When it does register, the SAME instance is added as an `IHealthContributor`. The correlation defaults to unattributed, so every existing call site is unchanged |
+| `TelemetryRecord.V0` | `"telemetry/v0"` — stamped on every line, and still v0 after `correlation` because the field is additive |
+| `TelemetryRecord.From(usage, emitter, correlation)` | The domain record as the wire shape |
+| `TelemetryCorrelation.Declared(declaration, sharedTransport)` | What `Mcp.Host` calls for `--correlation`. Throws on the shared transport rather than stamping an invented attribution |
 
 ## The rules this module exists to keep
 
@@ -77,6 +79,11 @@ flowchart LR
   shared across runs cannot be handed over while it is being written.
 - **Retention is decided at emit.** Payload budgets are applied by `ToolCatalog` before the record
   arrives, so no line ever exceeds them and there is no clean-up job to write later.
+- **Correlation is declared, never inferred, and refused where it would be a lie.** The value comes from
+  `--correlation` and is stamped unchanged; it is honest only for a process serving one unit of work, so
+  the flag stops the host on the shared HTTP transport instead of being quietly applied. Its two
+  unattributed reasons are byte-identical to the ones the consumer substitutes for a missing object, so
+  "this line predates the field" and "this caller declared nothing" stay one fact downstream.
 
 ## Wire shape, in one line
 
@@ -85,6 +92,7 @@ flowchart LR
   "caller": { "clientName": {"captured","value","reason"}, "clientVersion": {…},
               "model": {"captured": false, "reason": "the MCP protocol carries no model identity…"},
               "transport": "stdio" },
+  "correlation": { "leg": {"captured","value","reason"}, "phase": {…} },
   "tool": "…", "scope": "…", "argumentsJson": "…", "argumentsTruncatedBytes": 0,
   "outcome": "answered|refused|error", "error": "",
   "responseChars": 42, "responseBody": "…", "responseTruncatedBytes": 0,
@@ -109,6 +117,21 @@ field shipping its reason, the file's path shape, non-blocking recording with ev
 written or counted, an unwritable directory that never fails a call, and an **unexpected** writer fault
 (a spool path the filesystem refuses with neither anticipated IO type) that is logged once and never
 surfaces as a throw at shutdown. `HealthTests.cs` covers the probe side.
+
+`TelemetryCorrelationTests.cs` covers the emitter half of the correlation contract: the parse (leg with
+and without a phase, a trailing separator, blank), the shared-transport refusal, the exact wire property
+names, and the exact unattributed reasons.
+
+**And a green suite here is not evidence about the contract itself** — each side compares its own list
+against itself. Verified live on 2026-08-16 by feeding a line this emitter actually wrote, correlation
+included, to the consumer's `TelemetryCodec.ReadLine` in `dew_flow_benchmark`: it parsed and came back
+**attributed**, and the historical fixture (written before the field existed) still reads as
+unattributed. That live step is what a green suite on either side cannot replace.
+
+One consequence for the consumer, recorded here because this change caused it: its
+`Fixtures/mcp-spool-v0.jsonl` is documented as being REPLACED from a fresh emitter run whenever the
+emitter's shape changes, but its backward-compatibility test needs a line from *before* `correlation`.
+One file can no longer be both. That repository needs a second fixture rather than a replaced one.
 
 ## What is not recorded
 

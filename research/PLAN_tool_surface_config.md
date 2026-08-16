@@ -1,26 +1,28 @@
 # PLAN — the tool surface as configuration: descriptions from files, a subset at startup, and a surface a caller can read back
 
-> Status: **open; build-order steps 1–3 shipped 2026-08-16, steps 4–6 outstanding.** Scope:
-> `src/Mcp.Application` (two decorators and a catalog), `src/Mcp.Contracts` (one wire record),
-> `src/Mcp.Telemetry` (one additive field), `src/Mcp.Host` (four flags), `src/Mcp.Api` (one endpoint),
-> `tests/Mcp.Tests`. **No change inside `ToolCatalog`, `ToolSchema`, `IToolProvider`,
-> `CatalogToolFunction` or `LocalLlmToolBridge`** — held; the diff touches none of the five.
+> Status: **IMPLEMENTED, 2026-08-16.** Scope: `src/Mcp.Application` (two decorators, a catalog and the
+> echo), `src/Mcp.Contracts` (one wire record), `src/Mcp.Telemetry` (one additive field),
+> `src/Mcp.Host` (five flags), `src/Mcp.Api` (one endpoint), `tests/Mcp.Tests`. **No change inside
+> `ToolCatalog`, `ToolSchema`, `IToolProvider`, `CatalogToolFunction` or `LocalLlmToolBridge`** — held;
+> the diff touches none of the five.
 >
-> What remains: **(4)** `SurfaceFingerprint` + `--print-surface` + `GET /api/mcp/surface`,
-> **(5)** `correlation` on `TelemetryRecord` + `--correlation`, **(6)** the `research/` sync for those two.
-> Of the cross-repository contract in §4, items 1, 2 and 5 are delivered; items 3 and 4 are steps 4–5.
+> All six build-order steps shipped, and all five items of the cross-repository contract in §4 are
+> delivered. Suite 72 → 105, 0 failed, Debug and Release. Deviations are recorded per step below; the
+> open tail is §7's two questions and one finding this change created for `dew_flow_benchmark` (its
+> spool fixture can no longer be both "what the emitter writes today" and "what it wrote before
+> `correlation` existed" — that repository needs a second fixture rather than a replaced one).
 >
 > Sibling half: `dew_flow_benchmark · todo/PLAN_tool_benchmark.md` — the harness that consumes this. A
 > change that crosses the boundary is named in both plans.
 >
-> Related: [PLAN_mcp_product.md](PLAN_mcp_product.md) — this plan is the machinery its
+> Related: [PLAN_mcp_product.md](../todo/PLAN_mcp_product.md) — this plan is the machinery its
 > *"the thing this repository actually sells"* section asks for;
-> [../research/PLAN_usage_telemetry.md](../research/PLAN_usage_telemetry.md) (the emitter this extends);
-> [../research/telemetry_v0_wire.md](../research/telemetry_v0_wire.md) (the schema, owned by the benchmark).
+> [PLAN_usage_telemetry.md](PLAN_usage_telemetry.md) (the emitter this extends);
+> [telemetry_v0_wire.md](telemetry_v0_wire.md) (the schema, owned by the benchmark).
 
 ## 1. The goal, before any solution
 
-[PLAN_mcp_product.md](PLAN_mcp_product.md) already states the thesis, and states it as settled:
+[PLAN_mcp_product.md](../todo/PLAN_mcp_product.md) already states the thesis, and states it as settled:
 
 > **The lesson is not "write nicer docs". It is that a tool's description is a measured artefact**, and a
 > change to it is an arm of the experiment matrix like any retrieval change.
@@ -195,9 +197,9 @@ rewrite of anything already spooled.
 - **No hot reload of descriptions.** §3.1's reasoning: a contract that changes under a live session is
   two populations in one log.
 - **No editing tools, and no knowledge of retrieval.** The boundary in
-  [PLAN_mcp_product.md](PLAN_mcp_product.md) Phase 4 is untouched; nothing here names a tool family.
+  [PLAN_mcp_product.md](../todo/PLAN_mcp_product.md) Phase 4 is untouched; nothing here names a tool family.
 - **No authentication work.** The HTTP transport is still open, still called out in
-  [PLAN_mcp_product.md](PLAN_mcp_product.md) Phase 2, and still not solved by this plan — noted so that
+  [PLAN_mcp_product.md](../todo/PLAN_mcp_product.md) Phase 2, and still not solved by this plan — noted so that
   a new endpoint here is not mistaken for a security review.
 
 ## 4. Build order
@@ -243,14 +245,52 @@ Six deviations, all deliberate:
 6. **One guard the plan did not list:** `--description-set` with no `--descriptions` stops the host. It
    would otherwise serve every compiled default while looking configured — and the puzzle would surface
    as two identical arms, days later.
-4. **`SurfaceFingerprint` + `--print-surface` + `GET /api/mcp/surface`** — the echo, both shapes.
-5. **`correlation` on `TelemetryRecord`, and `--correlation`** — additive field, process-level stamp,
-   refused on the HTTP transport.
-6. **Documentation** — `research/module_tool_dispatch.md` and `research/module_telemetry.md` updated,
-   `research/architecture.md`'s configuration section extended, `todo/README.md` table refreshed.
+4. ~~**`SurfaceFingerprint` + `--print-surface` + `GET /api/mcp/surface`**~~ **DONE 2026-08-16** — the
+   echo, both shapes.
+5. ~~**`correlation` on `TelemetryRecord`, and `--correlation`**~~ **DONE 2026-08-16** — additive field,
+   process-level stamp, refused on the HTTP transport.
+6. ~~**Documentation**~~ **DONE 2026-08-16** — `module_tool_dispatch.md`, `module_telemetry.md`,
+   `module_hosting.md`, `telemetry_v0_wire.md`, `architecture.md` (a new cross-cutting section and the
+   telemetry one), `todo/README.md`.
 
 Steps 1–3 are one shippable unit if that reads better in review; 4 and 5 are independent of each other and
 of 1–3.
+
+### What shipped in steps 4–6, and how it deviates
+
+Verified on live hosts, not only in the suite:
+
+- `--print-surface` emitted the fingerprint as the only thing on stdout and exited **0**; the
+  file-supplied description was echoed verbatim with the argument schema untouched.
+- `GET /api/mcp/surface` on a running HTTP host returned the same record. Across the two separate
+  processes the `toolsHash` was **identical** and the `descriptionsHash` **differed**, on exactly the
+  wording that differed — which is the property the hashes exist to have.
+- `--correlation cell-17/Verify` on a real stdio session produced a spool line carrying
+  `"correlation":{"leg":{"captured":true,"value":"cell-17",…},"phase":{…"Verify"…}}`.
+
+Three deviations:
+
+1. **No `BuiltAt`.** .NET's deterministic builds replace the PE link timestamp with a content hash, so
+   a build time would be unobtainable or invented, and rendering a value the thing never answered is
+   what `Captured` exists to prevent. The record carries `Version` as a `Captured` instead — the
+   assembly's informational version, which here resolves to `1.0.0+<commit sha>` — plus `TakenAt` from
+   the injected clock. The two hashes remain the build-independent identity of what is served.
+2. **`AddSurfaceFingerprint(app)` is its own registration**, not a parameter on `AddMcpApplication`.
+   Only the host knows which of its shapes is running (`mcp`, `mcp-stdio`, `mcp-surface`), and
+   `AddToolStack` already carries that name.
+3. **The correlation object is ALWAYS written, never omitted when unattributed** — and its two
+   `Unavailable` reasons are byte-identical to the strings the consumer substitutes for an absent
+   object. The record's own doctrine is that `captured` ships even when false; if the emitter omitted
+   the object instead, "this line predates the field" and "this caller declared nothing" would arrive
+   as two different facts downstream when they are one.
+
+**The cross-repository contract was checked live, because a green suite on either side is not evidence
+about it.** A line this emitter actually wrote — correlation included — was fed to the consumer's
+`TelemetryCodec.ReadLine` in `dew_flow_benchmark`. It parsed, and
+`A_line_written_before_correlation_existed_still_reads_and_reads_as_unattributed` failed with
+*"Expected record.Correlation.IsAttributed to be False … but found True"*, which is the proof: the real
+consumer read the real field into its own domain type. The historical fixture was restored and that
+repository's telemetry suite is 19/19 green.
 
 ## 5. Test plan
 
@@ -285,13 +325,13 @@ xUnit v3 executables only, never `dotnet test`.
       unchanged — the diff proves the seam was sufficient.
 - [x] Both presentations still advertise byte-identical schemas **under configuration**, asserted
       (`SurfaceParityTests.Both_presentations_still_match_after_a_subset_and_a_description_set_are_applied`).
-- [ ] `--print-surface` and `GET /api/mcp/surface` report exactly what is advertised, with hashes.
+- [x] `--print-surface` and `GET /api/mcp/surface` report exactly what is advertised, with hashes —
+      observed on both live hosts.
 - [x] A configuration that does not fit stops the host at startup, naming both sides.
-- [ ] `telemetry/v0` carries an optional correlation; lines without one still read; the benchmark's
-      committed fixture is unaffected.
+- [x] `telemetry/v0` carries an optional correlation; lines without one still read; the benchmark's
+      committed fixture is unaffected — its telemetry suite is 19/19 green against the original bytes.
 - [x] Nothing in this repository names a benchmark, a leg, a lane, or retrieval.
-- [x] `research/` module docs and `todo/README.md` updated **for steps 1–3**; steps 4–5 carry their own
-      doc pass.
+- [x] `research/` module docs and `todo/README.md` updated.
 
 ## 7. Open questions
 

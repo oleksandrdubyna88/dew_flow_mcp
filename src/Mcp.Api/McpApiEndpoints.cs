@@ -1,3 +1,4 @@
+using Mcp.Application;
 using Mcp.Contracts;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -20,6 +21,12 @@ public static class McpApiEndpoints
         // writer behind it — the probe answered for the route, not for the server.
         group.MapGet("/health", ([FromServices] IEnumerable<IHealthContributor> components) =>
             TypedResults.Ok(McpApiHealth.From(components)));
+
+        // Declare and echo, never assume: what a configuration ASKED for and what this process is
+        // SERVING are two different facts, and only the second one explains a result. The hashes are
+        // computed server-side and quoted — a consumer compares the string, never re-derives it.
+        group.MapGet("/surface", ([FromServices] SurfaceFingerprintReader surface) =>
+            TypedResults.Ok(surface.Read()));
 
         return endpoints;
     }
