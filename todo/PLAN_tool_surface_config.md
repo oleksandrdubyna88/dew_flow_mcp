@@ -1,9 +1,14 @@
 # PLAN — the tool surface as configuration: descriptions from files, a subset at startup, and a surface a caller can read back
 
-> Status: **plan only, nothing implemented yet.** Scope: `src/Mcp.Application` (two decorators and a
-> catalog), `src/Mcp.Contracts` (one wire record), `src/Mcp.Telemetry` (one additive field),
-> `src/Mcp.Host` (four flags), `src/Mcp.Api` (one endpoint), `tests/Mcp.Tests`. **No change inside
-> `ToolCatalog`, `ToolSchema`, `IToolProvider`, `CatalogToolFunction` or `LocalLlmToolBridge`.**
+> Status: **open; build-order steps 1–3 shipped 2026-08-16, steps 4–6 outstanding.** Scope:
+> `src/Mcp.Application` (two decorators and a catalog), `src/Mcp.Contracts` (one wire record),
+> `src/Mcp.Telemetry` (one additive field), `src/Mcp.Host` (four flags), `src/Mcp.Api` (one endpoint),
+> `tests/Mcp.Tests`. **No change inside `ToolCatalog`, `ToolSchema`, `IToolProvider`,
+> `CatalogToolFunction` or `LocalLlmToolBridge`** — held; the diff touches none of the five.
+>
+> What remains: **(4)** `SurfaceFingerprint` + `--print-surface` + `GET /api/mcp/surface`,
+> **(5)** `correlation` on `TelemetryRecord` + `--correlation`, **(6)** the `research/` sync for those two.
+> Of the cross-repository contract in §4, items 1, 2 and 5 are delivered; items 3 and 4 are steps 4–5.
 >
 > Sibling half: `dew_flow_benchmark · todo/PLAN_tool_benchmark.md` — the harness that consumes this. A
 > change that crosses the boundary is named in both plans.
@@ -21,7 +26,7 @@
 > change to it is an arm of the experiment matrix like any retrieval change.
 
 That sentence cannot currently be acted on. A description is a C# string literal compiled into the binary
-(`src/Workspace.Application/WorkspaceToolProvider.cs:19-22`), and the catalog is assembled once at startup
+(`src/Workspace.Application/WorkspaceToolProvider.cs:19-24`), and the catalog is assembled once at startup
 from every registered provider with no way to serve fewer (`src/Mcp.Application/ToolCatalog.cs:61-72`).
 So A/B-ing a wording means a branch and a rebuild, and A/B-ing a tool subset is not possible at all. A
 matrix of ten wordings is, in practice, not runnable.
@@ -48,7 +53,7 @@ what a running server is actually advertising. Nothing in this plan names a benc
 
 | capability | state | where |
 |---|---|---|
-| A tool's description | a `required string` on a record, authored as a C# literal in the provider | `src/Mcp.Contracts/ToolSchema.cs:12`, `src/Workspace.Application/WorkspaceToolProvider.cs:19-22` |
+| A tool's description | a `required string` on a record, authored as a C# literal in the provider | `src/Mcp.Contracts/ToolSchema.cs:12`, `src/Workspace.Application/WorkspaceToolProvider.cs:19-24` |
 | The catalog | built once from `IEnumerable<IToolProvider>`, flattened, name-ordered, frozen; duplicate names throw at construction, naming both providers | `src/Mcp.Application/ToolCatalog.cs:46-72, 199-214` |
 | Serving a subset per session or per call | **does not exist** — `Advertised` is one process-wide immutable list | `src/Mcp.Application/ToolCatalog.cs:64, 72` |
 | The two presentations | protocol and bridge, both projections of `catalog.Advertised`; the bridge declares no tool of its own | `src/Mcp.Bridge/LocalLlmToolBridge.cs:16-18`, `src/Mcp.Server/CatalogToolFunction.cs` |
@@ -197,12 +202,47 @@ rewrite of anything already spooled.
 
 ## 4. Build order
 
-1. **`ToolDescriptionCatalog`** — file resolution, sets as subfolders, never-empty floor, literal
-   fallback. Pure, no DI, unit-tested against a temp directory.
-2. **`ToolSurfaceProvider` + `AddMcpApplication` overload** — subset filtering, description override,
-   refusal of a tool outside the surface, startup refusal of a configuration that does not fit.
-3. **Host flags** — `--tools`, `--descriptions`, `--description-set`, using the existing `ReadOption`
-   helper and the existing `AddToolStack` seam.
+1. ~~**`ToolDescriptionCatalog`**~~ **DONE 2026-08-16** — file resolution, sets as subfolders,
+   never-empty floor, literal fallback. Pure, no DI, unit-tested against a temp directory.
+2. ~~**`ToolSurfaceProvider` + `AddMcpApplication` overload**~~ **DONE 2026-08-16** — subset filtering,
+   description override, refusal of a tool outside the surface, startup refusal of a configuration that
+   does not fit.
+3. ~~**Host flags**~~ **DONE 2026-08-16** — `--tools`, `--descriptions`, `--description-set`, using the
+   existing `ReadOption` helper and the existing `AddToolStack` seam.
+
+### What shipped in steps 1–3, and how it deviates from the text above
+
+Suite 72 → 90 tests, 0 failed, in Debug **and** Release. Verified end to end on the real stdio
+transport: a `tools/list` over JSON-RPC returned `rt_read_local_file` carrying the description from
+`<dir>/concise-v1/rt_read_local_file.md`, argument schema untouched; `--tools nope` stopped the host in
+`StartAsync` with *"The tool subset names nope, which no registered provider offers. This server offers:
+rt_read_local_file."* on stderr, stdout clean.
+
+Six deviations, all deliberate:
+
+1. **The set is chosen at LOAD, not per call.** `ToolDescriptionCatalog.Load(directory, set)` +
+   `DescriptionFor(tool, builtIn)`, rather than §3.1's `DescriptionFor(tool, set, builtIn)`. This makes
+   *"read once, at startup"* structural instead of a convention, and puts the unknown-set refusal where
+   the files are actually read.
+2. **`ToolDescriptionCatalog.None` replaces the nullable.** §3.2's decorator took
+   `ToolDescriptionCatalog?`; the family's no-null rule wants a typed empty value, and `None` is also
+   what makes "no catalog named" and "a catalog with no file for this tool" one code path.
+3. **The three settings travel as one `ToolSurfaceOptions` record**, not three parameters on
+   `AddMcpApplication`. Its `From(tools, directory, set)` holds the only real parsing (the comma-separated
+   list) as a pure function the suite covers, so the host keeps its single `ReadOption` helper and
+   nothing is duplicated to make the flags testable.
+4. **An ignored description file is reported, not merely tolerated.** The plan said a blank or unreadable
+   file yields the literal and said nothing about saying so. `Ignored` carries each one with its reason
+   and registration logs them at startup: an override somebody authored and this server dropped is the
+   same invisible failure §3.2's guards exist to prevent.
+5. **The fit guard measures against TWO different sets, and conflating them was a real defect** the
+   suite caught before it shipped. A subset typo is answered with what the providers OFFER — answering
+   with the already-filtered list hides exactly the tools the operator was choosing between. A
+   description file is answered with what the surface SERVES, since a file for an excluded tool is a
+   mismatch precisely against the narrowed surface.
+6. **One guard the plan did not list:** `--description-set` with no `--descriptions` stops the host. It
+   would otherwise serve every compiled default while looking configured — and the puzzle would surface
+   as two identical arms, days later.
 4. **`SurfaceFingerprint` + `--print-surface` + `GET /api/mcp/surface`** — the echo, both shapes.
 5. **`correlation` on `TelemetryRecord`, and `--correlation`** — additive field, process-level stamp,
    refused on the HTTP transport.
@@ -237,19 +277,21 @@ xUnit v3 executables only, never `dotnet test`.
 
 ## 6. Definition of Done
 
-- [ ] A tool's description can be changed without recompiling, and the compiled literal remains the
+- [x] A tool's description can be changed without recompiling, and the compiled literal remains the
       default when no catalog is named.
-- [ ] A server can be started with a subset of its tools, and a tool outside that subset is refused
+- [x] A server can be started with a subset of its tools, and a tool outside that subset is refused
       rather than dispatched.
-- [ ] `ToolCatalog`, `ToolSchema`, `IToolProvider`, `CatalogToolFunction` and `LocalLlmToolBridge` are
+- [x] `ToolCatalog`, `ToolSchema`, `IToolProvider`, `CatalogToolFunction` and `LocalLlmToolBridge` are
       unchanged — the diff proves the seam was sufficient.
-- [ ] Both presentations still advertise byte-identical schemas **under configuration**, asserted.
+- [x] Both presentations still advertise byte-identical schemas **under configuration**, asserted
+      (`SurfaceParityTests.Both_presentations_still_match_after_a_subset_and_a_description_set_are_applied`).
 - [ ] `--print-surface` and `GET /api/mcp/surface` report exactly what is advertised, with hashes.
-- [ ] A configuration that does not fit stops the host at startup, naming both sides.
+- [x] A configuration that does not fit stops the host at startup, naming both sides.
 - [ ] `telemetry/v0` carries an optional correlation; lines without one still read; the benchmark's
       committed fixture is unaffected.
-- [ ] Nothing in this repository names a benchmark, a leg, a lane, or retrieval.
-- [ ] `research/` module docs and `todo/README.md` updated.
+- [x] Nothing in this repository names a benchmark, a leg, a lane, or retrieval.
+- [x] `research/` module docs and `todo/README.md` updated **for steps 1–3**; steps 4–5 carry their own
+      doc pass.
 
 ## 7. Open questions
 

@@ -4,6 +4,7 @@ using Mcp.Application;
 using Mcp.Bridge;
 using Mcp.Contracts;
 using Mcp.Server;
+using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using Workspace.Application;
 using Xunit;
@@ -89,6 +90,50 @@ public sealed class SurfaceParityTests
             .Select(d => d.Function.Name).Should().Contain("brand_new_tool");
     }
 
+    [Fact]
+    public void Both_presentations_still_match_after_a_subset_and_a_description_set_are_applied()
+    {
+        var catalog = ConfiguredCatalog(out var overriddenDescription);
+        var bridge = Bridge(catalog);
+
+        // The configuration is applied by a decorator AHEAD of the catalog, so parity should hold by
+        // construction — both surfaces still project one Advertised list. This is the test that would
+        // catch it being applied to one presentation and not the other.
+        catalog.Advertised.Select(t => t.Name).Should().Equal("kept");
+        bridge.ToolDefinitions.Select(d => d.Function.Name).Should().Equal("kept");
+
+        var fromBridge = bridge.ToolDefinitions.Single();
+        fromBridge.Function.Description.Should().Be(overriddenDescription,
+            "a model must read one wording for a tool, whichever surface it arrives through");
+        fromBridge.Function.Description.Should().Be(catalog.Advertised.Single().Description);
+        fromBridge.Function.Parameters.GetRawText()
+            .Should().Be(catalog.Advertised.Single().InputSchema.GetRawText());
+    }
+
+    /// <summary>A catalog serving one of two tools, with that tool's description read from a file.
+    /// </summary>
+    private static ToolCatalog ConfiguredCatalog(out string overriddenDescription)
+    {
+        overriddenDescription = "the wording an operator supplied without a rebuild";
+
+        var descriptions = Directory.CreateTempSubdirectory("mcp-parity-descriptions").FullName;
+        var set = Path.Combine(descriptions, "concise-v1");
+        Directory.CreateDirectory(set);
+        File.WriteAllText(Path.Combine(set, "kept.md"), overriddenDescription);
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IToolProvider>(new TwoToolProvider());
+        services.AddMcpApplication(new ToolSurfaceOptions
+        {
+            Tools = new HashSet<string>(["kept"], StringComparer.Ordinal),
+            DescriptionsDirectory = descriptions,
+            DescriptionSet = "concise-v1",
+        });
+
+        return services.BuildServiceProvider().GetRequiredService<ToolCatalog>();
+    }
+
     /// <summary>The bridge as a host with no model to declare — the honest default, and the one that
     /// records the model as not captured rather than inventing one.</summary>
     private static LocalLlmToolBridge Bridge(ToolCatalog catalog) =>
@@ -107,6 +152,29 @@ public sealed class SurfaceParityTests
             new Workspace.Infrastructure.SandboxedFileReaderOptions(),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<Workspace.Infrastructure.SandboxedFileReader>.Instance);
         return ToolCatalogTests.Build(new WorkspaceToolProvider(reader));
+    }
+
+    /// <summary>Two tools, so a configured subset has something to leave out.</summary>
+    private sealed class TwoToolProvider : IToolProvider
+    {
+        public IReadOnlyList<ToolSchema> Tools { get; } =
+        [
+            new ToolSchema
+            {
+                Name = "kept",
+                Description = "the literal compiled into this provider",
+                InputSchema = ToolSchema.ParseSchema("""{"type":"object","properties":{"a":{"type":"string"}}}"""),
+            },
+            new ToolSchema
+            {
+                Name = "dropped",
+                Description = "excluded by the configured subset",
+                InputSchema = ToolSchema.ParseSchema("""{"type":"object"}"""),
+            },
+        ];
+
+        public Task<ToolResult> InvokeAsync(ToolCall call, CancellationToken cancellationToken) =>
+            Task.FromResult(ToolResult.Success("ok"));
     }
 
     private sealed class ExtraProvider : IToolProvider

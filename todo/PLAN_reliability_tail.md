@@ -104,14 +104,24 @@ before the document is disposed.
 
 ### 3. The payload budget pays an O(n log n) cost on every call — MEDIUM
 
-`src/Mcp.Application/PayloadBudget.cs:18-33` runs `Encoding.UTF8.GetByteCount(text)` unconditionally,
-and `LongestPrefixWithin:38-62` binary-searches with a fresh `GetByteCount` over a growing prefix each
-step. It is called twice per tool call from `ToolCatalog.RecordAsync` — for arguments and for the
-response. On small payloads this is noise; composed with item 1 it becomes a real per-call cost on
-the hot path, paid to produce a record that will be truncated anyway.
+`src/Mcp.Contracts/PayloadBudget.cs:24-39` runs `Encoding.UTF8.GetByteCount(text)` unconditionally —
+the fits-the-budget early return at `:32` is reached only *after* the full count is paid — and
+`LongestPrefixWithin:44-68` binary-searches with a fresh `GetByteCount` over a growing prefix each
+step. It is called twice per tool call from `ToolCatalog.RecordAsync`
+(`src/Mcp.Application/ToolCatalog.cs:155-158`) — for arguments and for the response. On small payloads
+this is noise; composed with item 1 it becomes a real per-call cost on the hot path, paid to produce a
+record that will be truncated anyway.
 
-**Fix:** short-circuit when the payload is already under budget by a cheap check (length in chars
-bounds bytes from below), and avoid re-counting from zero inside the search.
+*(The type moved to `Mcp.Contracts` when item 1 shipped — deviation 3 above. This finding was written
+against its old home in `Mcp.Application`.)*
+
+**Fix:** short-circuit on `text.Length` before counting, and avoid re-counting from zero inside the
+search. **The cheap check must use the UPPER bound, and the original wording of this item named the
+wrong one:** chars bound bytes from *below* (`bytes >= chars`), which proves only the reject case —
+`text.Length > budgetBytes` means the payload certainly overflows. What proves "already fits" without
+counting is that UTF-8 never spends more than 3 bytes per `char` (a 4-byte codepoint is two chars), so
+`text.Length <= budgetBytes / 3` is the accept. Both are worth having; only the second removes the
+count from the hot path's common case.
 
 ### 4. No explicit Kestrel or request timeouts on the HTTP transport — MEDIUM
 

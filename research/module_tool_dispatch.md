@@ -60,6 +60,9 @@ fabricated failure, because the client is gone and a record of it would be a cal
 | `ToolCall` | `Name`, `Arguments` (`JsonElement`) | |
 | `ToolResult` | closed union `Ok` / `Refused` / `Failed` | `Match` takes three arms; `Text` and (on providers' side) the refusal flag are the shared projections |
 | `ToolCatalogOptions` | `CallTimeout` (default **2 minutes**) | What the catalog imposes on every call. Longer than the clients' own per-call timeouts, so the ceiling only ever reclaims calls whose caller has gone; `Timeout.InfiniteTimeSpan` disables it and hands the documented reason-plus-watchdog pair to the host. A non-positive value stops the host at construction |
+| `ToolSurfaceOptions` | `Tools` (empty = every tool), `DescriptionsDirectory`, `DescriptionSet` | Which tools this process serves and where their wording comes from. All three default to "nothing configured", and `IsEverything` then takes the untouched registration path — the shipped default is the same code, not merely equivalent behaviour |
+| `ToolDescriptionCatalog` | `Load(directory, set)`, `DescriptionFor(tool, builtIn)`, `NamedTools`, `Ignored` | Descriptions read once from `<directory>/<set>/<tool>.md`. The compiled literal is the FLOOR: a missing, blank or unreadable file yields it, and the reason is carried on `Ignored` rather than dropped |
+| `ToolSurfaceProvider` | `internal`, decorates one `IToolProvider` | Filters to the subset and applies the description override with `with { Description = … }`. Sits AHEAD of the catalog — see the rule below |
 | `ToolUsage` | tool, timestamp, caller, scope, budgeted arguments + truncation, outcome, error, response size + budgeted body + truncation, tokens, duration | The record `IUsageSink` receives |
 | `ToolOutcome` | `Answered` / `Refused` / `Error` | Three states, because a guard that worked and a component that broke have different remedies |
 | `CallerIdentity` | `ClientName`, `ClientVersion`, `Model` (each `Captured`), `Transport` | |
@@ -72,6 +75,8 @@ fabricated failure, because the client is gone and a record of it would be a cal
 | `ToolCatalog.Advertised` | Every tool, name-ordered so the surface is stable across restarts |
 | `ToolCatalog.InvokeAsync(ToolCall, ct)` | The dispatch point. Called by every presentation |
 | `McpApplicationExtensions.AddMcpApplication()` | Registers the catalog, `AmbientCallerContext`, `TimeProvider.System`, `ToolCatalogOptions` and `NullUsageSink` as floors (`TryAdd`, so a host's real sink and its own ceiling survive) |
+| `McpApplicationExtensions.AddMcpApplication(ToolSurfaceOptions)` | The same core over a configured surface: each registered provider is wrapped in a `ToolSurfaceProvider` before the catalog is built |
+| `ToolSurfaceOptions.From(tools, directory, set)` | The three command-line strings a host reads, parsed once. The tool list is comma-separated |
 | `PayloadBudget.Apply(text, budgetBytes)` | Cuts a payload to a byte budget and reports the exact loss. Lives in `Mcp.Contracts` since 2026-08-16, not `Mcp.Application`: the sandboxed reader needs the same clipper for its byte cap and may not reference the catalog, so the shared half moved to their common ancestor rather than being written twice |
 
 ## Rules worth knowing before changing this
@@ -96,6 +101,25 @@ fabricated failure, because the client is gone and a record of it would be a cal
 - **Retention is decided at emit.** The spool never holds more than the budget, so there is no later
   clean-up job to forget.
 - **The clock is injected** (`TimeProvider`), so a record's timestamp is testable.
+- **The surface is configured AHEAD of the catalog, never inside it.** `ToolSurfaceProvider` decorates
+  each registered provider before `ToolCatalog` is constructed, so the catalog, `ToolSchema`,
+  `IToolProvider`, `CatalogToolFunction` and `LocalLlmToolBridge` are untouched and parity between the
+  two presentations holds *by construction*: both still project one `Advertised` list, which is simply
+  now configurable. A description is a **measured artefact** — rewriting one routing instruction moved a
+  score 16.5 points of 63 while quadrupling the toolbox moved it 1 — and one compiled into the binary
+  cannot be A/B-ed without a rebuild.
+- **A configuration that does not fit stops the host, naming both sides.** A subset naming a tool nobody
+  offers is answered with what the providers OFFER; a description file for a tool the subset excluded is
+  answered with what this surface SERVES. The two sets are deliberately different: telling an operator
+  who typo'd `--tools` only the already-narrowed list hides exactly the tools they were choosing between
+  (a real defect, caught by `ToolSurfaceTests` before it shipped).
+- **A description is never empty, and never silently ignored.** A missing, blank or unreadable file
+  falls back to the compiled literal, because a tool with no description is a tool no agent can route
+  to. The fallback is logged with its reason at startup — an override somebody wrote and this server
+  dropped is the same invisible failure the guards above exist to prevent.
+- **Descriptions are read once, at startup.** A wording that changed mid-session would make one
+  session's traffic two populations. Re-reading is a restart, which for a subprocess-per-task client is
+  free.
 
 ## Dependencies
 
@@ -105,7 +129,19 @@ fabricated failure, because the client is gone and a record of it would be a cal
 
 ## Tests
 
-`tests/Mcp.Tests/ToolCatalogTests.cs`, `PayloadBudgetTests.cs`. They pin: every outcome reaches the sink
+`tests/Mcp.Tests/ToolCatalogTests.cs`, `PayloadBudgetTests.cs`, `ToolDescriptionCatalogTests.cs`,
+`ToolSurfaceTests.cs`, and the configured-surface case in `SurfaceParityTests.cs`.
+
+The surface tests pin: a named set overrides and a tool with no file keeps its literal; a blank file
+falls back *and says so*; an unknown set is refused naming the sets that exist; a set does not see the
+files of the directory around it; only the named tools are advertised; a call to a tool outside the
+surface is **refused** and never reaches the provider; overriding a description carries the argument
+schema through byte-identical; both mismatched-configuration cases stop the host naming both sides; a
+set named with no directory stops the host; and — the guarantee the whole placement rests on — the
+protocol surface and the bridge still advertise identical names, schemas and description text **under
+configuration**.
+
+`ToolCatalogTests`/`PayloadBudgetTests` pin: every outcome reaches the sink
 as its own state, an unknown tool is metered too, a provider that THROWS is answered as a failure and
 still reaches the sink, a tool that never returns is cut off at the ceiling (and metered), a ceiling that
 cannot be applied stops the host instead of throwing per call, a throwing sink loses the record and not

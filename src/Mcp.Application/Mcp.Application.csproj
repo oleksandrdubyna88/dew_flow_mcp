@@ -12,4 +12,11 @@
     <ProjectReference Include="..\Mcp.Contracts\Mcp.Contracts.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- ToolSurfaceProvider is internal on purpose: it is a decorator this module applies, never a type
+         a host composes. The suite still asserts its refusal directly, because reaching it through DI
+         would only prove the wiring. -->
+    <InternalsVisibleTo Include="Mcp.Tests" />
+  </ItemGroup>
+
 </Project>

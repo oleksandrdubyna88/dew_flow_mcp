@@ -14,7 +14,7 @@ against a local checkout, with no product and no index anywhere.**
 
 ```mermaid
 flowchart TD
-    ARGS["args: --root, --spool, --stdio"] --> MODE{"--stdio?"}
+    ARGS["args: --root, --spool, --stdio<br/>--tools, --descriptions, --description-set"] --> MODE{"--stdio?"}
 
     MODE -->|yes| STDIO["Host.CreateApplicationBuilder"]
     MODE -->|no| WEB["WebApplication.CreateBuilder"]
@@ -25,7 +25,7 @@ flowchart TD
     LOGS --> STACK
     LOGW --> STACK
 
-    STACK["AddToolStack"] --> APP["AddMcpApplication<br/>catalog + null sink"]
+    STACK["AddToolStack"] --> APP["AddMcpApplication(surface)<br/>catalog + null sink"]
     STACK --> TEL["AddTelemetrySpool<br/>replaces the sink only if --spool"]
     STACK --> BRIDGE["AddLocalLlmToolBridge"]
     STACK --> WS["AddWorkspaceTools(root)"]
@@ -43,6 +43,15 @@ flowchart TD
 | Management API | `GET /api/mcp/health` → `{ "status": "ok" \| "degraded", "components": [ { "component", "healthy", "detail" } ] }` |
 | Workspace root | `--root <path>`, defaults to the current directory |
 | Telemetry | `--spool <path>`; absent ⇒ nothing is written |
+| Tool subset | `--tools a,b,c`; absent ⇒ every registered tool is advertised |
+| Descriptions | `--descriptions <dir>` `--description-set <name>`; reads `<dir>/<set>/<tool>.md`, absent ⇒ the literals compiled into the providers stand |
+
+The three surface flags are parsed once by `ToolSurfaceOptions.From` and handed to `AddMcpApplication`;
+a configuration that does not fit — a subset naming a tool nobody offers, a description file for a tool
+this surface does not serve, a set named with no directory — stops the host during `StartAsync`, naming
+both sides. On the stdio host that message goes to **stderr**, so stdout stays clean for the protocol.
+Why any of this is configurable at all: [module_tool_dispatch.md](module_tool_dispatch.md) § *Rules
+worth knowing*.
 
 ## Logging
 
