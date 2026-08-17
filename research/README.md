@@ -18,6 +18,8 @@ most valuable part of the record.
 | [module_telemetry.md](module_telemetry.md) | `Mcp.Telemetry` — per-call recording, the spool, and why it can never fail a call |
 | [module_hosting.md](module_hosting.md) | `Mcp.Host` + `Mcp.Api` + `ServiceDefaults` — composition and logging |
 | [PLAN_usage_telemetry.md](PLAN_usage_telemetry.md) | Design record, IMPLEMENTED 2026-08-15 — the third `ToolResult` case, caller identity, byte-budgeted capture, the spool sink |
+| [PLAN_tool_surface_config.md](PLAN_tool_surface_config.md) | Design record, IMPLEMENTED 2026-08-16 — the tool surface as configuration: descriptions from `<dir>/<set>/<tool>.md`, a subset chosen at process start, the `SurfaceFingerprint` behind `--print-surface` and `GET /api/mcp/surface`, and `correlation` on `telemetry/v0`. One decorator ahead of the catalog, so parity holds by construction |
+| [PLAN_reliability_tail.md](PLAN_reliability_tail.md) | Design record, IMPLEMENTED 2026-08-16 (reconciled 2026-08-17) — what the 24/7 audit found and the same-day fixes did not take: the streaming read cap, the undisposed `JsonDocument`, the payload budget's per-call cost, explicit Kestrel and request timeouts with **no** global policy (it would have severed the SSE stream), the console sink's per-line lock, and a file per run segmented at UTC midnight |
 | [telemetry_v0_wire.md](telemetry_v0_wire.md) | The `telemetry/v0` line this server emits, as implemented — the emitter half of a contract owned by `dew_flow_benchmark` |
 
 ## Cross-repository citations
