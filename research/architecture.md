@@ -258,6 +258,6 @@ Stated because a knowledge base that only describes what is there reads like a c
 - **Tokens** are never counted; `ToolUsage.Tokens` is always *not captured* on this surface.
 - **A LICENSE, THIRD-PARTY-NOTICES and a version policy** — required before the repository is advertised.
 - **Explicit HTTP timeouts and a retention owner for `logs/` and the spool** —
-  [../todo/PLAN_reliability_tail.md](../todo/PLAN_reliability_tail.md), items 4 and 5.
+  [PLAN_reliability_tail.md](PLAN_reliability_tail.md), items 4 and 5.
 - **A bound on a provider that ignores its cancellation token.** The catalog cancels and answers the
   caller at the ceiling; work that never observes the token keeps running behind that answer.

@@ -185,7 +185,7 @@ than a retrofit.
   binds it to a LAN, and somebody will.
 - **Explicit Kestrel and request timeouts.** The web host relies on framework defaults, which the shared
   rule counts as an unnamed decision. Tracked as item 4 of
-  [../todo/PLAN_reliability_tail.md](../todo/PLAN_reliability_tail.md), where it composes with the
+  [PLAN_reliability_tail.md](PLAN_reliability_tail.md), where it composes with the
   catalog's own 2-minute per-call ceiling.
 - **Retention for `logs/` and the spool.** One file per run is correct, but the rotation that rule relies
   on IS the restart, and this deployment's premise is a process that does not restart (item 5 of the same

@@ -1,11 +1,25 @@
 # PLAN — the reliability tail the 24/7 audit left open
 
-> Status: **open; every item shipped 2026-08-16 on this side. What holds the plan here is item 6's
-> consuming half — `dew_flow_rag_qln` must move its `external/dew_flow_mcp` submodule pin, which needs
-> a push — and one thing deliberately named rather than folded in: the midnight segment makes this
-> repository log differently from the shared rule in `dew_flow_conventions` and from its two sibling
-> repos.** Scope:
+> Status: **IMPLEMENTED, 2026-08-16.** All seven items shipped here that day. The two things that held it
+> open afterwards closed on 2026-08-17: item 6's consuming half landed in `dew_flow_rag_qln` (submodule pin
+> moved and pushed, an `McpModule` publishing `/mcp`), and the midnight segment stopped being this
+> repository's private divergence — it is in the shared rule and in all three siblings, the Rust sidecar
+> included. Scope:
 > `src/Mcp.Application`, `src/Mcp.Bridge`, `src/Mcp.Host`, `src/Mcp.Telemetry`, `src/ServiceDefaults`.
+>
+> **Deviations worth reading before the items.** Item 4's obvious fix was a trap: a global
+> `AddRequestTimeouts` policy would have severed the MCP SSE stream on a schedule, so the policy is named
+> and scoped to `/api/mcp`. Item 5's answer came from the operator and was neither candidate this plan
+> offered — a file per run, segmented at UTC midnight. Item 7's proposed buffering was refused: it trades
+> contention for losing the last lines of a crash.
+>
+> **And one recorded mistake.** Retention shipped twice. The first attempt invented `LogRetention.Prune`
+> with `Mcp:Logs:RetentionDays` and a 30-day default, because the search for prior art covered only this
+> repository — `dew_flow_benchmark` had already committed `Serilog:RetentionDays`, 14 days, and
+> `PruneLogFolders(contentRoot, retentionDays, now)`. The second answer to a settled question is a mirror
+> that has already drifted, which is the whole reason the rule is shared. Reverted to the family shape; the
+> item text below has been corrected, and the reason lives beside the constant so the next reader meets it.
+>
 > The CRITICAL/HIGH defects of the same audit — the overflowing read window, the silently dying spool
 > writer, the unguarded dispatch chain, the missing per-call ceiling and the constant health answer —
 > were fixed in a separate task on 2026-08-16 and are **not** in this plan.
@@ -56,7 +70,7 @@ Closed by the streaming rewrite this item asked for. What shipped:
    observable consequence is pinned (the caps, the marker, the true total, the next `startLine` actually
    working, an asked-for window never marked truncated); the difference between streaming and
    materializing is peak LIVE memory during an async read, which is sampling-only. See the *Tests*
-   section of [../research/module_workspace_tools.md](../research/module_workspace_tools.md).
+   section of [module_workspace_tools.md](module_workspace_tools.md).
 
 The original finding, kept for the record:
 
@@ -234,13 +248,20 @@ What shipped:
 shape before being trusted — "found 1" file where two were expected.
 
 **The other half — a retention window — shipped too**, after the operator asked for it separately.
-`LogRetention.Prune` deletes day folders older than `Mcp:Logs:RetentionDays` (default 30), once, at
-startup rather than on a timer: a background sweep is a second thing that can fail silently in a process
-nobody is watching, and the window is measured in days. Zero or negative keeps everything — an explicit
-off switch, because a misread config that silently deleted a month of logs would be the worst possible
-failure of a retention feature. Only folders whose name parses as `yyyy-MM-dd` are candidates, and one
-that will not delete is counted rather than thrown, because a log viewer holding a file open must not
-stop a host from starting.
+`McpLogging.PruneLogFolders` deletes day folders older than `Serilog:RetentionDays` (default **14**), once,
+at startup rather than on a timer: a background sweep is a second thing that can fail silently in a process
+nobody is watching, and the window is measured in days. Zero keeps everything — an explicit off switch,
+because a misread config that silently deleted a month of logs would be the worst possible failure of a
+retention feature. Only folders whose name parses as `yyyy-MM-dd` are candidates, and one that will not
+delete is counted rather than thrown, because a log viewer holding a file open must not stop a host from
+starting.
+
+**It shipped WRONG first, and the correction is the point.** The original was `LogRetention.Prune` with
+`Mcp:Logs:RetentionDays` and 30 days — a whole second answer to a question `dew_flow_benchmark` had already
+settled in commit `e9a52aa` with the key, default and signature above. The search for prior art had covered
+this repository only. Deleted and replaced with the family shape verbatim; the reason sits in the XML doc
+beside the constant, because the next person to add retention to a fourth repository will search the same
+way.
 
 **The spool is deliberately NOT pruned here, and that is the answer rather than an omission.** It looks
 like the same problem and is not: a spool file is *drained* by a consumer, and this process cannot know
@@ -251,15 +272,21 @@ ingested — a worse bug than the growth it fixes. The owner is named; that is w
 **Tests:** `A_day_folder_older_than_the_window_is_pruned_at_startup` — the name this plan reserved —
 plus the boundary day, the off switch, a non-date folder, a missing `logs/`, and a folder held open.
 Watched failing against a sweep that expires nothing: *"Expected removed to be 1, but found 0"*. Verified
-live: a planted `logs/2020-01-01` was gone after one start, with
-*"Log retention: removed 1 day folder(s) older than 30 day(s), 0 refused"* in the log.
+live: a planted `logs/2020-01-01` was gone after one start.
 
-**And this changes a rule shared by four repositories.**
-`.claude/rules/shared/common/logging-serilog.md` (the `dew_flow_conventions` submodule) says *"A file per
-RUN, not per day"* and *"Never a rolling-by-day file sink"*, and the identical `RunFilePath` shape lives
-in `dew_flow_rag_qln`'s `RagLogging` and `dew_flow_benchmark`'s `BenchLogging`. Only this repository has
-the midnight segment. Until the rule and the two siblings follow, the family logs differently in
-different repos — which is the exact drift the shared submodule exists to prevent.
+**And this changed a rule shared by four repositories — reconciled 2026-08-17.**
+`.claude/rules/shared/common/logging-serilog.md` (the `dew_flow_conventions` submodule) said *"A file per
+RUN, not per day"* and *"Never a rolling-by-day file sink"*, and only this repository had the segment. The
+rule now carries the distinction explicitly — rolling by day merges DIFFERENT runs, a segment splits ONE —
+and every sibling has it: `BenchLogging` (`dew_flow_benchmark` `3f8ada8`), `RagLogging`
+(`dew_flow_rag_qln` `94a3b81`), and `DaySegments` in the Rust sidecar (`48e544b`), which needed its own
+implementation because `tracing` has no Serilog.
+
+The sidecar also gained the retention half it had never had (`bd008f4`) — it is the host least likely to
+be restarted, started once by the orchestrator and serving until the machine does not, so it was the worst
+possible one to leave unbounded. Its day-folder names are validated by round-tripping them through the
+calendar rather than compared as strings, so a `2026-02-30` left in `logs/` by a person survives a sweep
+that a lexicographic comparison would have taken.
 
 The original finding, kept for the record:
 
@@ -283,14 +310,19 @@ the one item on this list that needs an operator decision rather than a patch.
 - **`Pages/McpSurface.razor` (+ `.razor.cs`), route `/mcp`** — what this server is actually advertising:
   every tool with the exact description text served, the schema hashes, the surface hashes, the build,
   and the components behind it. It is the human-readable face of the `SurfaceFingerprint` that
-  [PLAN_tool_surface_config.md](../research/PLAN_tool_surface_config.md) shipped the same day; before
+  [PLAN_tool_surface_config.md](PLAN_tool_surface_config.md) shipped the same day; before
   this page, "declare and echo" meant curling an endpoint and reading JSON.
 - **`Services/McpConsoleApi`** — the read side, where every failure becomes a value. `Read<T>` carries
   the value, whether it arrived, and why it did not, so "the daemon could not be reached" and "this
   server advertises no tools" render as two different messages rather than one blank table.
-- **`AddMcpUi(apiBaseAddress)`** — one registration call. The address is NOT defaulted: a WASM client and
-  a server-rendered one reach the same API by different addresses, and a console guessing `localhost`
-  reads a different server's surface than the one on screen.
+- **`AddMcpUi()`** — one registration call, registering the read side and nothing else.
+
+  **This shipped wrong first and the correction is instructive.** It was `AddMcpUi(Uri apiBaseAddress)`,
+  written without looking at how the consuming console supplies an address — and a fixed `Uri` cannot
+  express what the mount point actually needs. The WASM client takes its address once from
+  `HostEnvironment.BaseAddress`; the SSR host must take it **per request**, because a server-side render
+  calls back into the process serving it. So the address belongs to the host's own `HttpClient`
+  registration, exactly as `RagConsoleApi` already did it, and the slice takes it by injection.
 - **`src/Mcp.Ui/README.md`** — who mounts it, and why `Mcp.Host` deliberately does not.
 
 **Deviation:** the item offered "either wire it or remove it from the shipped set". Neither happened
@@ -305,10 +337,16 @@ daemon, an unparseable body, a timeout, and "nothing asked yet" as its own state
 covered**: this repository has no bUnit harness and adding one is its own decision, said here and in the
 project's README rather than left as an assumed gap.
 
-**The consuming half is NOT done and cannot be from here.** `dew_flow_rag_qln` needs its `Routes.razor`
-slice list, its `NavMenu` entry, its `AddMcpUi` call and the AppHost's named URL — and, before any of
-that, its `external/dew_flow_mcp` submodule pin moved to a commit that contains this page. The pin
-tracks a public GitHub remote, so it needs a push.
+**The consuming half landed 2026-08-17** in `dew_flow_rag_qln`, after the pin was pushed. It went through
+that repository's `IDaemonModule` registry rather than as five edits to the composition root: an
+`McpModule` owns `MapMcpApi()` — which had been hardcoded ABOVE the module loop, the very shape the
+contract exists to remove — and declares its pages assembly and its `("MCP", "/mcp")` entry, so the router
+slice, the nav entry, the AppHost URL and the prerender list all come from one declaration.
+
+Verified live rather than by inspection: the running daemon published `{"name":"MCP","url":".../mcp"}` in
+its endpoint file with nobody editing the publish code, and `EveryPublishedPageRenders` — which GETs every
+published page and fails on a 500 — ran green with **`skipped: 0`**, the part that matters, since that test
+skips itself when no console is answering.
 
 The original finding, kept for the record:
 
@@ -365,9 +403,12 @@ than per line. Listed so the next person debugging a hot server does not discove
 3. ~~**(4) explicit HTTP timeouts**~~ (done) — configuration; no behaviour change, and one avoided
    (a global policy would have severed the SSE stream).
 4. ~~**(5) retention**~~ (done) — the operator's answer was a midnight segment, not either candidate.
-   Its *other* half, pruning old day folders, was not asked for and is not built.
-5. ~~**(6) `Mcp.Ui`**~~ and ~~**(7) the sink**~~ (done). Every item of this plan is now shipped on
-   this side; item 6's consuming half lives in `dew_flow_rag_qln` and is gated on a submodule pin.
+   Its *other* half, pruning old day folders, followed on a second instruction.
+5. ~~**(6) `Mcp.Ui`**~~ and ~~**(7) the sink**~~ (done). Item 6's consuming half landed in
+   `dew_flow_rag_qln` on 2026-08-17 once the pin was pushed.
+6. ~~**the family reconciliation**~~ (done, 2026-08-17) — not a numbered item, because it only became work
+   once item 5 chose an answer that no other repository had. The shared rule, the two .NET siblings and the
+   Rust sidecar all carry the midnight segment now, and the sidecar gained retention as well.
 
 ## Test plan
 
@@ -379,7 +420,7 @@ the guarantee, observed failing for the real symptom:
 | 1 | *(shipped)* `A_read_of_a_file_larger_than_the_cap_says_it_was_truncated_and_names_the_real_total` — RED: *"Expected content to start with `lines 1-5000 of 6000`, but `lines 1-6000 of 6000 …`"*, the whole file coming back untruncated. Plus `A_single_line_longer_than_the_byte_cap_is_clipped_instead_of_going_out_whole` — RED: the 2 MiB line back whole, no `TRUNCATED` in it. The streaming half is **not** covered; said so above and in the module doc |
 | 2 | *(shipped without one)* — `ArrayPool.Shared` exposes no rent/return count, so the guarantee has no observable assertion short of instrumenting the pool; the change is `using` on a parse whose result is already cloned, and `SurfaceParityTests` covers the bridge path it sits on |
 | 3 | *(shipped)* `A_payload_the_cheap_check_accepts_is_returned_whole_and_reports_no_loss` — the observable half; "it did not count" cannot be seen from outside. Plus `A_payload_is_never_returned_over_its_budget_whatever_it_is_made_of`, the safety property a wrong bound breaks: five alphabets × 45 budgets |
-| 5 | *(shipped)* `A_run_that_outlives_the_day_continues_in_a_midnight_segment_under_the_next_days_folder`, `Each_segment_holds_only_its_own_days_events`, `Both_segments_carry_the_same_pid_so_the_run_is_still_one_thing`, `An_event_stamped_before_the_open_segment_does_not_reopen_the_previous_day`, `A_spool_that_outlives_the_day_continues_in_a_midnight_segment` — RED against the old shape: *"Expected … to contain 2 item(s), but found 1"*. `A_day_folder_older_than_the_window_is_pruned_at_startup` is **still unwritten**: pruning was not part of the answer |
+| 5 | *(shipped)* `A_run_that_outlives_the_day_continues_in_a_midnight_segment_under_the_next_days_folder`, `Each_segment_holds_only_its_own_days_events`, `Both_segments_carry_the_same_pid_so_the_run_is_still_one_thing`, `An_event_stamped_before_the_open_segment_does_not_reopen_the_previous_day`, `A_spool_that_outlives_the_day_continues_in_a_midnight_segment` — RED against the old shape: *"Expected … to contain 2 item(s), but found 1"*. Plus `A_day_folder_older_than_the_window_is_pruned_at_startup` — the name this plan reserved — with the boundary day, the off switch, a non-date folder, a missing `logs/` and a folder held open; RED against a sweep that expires nothing: *"Expected removed to be 1, but found 0"* |
 | 7 | *(shipped)* `One_event_reaches_the_stream_as_a_single_write`, `An_exception_still_travels_with_its_line_in_that_one_write`, `The_level_is_coloured_even_though_the_stream_is_redirected`, `Concurrent_events_never_interleave_within_a_line` — RED against the old shape: *"Expected stream.Writes to be 1, but found 5"*, and 801 lines out of 800 |
 
 Item 4 has no observable behaviour to assert without an ASP.NET test host this repository does not have,
@@ -407,12 +448,14 @@ binaries ~60 s apart without rebuilding.
 - [x] Timeouts **and the retention window** live in `appsettings.json`, not in code — four values, each
       with its reasoning beside it.
 - [x] `logs/` and the spool have a named retention owner, and the never-restarting case is answered. The
-      log: a midnight segment plus a 30-day startup sweep, both here. The spool: a midnight segment here,
+      log: a midnight segment plus a 14-day startup sweep, both here. The spool: a midnight segment here,
       and its total owned by the INGESTER, because only the consumer knows which records it has taken.
 - [x] Nothing writes to stdout in the stdio host — verified by running it: the surface probe puts JSON
       there and every log line goes to stderr.
-- [ ] On completion the plan is promoted to `research/` with its deviations recorded, and the
-      *Currently open* table in [README.md](README.md) is updated in the same task.
-      *(Not yet — one thing is genuinely unfinished: the midnight segment makes this repository log
-      differently from the shared rule and from its two sibling repos, and that reconciliation is real
-      work in four repositories. Promoting now would file it as documentation.)*
+- [x] The family reconciliation the midnight segment created is done, in four repositories: the shared
+      rule, `BenchLogging`, `RagLogging`, and `DaySegments` in the Rust sidecar — which needed a separate
+      implementation, since `tracing` is not Serilog and only the CONTRACT is shared.
+- [x] On completion the plan is promoted to `research/` with its deviations recorded, and the
+      *Currently open* table in [../todo/README.md](../todo/README.md) is updated in the same task.
+      *(Done 2026-08-17. Held back on 2026-08-16 deliberately: promoting while this repository logged
+      differently from the rule it ships with would have filed an open divergence as documentation.)*
