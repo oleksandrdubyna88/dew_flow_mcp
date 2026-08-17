@@ -91,10 +91,23 @@ fabricated failure, because the client is gone and a record of it would be a cal
   genuine infrastructure fault and the sandboxed reader takes it (a locked file, a delete between the
   exists-check and the read). It is logged with the exception first, metered as `Error`, and answered as
   `ToolResult.Failed`. A server that runs unattended must never lose a session to one tool.
-- **Every call carries this server's own ceiling.** A linked `CancellationTokenSource` at the dispatch
-  chokepoint means every present and future provider inherits it without knowing. It binds providers that
-  honour their token — which the contract already requires; a provider that ignores it is not bounded by
-  anything here.
+- **Every call carries this server's own ceiling, and it binds providers that do not cooperate.** A linked
+  `CancellationTokenSource` at the dispatch chokepoint means every present and future provider inherits it
+  without knowing. The dispatch waits on the BUDGET rather than on the work (`work.WaitAsync(budget.Token)`),
+  which is the part that had to be fixed: awaiting the provider directly made the ceiling a promise only a
+  cooperative provider kept, since cancelling a token nothing reads changes nothing. The caller then got no
+  answer at all rather than a late one — measured at a 200 ms ceiling still unanswered after five seconds.
+  Since every provider is implemented in another repository, "reads its token" is not something this
+  catalog may assume.
+- **Work the ceiling could not stop is counted, not hidden.** Nothing in .NET stops a task that is not
+  listening, so the abandonment is made visible instead: `ToolCatalog.Abandoned` counts it, a warning names
+  the tool, and the task is OBSERVED — an abandoned task that later faults with nobody awaiting it would
+  otherwise raise `UnobservedTaskException`, a process-level event attributed to nothing and arriving
+  minutes later. Zero is the expected value; anything else names a provider that ignores its token.
+- **A provider may throw synchronously, and that is normalised.** `IToolProvider` returns a `Task` and an
+  implementation may throw before its first await — the sandboxed reader does, on a locked file. The
+  invocation goes through a small `async` wrapper so every such throw arrives as a faulted task rather than
+  on the dispatch stack, which is what keeps the guard above and the ceiling race compatible.
 - **Metering never fails a call.** `RecordAsync` is guarded end to end, budgeting included: a throwing
   sink loses the record, not the session the guard above just saved.
 - **Budgets are bytes, not characters**, and the cut never splits a surrogate pair. `ToolCatalog`

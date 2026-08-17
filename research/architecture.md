@@ -281,10 +281,28 @@ Stated because a knowledge base that only describes what is there reads like a c
 - **The `rag_` and `graf_` tool families.** One real tool exists (`rt_read_local_file`), deliberately —
   the tool set was always going to change completely.
 - **Authentication** on the HTTP transport.
-- **Tokens** are never counted; `ToolUsage.Tokens` is always *not captured* on this surface.
+- **Tokens** are *not captured* on this surface — and that is the correct state, not a gap. The count the
+  field means is what the TOOL spent, and every tool here reads a file, which spends none. The caller's
+  own context cost is a different number and not ours to state: the MCP protocol carries no model
+  identity, so any figure would be counted with the wrong tokenizer — the same trade the sidecar refuses
+  when it answers an unknown tokenizer name with a `400` listing the registered ones. The `rag_` family
+  WILL spend tokens, and when it lands the number belongs to the provider that spent it, reported through
+  `ToolResult` rather than guessed at the chokepoint. The consumer draws the same line: *"a tool that
+  embeds or reranks knows its tokens; a file read does not, and the difference must be visible rather
+  than rendered as zero"*.
 - ~~A LICENSE, THIRD-PARTY-NOTICES and a version policy~~ — **shipped 2026-08-17**, see *Public
   presentation* below.
 - ~~Explicit HTTP timeouts and a retention owner for `logs/` and the spool~~ — **shipped 2026-08-16**,
   [PLAN_reliability_tail.md](PLAN_reliability_tail.md), items 4 and 5.
-- **A bound on a provider that ignores its cancellation token.** The catalog cancels and answers the
-  caller at the ceiling; work that never observes the token keeps running behind that answer.
+- ~~A bound on a provider that ignores its cancellation token~~ — **the CALLER's half shipped
+  2026-08-17.** This entry used to say the catalog "answers the caller at the ceiling" while the work runs
+  on. It did not: `RunAsync` awaited the provider directly, so cancelling a token nothing reads changed
+  nothing and the caller got **no answer at all**. Measured — a 200 ms ceiling still unanswered after five
+  seconds. The dispatch now waits on the budget rather than on the work (`Task.WaitAsync`), so the ceiling
+  binds every provider whether or not it cooperates.
+
+  What genuinely remains is the WORK's half, and it is a platform limit rather than an omission: .NET
+  cannot stop a task that is not listening. So the abandonment is made visible instead — counted on
+  `ToolCatalog.Abandoned`, logged by name when it happens and again if the work ever ends, and the task is
+  observed so a later fault cannot surface as an unattributed `UnobservedTaskException`. Killing such work
+  for real needs the provider in its own process, which is a shape decision, not a patch.

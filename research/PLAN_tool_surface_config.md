@@ -8,9 +8,13 @@
 >
 > All six build-order steps shipped, and all five items of the cross-repository contract in §4 are
 > delivered. Suite 72 → 105, 0 failed, Debug and Release. Deviations are recorded per step below; the
-> open tail is §7's two questions and one finding this change created for `dew_flow_benchmark` (its
-> spool fixture can no longer be both "what the emitter writes today" and "what it wrote before
-> `correlation` existed" — that repository needs a second fixture rather than a replaced one).
+> open tail is §7's two questions. **The finding this change created for `dew_flow_benchmark` is
+> closed (2026-08-17):** its spool fixture could not be both "what the emitter writes today" and "what it
+> wrote before `correlation` existed", and it now has two — `mcp-spool-v0-precorrelation.jsonl` kept as the
+> backward-compatibility evidence, and `mcp-spool-v0-correlated.jsonl` emitted by a new `SpoolFixtureTests`
+> here so the consumer regenerates rather than hand-edits. The split immediately earned itself: with the
+> codec's correlation mapping broken deliberately, the new fixture's test failed and **the old one still
+> passed** — the shape that could catch it did not exist before.
 >
 > Sibling half: `dew_flow_benchmark · todo/PLAN_tool_benchmark.md` — the harness that consumes this. A
 > change that crosses the boundary is named in both plans.

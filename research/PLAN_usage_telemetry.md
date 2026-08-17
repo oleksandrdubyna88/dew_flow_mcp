@@ -33,6 +33,18 @@
 > so the path is proven from the emitter's own output rather than from live traffic. Tracked by the
 > benchmark's plan.
 >
+> **Closed 2026-08-17 — the path is now proven on live traffic.** A real MCP client spoke JSON-RPC over
+> stdio to the shipped `Mcp.Host` (`--spool --correlation cell-live/verify`): `initialize` returned
+> `Mcp.Host 1.0.0.0`, `tools/list` answered, one call read three lines of a real file and one attempted a
+> sandbox escape and came back refused with `isError: true`. The production `SpoolUsageSink` wrote two
+> records. `bench telemetry ingest` drained them — *"ingested 2, duplicate 0, refused 0"*, exit 0 — retired
+> the file to `.ingested`, and a second run answered *"nothing to ingest"*, so resume is idempotent on real
+> data rather than on a fixture. `bench telemetry report` rendered them:
+> `rt_read_local_file · live-check/?/stdio · 2 calls · 1 ans · 1 ref · p50 0.8 ms · p95 10.4 ms`, the `?`
+> being the uncaptured model. In Postgres the rows carry `Leg = cell-live`, `Phase = verify`,
+> `LegCaptured = true` — the correlation survived emitter → wire → codec → store, which is the join this
+> whole contract exists for.
+>
 > This is the emitter half of a cross-repository contract. The schema (`telemetry/v0`), the ingest
 > and the report live in the benchmark: `dew_flow_benchmark · research/PLAN_tool_telemetry_v0.md`. The
 > owner of the contract is the benchmark repository (operator decision, 2026-08-15); this plan

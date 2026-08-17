@@ -145,6 +145,34 @@ public sealed class ToolCatalogTests
             .Which.Outcome.Should().Be(ToolOutcome.Error, "a call the server gave up on is a fact about the server");
     }
 
+    /// <summary>
+    /// The ceiling holds against a provider that does not cooperate — which is the only case it was ever
+    /// needed for.
+    ///
+    /// <para>The test above passes with a provider that OBSERVES its token, so it proves the token is
+    /// passed and nothing more. A provider that ignores it is not a hypothetical: this catalog's whole
+    /// design is that providers are implemented in other repositories, and the ordinary way to ignore a
+    /// token is a blocking call in a library that never took one. For that provider the ceiling was a
+    /// promise the server could not keep — the await simply did not return, and the caller got no answer
+    /// at all rather than a late one.</para>
+    /// </summary>
+    [Fact]
+    public async Task A_tool_that_ignores_its_cancellation_token_is_still_answered_at_the_ceiling()
+    {
+        var sink = new RecordingSink();
+        var catalog = Build(sink, new ToolCatalogOptions { CallTimeout = TimeSpan.FromMilliseconds(200) }, new DeafProvider());
+
+        var call = catalog.InvokeAsync(new ToolCall("deaf", Empty()), TestContext.Current.CancellationToken);
+        var first = await Task.WhenAny(call, Task.Delay(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+
+        first.Should().Be(call,
+            "a ceiling that only binds providers which agree to be bound is not a ceiling");
+        (await call).Should().BeOfType<ToolResult.Failed>()
+            .Which.Message.Should().Contain("ceiling");
+        catalog.Abandoned.Should().Be(1,
+            "the work is still running behind that answer, and a leak nobody counts is a leak nobody finds");
+    }
+
     [Fact]
     public void A_ceiling_that_cannot_be_applied_stops_the_host_instead_of_throwing_on_every_call()
     {
@@ -276,6 +304,27 @@ public sealed class ToolCatalogTests
         {
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             return ToolResult.Success("unreachable");
+        }
+    }
+
+    /// <summary>A provider that takes the token and does not look at it — the shape of a third-party
+    /// implementation wrapping a blocking library call.</summary>
+    private sealed class DeafProvider : IToolProvider
+    {
+        public IReadOnlyList<ToolSchema> Tools { get; } =
+        [
+            new ToolSchema
+            {
+                Name = "deaf",
+                Description = "ignores the token it is handed",
+                InputSchema = ToolSchema.ParseSchema("""{"type":"object"}"""),
+            },
+        ];
+
+        public async Task<ToolResult> InvokeAsync(ToolCall call, CancellationToken cancellationToken)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(30), CancellationToken.None);
+            return ToolResult.Success("far too late");
         }
     }
 
