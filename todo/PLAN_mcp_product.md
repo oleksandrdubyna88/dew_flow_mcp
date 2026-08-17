@@ -53,8 +53,8 @@ same footing as code:
   invisible in any single call and shows up only across a set.
 
 The lesson is not "write nicer docs". It is that **a tool's description is a measured artefact**, and a
-change to it is an arm of [the experiment matrix](../../dew_flow_rag_qln/todo/PLAN_experiment_matrix.md) like
-any retrieval change.
+change to it is an arm of the experiment matrix — `dew_flow_rag_qln · todo/PLAN_experiment_matrix.md` —
+like any retrieval change.
 
 ## Build order
 
