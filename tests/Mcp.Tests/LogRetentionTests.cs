@@ -72,9 +72,32 @@ public sealed class LogRetentionTests
         prune.Should().NotThrow("the first run of a fresh checkout has no logs to prune");
     }
 
+    /// <summary>
+    /// Windows only, and not for convenience: <b>an open handle is what makes a directory refuse to go
+    /// THERE.</b>
+    ///
+    /// <para>POSIX unlinks a file another process is reading, so on Linux <c>Directory.Delete(recursive)</c>
+    /// succeeds regardless of <c>FileShare.None</c> and the folder is gone — the sweep behaved correctly and
+    /// the test asserted the opposite. It passed on this machine and failed every CI run on
+    /// <c>ubuntu-latest</c>, which is the worst shape a test can have: green where it is written, red where
+    /// it is checked.</para>
+    ///
+    /// <para>The Rust twin of this sweep already carries the same guard for the same reason
+    /// (<c>dew_flow_sidecar_rust · log_segments.rs</c>, <c>#[cfg(windows)]</c>). This one did not, and that
+    /// asymmetry is the whole defect: a rule mirrored across repositories has to be mirrored with its
+    /// caveats.</para>
+    /// </summary>
     [Fact]
     public void A_folder_that_cannot_be_removed_is_skipped_rather_than_thrown()
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            // Skipped rather than rewritten to assert the POSIX behaviour: what is under test is that a
+            // REFUSED delete is survived, and on POSIX nothing refuses, so there is no such case to observe.
+            Assert.Skip("POSIX unlinks an open file, so a held folder cannot be made to refuse deletion");
+            return;
+        }
+
         var root = Root(("2020-01-01", "held.log"));
 
         // A log viewer holding a file open is the ordinary case, and it must never stop a host from
