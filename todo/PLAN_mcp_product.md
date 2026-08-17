@@ -1,7 +1,19 @@
 # PLAN — the MCP surface: from one proving tool to the product's public face
 
-> Status: **plan; the inversion and both transports are built and parity-tested, the tool set is one
-> placeholder.** Scope: `src/Mcp.*`, `src/Workspace.*`, and this repository's public presentation.
+> Status: **open. Phase 3 shipped 2026-08-17; Phases 1 and 2 are the work.** The inversion and both
+> transports are built and parity-tested, and the tool set is still one placeholder. Scope: `src/Mcp.*`,
+> `src/Workspace.*`, and this repository's public presentation.
+>
+> **Phase 3 is done** — LICENSE, NOTICE, THIRD-PARTY-NOTICES.md, README.md, VERSIONING.md, CONTRIBUTING.md
+> and SECURITY.md all exist, and `Directory.Build.props` carries an explicit `<Version>`. It was taken
+> first because it was the only phase whose absence was doing damage: the repository is already public, and
+> a public repository with no LICENSE is "all rights reserved" by silence — the source was readable and
+> legally unusable by anyone, which is the opposite of why it is public.
+>
+> **Of what remains, the `rt_` family is the part that is not blocked.** It touches the filesystem and git
+> and needs no index. The `rag_` and `graf_` families are gated on `dew_flow_rag_qln` supplying
+> `IToolProvider` implementations, which it does not yet: its `hosts/Daemon/Program.cs` says so in its own
+> comment, and the daemon serves exactly one MCP tool today, this repository's `rt_read_local_file`.
 >
 > Related: the RAG repo's `todo/PLAN_rag_product.md` (what supplies the retrieval tools) and
 > `todo/PLAN_experiment_matrix.md` (how their behaviour is judged).
@@ -78,19 +90,42 @@ Two rules that are not negotiable, both learned the expensive way:
   host opts in. Open tail there: the private product host's registration line, and the ingest side.
 - **Cancellation that reaches the work**, not just the request.
 
-### Phase 3 — being a public repository
+### Phase 3 — being a public repository — **DONE 2026-08-17**
 
-This one is public, and nothing about that is currently true except the visibility flag. It needs, before
-anyone is pointed at it:
+Taken first, out of the plan's own order, because it was the only phase already costing something: the
+repository was public with no LICENSE, which is "all rights reserved" by silence — readable and legally
+unusable, the opposite of the intent.
 
-- A README that says what this is, what it is *not* (it does not know about retrieval), and how to run both
-  transports in five lines.
-- A LICENSE, and `THIRD-PARTY-NOTICES.md` for the dependency set — the sibling repos already carry the
-  convention: resolve the licence of the **exact version** from the artefact, never from metadata, because
-  metadata lies and licences change between versions of one package.
-- A versioning and release story. A tool schema is a contract; changing a parameter's meaning without a
-  version is how a customer's agent starts calling the wrong thing quietly.
-- Contribution and security notes, kept short.
+What shipped:
+
+- **[LICENSE](../LICENSE)** — proprietary, source-available; the operator chose the family default that
+  `ClaudeRag` set. Its section 0 exists only in this repository's copy and says the thing the file is for:
+  *the source is public, that is not a licence*. `{{COPYRIGHT_HOLDER}}` and the counsel banner stay until a
+  lawyer reviews it — that is deliberate, not unfinished.
+- **[NOTICE](../NOTICE)** — the Apache-2.0 §4(d) attribution that must travel with any build, naming the
+  Serilog stack and the MCP SDK.
+- **[THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md)** — 78 resolutions over 61 distinct packages: 56
+  MIT, 20 Apache-2.0, no copyleft, nothing separately installed. Resolved from `obj/project.assets.json`
+  rather than `Directory.Packages.props`, because the props file lists 11 things we ASK for and the assets
+  file records what restore produced.
+- **[README.md](../README.md)** — what this is, what it is not, and five lines to run both transports.
+  Every claim in it was verified against a running server rather than read off the source.
+- **[VERSIONING.md](../VERSIONING.md)** plus an explicit `<Version>` in `Directory.Build.props`.
+- **[CONTRIBUTING.md](../CONTRIBUTING.md)** and **[SECURITY.md](../SECURITY.md)**, both short.
+
+**The finding worth keeping.** The convention this phase was told to follow — *resolve the licence of the
+exact version from the artefact, never from metadata* — caught a live error on its first application:
+`dew_flow_rag_qln`'s notices recorded `ModelContextProtocol` as **MIT**, and the 2.2.0 nuspec says
+**Apache-2.0**. It ran in the unsafe direction, because Apache-2.0 attaches an attribution duty on
+distribution that MIT does not. Corrected in both repositories. The rule was written after a package that
+declared one licence and classified itself as another; this time it caught a human summary instead, which
+is the more ordinary failure.
+
+**Two deviations from the phase as written.** It asked for a versioning *story* and got a document with a
+table of what breaks a tool surface, because the interesting breaking changes here are the ones that leave
+every call compiling — a changed parameter MEANING, a changed default, a description rewritten to describe
+different behaviour. And it did not ask for `<Version>` to be set: the surface fingerprint reports the
+version to callers, so the SDK's silent `1.0.0` was already a promise nobody had made.
 
 ### Phase 4 — what stays out, and why that is a decision
 
@@ -107,5 +142,8 @@ back later.
 - [ ] Reads take a line window; responses carry freshness; refusals set `isError`.
 - [ ] The HTTP transport authenticates.
 - [x] `IUsageSink` has an implementation and per-call usage is recorded.
-- [ ] README, LICENSE, notices and a version policy exist before the repository is advertised.
+- [x] README, LICENSE, notices and a version policy exist before the repository is advertised.
+      *(2026-08-17. One thing is deliberately left open inside them: `{{COPYRIGHT_HOLDER}}` is a placeholder
+      and LICENSE carries an ACTION REQUIRED banner, because naming a legal entity and clearing the text is
+      counsel's call, not this task's.)*
 - [ ] No editing tool has appeared in this repository.

@@ -231,12 +231,38 @@ those three.
 ### Authentication
 
 **None.** The HTTP transport is open — fine on localhost, and named as open work in
-[../todo/PLAN_mcp_product.md](../todo/PLAN_mcp_product.md).
+[../todo/PLAN_mcp_product.md](../todo/PLAN_mcp_product.md). Since 2026-08-17 it is also stated where an
+operator will actually meet it, in [SECURITY.md](../SECURITY.md): a gap nobody is told about is one people
+discover by deploying first.
 
 ### CI
 
 `.github/workflows/ci.yml` builds the solution in Release and runs the test executable. Tests are run as
 an executable, never through `dotnet test` (xUnit v3 on Microsoft Testing Platform has no VSTest host).
+
+### Public presentation
+
+This repository is public, and since 2026-08-17 that is a stated position rather than a visibility flag.
+
+[LICENSE](../LICENSE) is **proprietary, source-available**: the source is readable so a customer can audit
+a server they run inside their network, and reading is the only right it grants. Its section 0 says so
+first, because a public repository without such a sentence is read as an invitation — and one with no
+licence file at all is "all rights reserved" by silence, which is worse than either.
+
+[NOTICE](../NOTICE) carries the Apache-2.0 §4(d) attribution that must travel with any build, and
+[THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md) inventories every dependency at its exact version: 78
+resolutions over 61 packages, 56 MIT and 20 Apache-2.0, no copyleft and nothing separately installed. The
+resolution reads `obj/project.assets.json`, not `Directory.Packages.props` — the props file lists the 11
+packages we ask for, the assets file records what restore produced.
+
+[VERSIONING.md](../VERSIONING.md) is the one worth reading, because a tool schema breaks differently from
+an API. The dangerous changes leave every call compiling: a parameter's **meaning** redefined, a default
+moved, a description rewritten to describe different behaviour. An agent re-reads nothing, so the failure
+is not an error — it is worse answers, indefinitely. `toolsHash` and `descriptionsHash` from the surface
+fingerprint are the detector, which is why `--print-surface` needs no port and exits.
+
+The `<Version>` in `Directory.Build.props` is explicit for the same reason: the fingerprint reports it to
+callers, so the SDK's silent `1.0.0` was a promise nobody had made.
 
 ## Modules
 
@@ -256,8 +282,9 @@ Stated because a knowledge base that only describes what is there reads like a c
   the tool set was always going to change completely.
 - **Authentication** on the HTTP transport.
 - **Tokens** are never counted; `ToolUsage.Tokens` is always *not captured* on this surface.
-- **A LICENSE, THIRD-PARTY-NOTICES and a version policy** — required before the repository is advertised.
-- **Explicit HTTP timeouts and a retention owner for `logs/` and the spool** —
+- ~~A LICENSE, THIRD-PARTY-NOTICES and a version policy~~ — **shipped 2026-08-17**, see *Public
+  presentation* below.
+- ~~Explicit HTTP timeouts and a retention owner for `logs/` and the spool~~ — **shipped 2026-08-16**,
   [PLAN_reliability_tail.md](PLAN_reliability_tail.md), items 4 and 5.
 - **A bound on a provider that ignores its cancellation token.** The catalog cancels and answers the
   caller at the ceiling; work that never observes the token keeps running behind that answer.

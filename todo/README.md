@@ -13,7 +13,7 @@ Definition of Done.
 
 | plan | status | scope |
 |---|---|---|
-| [PLAN_mcp_product.md](PLAN_mcp_product.md) | inversion and both transports built and parity-tested; the tool set is one placeholder | the three tool families, auth, public-repository hygiene (usage metering now shipped — see below) |
+| [PLAN_mcp_product.md](PLAN_mcp_product.md) | **Phase 3 shipped 2026-08-17**; inversion and both transports built and parity-tested; the tool set is one placeholder | What remains: the three tool families and HTTP auth. Public-repository hygiene is **done** — LICENSE, NOTICE, THIRD-PARTY-NOTICES, README, VERSIONING, CONTRIBUTING, SECURITY, and an explicit `<Version>`; taken first because the repository was already public with no licence, which is "all rights reserved" by silence. Usage metering shipped earlier (see below). Of the rest, the `rt_` family is unblocked and lives here; `rag_`/`graf_` are gated on `dew_flow_rag_qln` supplying `IToolProvider` implementations, which it does not yet |
 
 ## Promoted
 

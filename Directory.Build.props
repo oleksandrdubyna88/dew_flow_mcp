@@ -7,6 +7,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+
+    <!-- Explicit, because an unset Version is silently 1.0.0 forever — and that number reaches a caller:
+         SurfaceFingerprint reports it, so an inherited default becomes a promise nobody made. What a bump
+         means for a TOOL SCHEMA is in VERSIONING.md; the short version is that a changed parameter MEANING
+         is a breaking change even though every call still compiles. The commit sha is appended by the
+         SDK's source-link stamp and answers a different question: which build, not what it promises. -->
+    <Version>1.0.0</Version>
   </PropertyGroup>
 
 </Project>

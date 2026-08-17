@@ -1,0 +1,58 @@
+DewFlow MCP Server
+Copyright (c) 2026 {{COPYRIGHT_HOLDER}}. All rights reserved.
+
+This product includes third-party open-source software. The complete
+per-component inventory, with the exact versions whose licences were resolved,
+is in THIRD-PARTY-NOTICES.md, distributed alongside this file.
+
+This file exists to satisfy the attribution obligations that travel with
+distribution — principally Apache License 2.0 section 4(d), and the requirement
+in MIT to retain the copyright notice in all copies. Do not remove it from a
+build, a container image, or a published artefact.
+
+--------------------------------------------------------------------------------
+Apache License 2.0 components — attribution required
+--------------------------------------------------------------------------------
+
+This product includes software licensed under the Apache License, Version 2.0
+(http://www.apache.org/licenses/LICENSE-2.0):
+
+  Serilog, and the Serilog sinks and integrations
+    Serilog · Serilog.AspNetCore · Serilog.Extensions.Hosting
+    Serilog.Extensions.Logging · Serilog.Formatting.Compact
+    Serilog.Settings.Configuration · Serilog.Sinks.Console
+    Serilog.Sinks.Debug · Serilog.Sinks.File
+    Copyright Serilog Contributors
+    https://github.com/serilog
+
+  ModelContextProtocol C# SDK
+    ModelContextProtocol · ModelContextProtocol.Core
+    ModelContextProtocol.AspNetCore
+    Copyright Anthropic and the Model Context Protocol contributors
+    https://github.com/modelcontextprotocol/csharp-sdk
+
+The following are used to BUILD and TEST this product and are not distributed
+with it. They are listed because the boundary between "used" and "shipped" is a
+decision this project records rather than assumes:
+
+  xUnit.net v3 (xunit.v3 and its packages, xunit.analyzers)
+    Copyright .NET Foundation and Contributors
+    https://github.com/xunit/xunit
+
+  FluentAssertions 7.2.2
+    Copyright Dennis Doomen and contributors
+    https://github.com/fluentassertions/fluentassertions
+    Pinned at 7.2.2 — the last Apache-2.0 release. See THIRD-PARTY-NOTICES.md.
+
+--------------------------------------------------------------------------------
+MIT components — copyright notice retained
+--------------------------------------------------------------------------------
+
+This product includes software licensed under the MIT License, principally the
+.NET runtime, ASP.NET Core and Microsoft.Extensions libraries:
+
+  Copyright (c) .NET Foundation and Contributors
+  https://github.com/dotnet
+
+The full list of 56 MIT-licensed packages, with versions, is in
+THIRD-PARTY-NOTICES.md.

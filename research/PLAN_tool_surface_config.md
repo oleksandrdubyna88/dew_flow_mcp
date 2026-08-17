@@ -275,6 +275,12 @@ Three deviations:
    what `Captured` exists to prevent. The record carries `Version` as a `Captured` instead — the
    assembly's informational version, which here resolves to `1.0.0+<commit sha>` — plus `TakenAt` from
    the injected clock. The two hashes remain the build-independent identity of what is served.
+
+   *(2026-08-17: the `1.0.0` half was the SDK's silent default until Phase 3 of `PLAN_mcp_product` made it
+   an explicit `<Version>` in `Directory.Build.props`. Because this record reports it to callers, an
+   inherited default was already a promise nobody had made. What a bump means for a tool surface is now in
+   [../VERSIONING.md](../VERSIONING.md) — and the interesting breaking changes there are the ones that
+   leave every call compiling, which is the same class of problem `descriptionsHash` exists to detect.)*
 2. **`AddSurfaceFingerprint(app)` is its own registration**, not a parameter on `AddMcpApplication`.
    Only the host knows which of its shapes is running (`mcp`, `mcp-stdio`, `mcp-surface`), and
    `AddToolStack` already carries that name.
