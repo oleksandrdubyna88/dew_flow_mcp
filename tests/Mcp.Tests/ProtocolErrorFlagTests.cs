@@ -54,19 +54,7 @@ public sealed class ProtocolErrorFlagTests
         return raw.Should().BeOfType<CallToolResult>().Subject;
     }
 
-    private sealed class FixedProvider(ToolResult answer) : IToolProvider
-    {
-        public IReadOnlyList<ToolSchema> Tools { get; } =
-        [
-            new ToolSchema
-            {
-                Name = "fixed",
-                Description = "always answers the same way",
-                InputSchema = ToolSchema.ParseSchema("""{"type":"object"}"""),
-            },
-        ];
-
-        public Task<ToolResult> InvokeAsync(ToolCall call, CancellationToken cancellationToken) =>
-            Task.FromResult(answer);
-    }
+    // FixedProvider moved to FixedProvider.cs when BridgeErrorParityTests needed the same thing: the two
+    // presentations must be asked about the same three answers, and a second copy is how one of them ends up
+    // being asked about only two.
 }

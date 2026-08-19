@@ -57,7 +57,7 @@ The bridge does the same in one step: it enters its own identity, calls the cata
 | `LocalLlmToolBridge.ToolDefinitions` | The catalog rendered as OpenAI-style function definitions |
 | `LocalLlmToolBridge.InvokeAsync(name, JsonElement \| string, ct)` | Runs one call; the string overload turns malformed JSON into a tool failure the model can read and retry |
 
-## Two rules that are asserted rather than remembered
+## Three rules that are asserted rather than remembered
 
 - **Parity.** `SurfaceParityTests` fails the build if the two surfaces advertise different names or
   byte-different schemas, or if either grows a tool of its own. A new provider reaches both with no edit
@@ -65,6 +65,19 @@ The bridge does the same in one step: it enters its own identity, calls the cata
 - **A refusal reaches the wire flagged.** `ProtocolErrorFlagTests` pins that `Refused` and `Failed` both
   set `isError`. Found live: the first working server answered a sandbox denial as ordinary content, so
   a caller could not tell "refused" from "read an empty file".
+- **And it reaches the BRIDGE just as distinguishably** (2026-08-19). The two rules above left a gap: they
+  proved the surfaces advertise the same tools and run the same code, and that the *wire* flags an error —
+  nothing checked how the in-process presentation signals one, which is the half where the original defect
+  lived. `BridgeErrorParityTests` pins it: a refusal arrives as `ToolResult.Refused` and never as an `Ok`
+  carrying the reason as content, both surfaces agree that something went wrong whichever case it was, and
+  the text is the same on both.
+
+  The two surfaces are deliberately **not** identical here, and the tests pin the asymmetry rather than
+  ironing it out: the protocol has one error state, so `Refused` and `Failed` collapse into one flag on the
+  wire — inventing a second would break every conforming client to express a difference only telemetry needs
+  — while the bridge hands over the union and keeps all three. More information on one side is fine; an error
+  arriving as a success on either side is not. Verified by breaking the bridge on purpose: collapsing its
+  result to `Ok` turns 5 of the 6 tests red, and the one that stays green is the success case.
 
 ## What the transport can and cannot tell us
 
@@ -84,7 +97,11 @@ record: an agent called `claude-code` may be running anything.
 
 ## Tests
 
-`SurfaceParityTests.cs`, `ProtocolErrorFlagTests.cs`, `CallerIdentityTests.cs`,
+`SurfaceParityTests.cs`, `ProtocolErrorFlagTests.cs`, `BridgeErrorParityTests.cs`, `CallerIdentityTests.cs`,
 `ProtocolCallerIdentityTests.cs`. The last runs a **real** `McpClient` against a **real** `McpServer`
 over an in-memory stream pair — the claim is about what the transport carries, and a hand-made context
 would prove only that the hand-made context has the field somebody put in it.
+
+`FixedProvider` — a provider whose one tool always answers the same way — is shared by the two error tests
+rather than copied into each: two fixed providers would be two things to keep in step with one three-case
+union, which is how the third case comes to be tested on one surface and not the other.

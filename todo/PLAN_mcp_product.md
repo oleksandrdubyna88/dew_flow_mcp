@@ -80,8 +80,24 @@ Two rules that are not negotiable, both learned the expensive way:
 
 - **Authentication on the HTTP transport.** Today it is open. Fine on localhost; not fine the first time
   someone binds it to a LAN, and someone will.
-- **A refusal is a refusal.** Already pinned by `ProtocolErrorFlagTests` after a live finding: a refused call
-  reached the wire as ordinary content with no `isError`, so the model read the refusal as an answer.
+- ~~**A refusal is a refusal.**~~ **DONE.** Pinned by `ProtocolErrorFlagTests` after a live finding: a refused
+  call reached the wire as ordinary content with no `isError`, so the model read the refusal as an answer.
+  Completed 2026-08-19 by `BridgeErrorParityTests`, which closes the half nothing covered — the *bridge's*
+  error signal. `SurfaceParityTests` compared names and schemas, `ProtocolErrorFlagTests` the wire, and
+  neither asked how the in-process presentation reports a failure. It also pins the deliberate asymmetry:
+  the wire has one error state and collapses `Refused` into it, while the bridge keeps all three. Raised and
+  built by the `dew_flow_rag_qln` side, whose three retrieval tools are the first providers with refusals
+  worth telling apart.
+
+  **A defect found while doing it, and deliberately NOT fixed here** (out of that task's agreed scope):
+  `WorkspaceToolProvider.ReadInt` calls `JsonElement.TryGetInt32` without checking `ValueKind`, and
+  `TryGetInt32` **throws** `InvalidOperationException` for a value that is not a number — it returns false
+  only for a `Number` too large for an `Int32`. So `{"startLine": "5"}` leaves the provider as an exception
+  the catalog records as a server **failure**, where the caller should have been told which argument was
+  wrong. The method's own doc comment states the opposite (*"present but not a whole 32-bit number
+  (`1e12`, `"5"`, `3.5`) means Unreadable"*) — `1e12` and `3.5` behave as documented, `"5"` does not. The fix
+  is one `ValueKind` check; the sibling repository's `ToolArguments.TryNumber` already carries it, found by
+  its own test.
 - ~~**Usage metering.**~~ **Shipped 2026-08-15** — see
   [research/PLAN_usage_telemetry.md](../research/PLAN_usage_telemetry.md).
   [`IUsageSink`](../src/Mcp.Contracts/IUsageSink.cs) now has a real implementation (a local spool
@@ -140,6 +156,10 @@ back later.
 - [ ] Every tool description states what the tool is FOR in behavioural terms, and every parameter whose
       effect is non-obvious says what it actually costs.
 - [ ] Reads take a line window; responses carry freshness; refusals set `isError`.
+      *(The third is done and now covered on BOTH presentations — `ProtocolErrorFlagTests` plus
+      `BridgeErrorParityTests`, 2026-08-19. The line window exists on `rt_read_local_file`. Freshness is
+      carried by the retrieval tools in `dew_flow_rag_qln`, in three states; nothing on THIS repository's own
+      surface reports it yet, which is what keeps this item open.)*
 - [ ] The HTTP transport authenticates.
 - [x] `IUsageSink` has an implementation and per-call usage is recorded.
 - [x] README, LICENSE, notices and a version policy exist before the repository is advertised.
