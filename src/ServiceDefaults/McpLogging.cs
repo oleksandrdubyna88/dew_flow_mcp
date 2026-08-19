@@ -102,7 +102,41 @@ public static class McpLogging
 
         var logger = configuration.CreateLogger();
         Retire(logger, contentRoot, RetentionDays(appConfiguration));
+        InstallUnobservedTaskNet(logger);
         return logger;
+    }
+
+    /// <summary>The logger the unobserved-task net writes through — the most recently created one,
+    /// which in a real process is the only one.</summary>
+    private static Serilog.ILogger unobservedNetLogger = Serilog.Log.Logger;
+
+    private static int unobservedNetInstalled;
+
+    /// <summary>The net under the net (reliability.md): a <see cref="Task"/> whose fault nobody
+    /// awaits surfaces only at finalization, where modern .NET swallows it silently instead of
+    /// crashing — which is worse, because nothing logs and the worker just stops existing. Every
+    /// KNOWN detached execution in this repository already observes its own fault; this catches the
+    /// future one that forgets.
+    /// <para>Installed from <see cref="CreateLogger"/> so every host — the extension's and the
+    /// orchestrator's alike — gets it with the logger it was creating anyway. Subscribed once per
+    /// process; a later logger takes over the writing, which is what a reconfigured test expects.</para></summary>
+    public static void InstallUnobservedTaskNet(Serilog.ILogger logger)
+    {
+        unobservedNetLogger = logger;
+        if (Interlocked.Exchange(ref unobservedNetInstalled, 1) == 0)
+        {
+            TaskScheduler.UnobservedTaskException += ObserveUnobservedTask;
+        }
+    }
+
+    /// <summary>Public so a test can hand it a constructed event and watch it observe — the
+    /// finalizer-driven path this rides on is not something a suite can await deterministically.</summary>
+    public static void ObserveUnobservedTask(object? sender, UnobservedTaskExceptionEventArgs e)
+    {
+        unobservedNetLogger.Error(
+            e.Exception,
+            "An unobserved task exception reached finalization — some detached task died with nobody awaiting it");
+        e.SetObserved();
     }
 
     /// <summary>
