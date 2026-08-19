@@ -102,6 +102,7 @@ nothing to say about it.
 | A file per RUN under a day folder, **segmented at UTC midnight** | Rolling by day appends every run into one file, and the question actually asked is "what did THAT run do". But a file per run and a process that never restarts are one file growing for months — the rule's mitigating rotation IS the restart, and the 24/7 premise is that there is none. `DailyRunFileSink` reconciles them: a run starting 15:00 writes `…-15-00-00-<pid>.log` and continues in `…/00-00-00-<pid>.log` under tomorrow's folder. Same pid, so the run is still one thing — which is what keeps this from being the rolling-by-day sink the rule forbids. The boundary is the CLOCK, not 24h of elapsed time, so files keep lining up with the folders they live in |
 | A stdio host logs to **stderr** | stdout carries the JSON-RPC. One log line there corrupts the stream and looks like a protocol bug rather than a logging one |
 | Levels from `appsettings.json` | Verbosity is a config edit and a restart, never an edited call site. Defaults: `Information`, with `Microsoft.AspNetCore` and `System.Net.Http.HttpClient` at `Warning` |
+| `CreateLogger` installs the **unobserved-task net** (2026-08-19) | reliability.md's "net under the net": a `Task` whose fault nobody awaits surfaces only at finalization, where modern .NET swallows it silently — no crash, no line, a worker that just stops existing. Every KNOWN detached execution here observes its own fault (`ToolCatalog.Settle` touches `work.Exception` directly); the net catches the future one that forgets. Installed once per process, with the logger it was creating anyway, so orchestrator-built hosts get it too. Handler pinned by `UnobservedTaskNetTests` — tested with a constructed event, because the real path rides the finalizer thread |
 
 ### Retention
 
@@ -116,6 +117,12 @@ Two different problems, two different owners, and conflating them would destroy 
 *drained* by a consumer, and this process cannot know which records that consumer has taken. Deleting one
 on a schedule would destroy telemetry nobody ingested. Naming the owner is the whole answer the audit
 asked for; deleting on its behalf would be a worse bug than the unbounded growth.
+
+**And since 2026-08-19 the named owner is actually invoked.** The 2026-08-19 family audit found the gap in
+the design above — an owner nothing ever called, so on an unattended machine the spool grew forever. The
+benchmark now carries `scripts/telemetry-ingest.ps1` and a Task Scheduler job (`dew_flow-telemetry-ingest`,
+daily 03:30): ingest, then prune `*.ingested` older than 14 days; an environment that is not ready (bench
+stack cold, exe unbuilt) skips loudly with exit 0, because the spool is append-only and simply waits.
 
 Three properties of the log sweep worth knowing:
 
