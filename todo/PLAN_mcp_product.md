@@ -1,7 +1,8 @@
 # PLAN — the MCP surface: from one proving tool to the product's public face
 
-> Status: **open. Phase 3 shipped 2026-08-17; Phases 1 and 2 are the work.** The inversion and both
-> transports are built and parity-tested, and the tool set is still one placeholder. Scope: `src/Mcp.*`,
+> Status: **open. Phase 3 shipped 2026-08-17; the `rt_` family and Phase 2 are the work.** The inversion and
+> both transports are built, parity-tested and — since 2026-08-19 — actually travelled by three providers
+> written outside this repository. This repository still offers one tool of its own. Scope: `src/Mcp.*`,
 > `src/Workspace.*`, and this repository's public presentation.
 >
 > **Phase 3 is done** — LICENSE, NOTICE, THIRD-PARTY-NOTICES.md, README.md, VERSIONING.md, CONTRIBUTING.md
@@ -10,10 +11,15 @@
 > a public repository with no LICENSE is "all rights reserved" by silence — the source was readable and
 > legally unusable by anyone, which is the opposite of why it is public.
 >
-> **Of what remains, the `rt_` family is the part that is not blocked.** It touches the filesystem and git
-> and needs no index. The `rag_` and `graf_` families are gated on `dew_flow_rag_qln` supplying
-> `IToolProvider` implementations, which it does not yet: its `hosts/Daemon/Program.cs` says so in its own
-> comment, and the daemon serves exactly one MCP tool today, this repository's `rt_read_local_file`.
+> **The `rag_` and `graf_` families are no longer this repository's to wait for.** They were gated on
+> `dew_flow_rag_qln` supplying `IToolProvider` implementations, and on 2026-08-19 it did: its daemon serves
+> `rag_search_project_context`, `graf_search_types` and `graf_get_type_relations` beside this repository's
+> `rt_read_local_file`, verified against a running daemon. So the inversion is not merely built — it is
+> travelled, by a provider written entirely outside this repository with no edit inside it.
+>
+> What remains here is the **`rt_` family**, which touches the filesystem and git and needs no index: this
+> repository still offers exactly one tool of its own, a workspace file read. That, and Phase 2's HTTP
+> authentication and cancellation.
 >
 > Related: the RAG repo's `todo/PLAN_rag_product.md` (what supplies the retrieval tools) and
 > `todo/PLAN_experiment_matrix.md` (how their behaviour is judged).
@@ -89,15 +95,16 @@ Two rules that are not negotiable, both learned the expensive way:
   built by the `dew_flow_rag_qln` side, whose three retrieval tools are the first providers with refusals
   worth telling apart.
 
-  **A defect found while doing it, and deliberately NOT fixed here** (out of that task's agreed scope):
-  `WorkspaceToolProvider.ReadInt` calls `JsonElement.TryGetInt32` without checking `ValueKind`, and
-  `TryGetInt32` **throws** `InvalidOperationException` for a value that is not a number — it returns false
-  only for a `Number` too large for an `Int32`. So `{"startLine": "5"}` leaves the provider as an exception
-  the catalog records as a server **failure**, where the caller should have been told which argument was
-  wrong. The method's own doc comment states the opposite (*"present but not a whole 32-bit number
-  (`1e12`, `"5"`, `3.5`) means Unreadable"*) — `1e12` and `3.5` behave as documented, `"5"` does not. The fix
-  is one `ValueKind` check; the sibling repository's `ToolArguments.TryNumber` already carries it, found by
-  its own test.
+  **A defect found while doing it, and FIXED 2026-08-19.** `WorkspaceToolProvider.ReadInt` called
+  `JsonElement.TryGetInt32` without checking `ValueKind`, and that method **throws** for a value that
+  is not a number — it returns false only for a `Number` too large for an `Int32`. So
+  `{"startLine": "5"}` left the provider as an exception the catalog records as a server *failure*,
+  where the caller should have been told which argument was wrong. The method's own doc comment named
+  `1e12`, `"5"` and `3.5` as refused; two of the three were, which is the ordinary kind of wrong — a
+  comment right about the cases somebody tried. Watched failing on all three non-numeric kinds
+  (`"5"`, `true`, `null`) before the `ValueKind` check landed, and `3.5` passed throughout, exactly as
+  documented. Raised by `dew_flow_rag_qln`, whose `ToolArguments.TryNumber` carries the same guard,
+  found by its own test.
 - ~~**Usage metering.**~~ **Shipped 2026-08-15** — see
   [research/PLAN_usage_telemetry.md](../research/PLAN_usage_telemetry.md).
   [`IUsageSink`](../src/Mcp.Contracts/IUsageSink.cs) now has a real implementation (a local spool

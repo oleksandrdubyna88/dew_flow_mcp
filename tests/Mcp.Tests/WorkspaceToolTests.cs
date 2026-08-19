@@ -92,6 +92,31 @@ public sealed class WorkspaceToolTests
             .Which.Reason.Should().Contain("startLine");
     }
 
+    [Theory]
+    [InlineData("\"5\"")]
+    [InlineData("3.5")]
+    [InlineData("true")]
+    [InlineData("null")]
+    public async Task A_window_number_that_is_not_a_number_is_REFUSED_and_never_thrown(string startLine)
+    {
+        // Found 2026-08-19 from the sibling repository, where the same shape was written and its own test
+        // caught it. JsonElement.TryGetInt32 does NOT return false for a value that is not a number — it
+        // THROWS InvalidOperationException, and returns false only for a Number too large for an Int32. So
+        // {"startLine": "5"} left this provider as an exception, which the catalog records as a FAILURE:
+        // the server broke, rather than the caller being told which argument it got wrong.
+        //
+        // The doc comment on ReadInt named exactly these inputs as Unreadable. Two of the three behaved as
+        // documented; the quoted one did not, which is the more ordinary kind of wrong — a comment that is
+        // right about the cases somebody tried.
+        var (provider, root) = Build();
+        await File.WriteAllTextAsync(Path.Combine(root, "a.txt"), "1\n2\n3", TestContext.Current.CancellationToken);
+
+        var result = await Invoke(provider, $$"""{"path":"a.txt","startLine":{{startLine}}}""");
+
+        result.Should().BeOfType<ToolResult.Refused>()
+            .Which.Reason.Should().Contain("startLine");
+    }
+
     [Fact]
     public async Task A_read_of_a_file_larger_than_the_cap_says_it_was_truncated_and_names_the_real_total()
     {

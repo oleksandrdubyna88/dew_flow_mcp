@@ -105,7 +105,14 @@ public sealed class WorkspaceToolProvider(ISandboxedFileReader reader) : IToolPr
     /// means <see cref="Unreadable"/>, never 0.
     /// <para>That distinction is the whole point: reading <c>{"startLine": 999999999999}</c> as 0
     /// answers with the top of the file and looks like a success, which is the one failure a caller
-    /// cannot detect. Out of range, they are told which argument and what the legal range is.</para></summary>
+    /// cannot detect. Out of range, they are told which argument and what the legal range is.</para>
+    /// <para><b>The <see cref="JsonValueKind"/> check is load-bearing, and this comment was wrong without
+    /// it.</b> <c>TryGetInt32</c> does not return false for a value that is not a number — it THROWS, and
+    /// returns false only for a <c>Number</c> too large for an <c>Int32</c>. So of the three inputs named
+    /// above, <c>1e12</c> and <c>3.5</c> behaved as documented and <c>"5"</c> left this method as an
+    /// exception the catalog records as a server FAILURE — the caller told that something broke rather than
+    /// which argument was wrong. Found 2026-08-19 in <c>dew_flow_rag_qln</c>, where the same shape was
+    /// written and its own test caught it.</para></summary>
     private static int ReadInt(JsonElement arguments, string name)
     {
         if (arguments.ValueKind != JsonValueKind.Object || !arguments.TryGetProperty(name, out var value))
@@ -113,6 +120,8 @@ public sealed class WorkspaceToolProvider(ISandboxedFileReader reader) : IToolPr
             return 0;
         }
 
-        return value.TryGetInt32(out var number) ? number : Unreadable;
+        return value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number)
+            ? number
+            : Unreadable;
     }
 }
