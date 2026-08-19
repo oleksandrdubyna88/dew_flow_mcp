@@ -18,10 +18,14 @@ Worth stating plainly, because the deployment shape decides most of the answer:
   or any routable interface. Do not bind it to one. Authentication is
   [tracked work](todo/PLAN_mcp_product.md), not an oversight, and this note exists so nobody discovers it
   by deploying first.
-- **The tools read the filesystem**, sandboxed to `--root`. Absolute paths, `..` traversal and symlink
-  escapes are rejected, and reads are capped in both lines and bytes so one call cannot pull an unbounded
-  payload. `--root` is the security boundary: point it at the workspace you mean, never at a home
-  directory or a drive root.
+- **The tools read the filesystem**, sandboxed to `--root`. Absolute paths and `..` traversal are
+  rejected lexically; symlink and junction escapes are rejected by resolving the REAL path — every
+  existing segment through `ResolveLinkTarget` — and requiring it to lie under the equally-resolved
+  root (a link whose target stays inside the root still reads). Until 2026-08-19 this sentence was
+  ahead of the code: the guard was lexical only, and a junction inside the root read straight through
+  it; the real-path check and its escape tests closed that. Reads are capped in both lines and bytes so
+  one call cannot pull an unbounded payload. `--root` is the security boundary: point it at the
+  workspace you mean, never at a home directory or a drive root.
 - **There are no editing tools here.** The public surface reads. That is a product boundary and also a
   security property, and it is asserted by a test.
 - **Telemetry is opt-in.** Without `--spool <path>` nothing is written. When it is on, call arguments are

@@ -26,9 +26,13 @@ public sealed record SandboxedFileReaderOptions
 }
 
 /// <summary>Reads files under one workspace root and nothing else.
-/// <para>The guard resolves the full path and compares it against the resolved root, which is what
-/// stops <c>..</c> traversal and symlink escapes alike — checking the STRING for "<c>..</c>" does not,
-/// because <c>a/../../b</c> and a link both spell fine.</para>
+/// <para>The guard is two checks, because each alone misses what the other catches. The LEXICAL one —
+/// <c>GetFullPath</c> then a prefix compare — stops <c>..</c> traversal, which a string scan for
+/// "<c>..</c>" does not (<c>a/../../b</c> spells fine). It cannot see NTFS links: <c>GetFullPath</c>
+/// normalizes dots without touching the disk, while the read below follows links transparently, so a
+/// junction inside the root pointing outside it passed until 2026-08-19 — the SECURITY.md claim was
+/// ahead of the code. The REAL-PATH check closes that: every existing segment is resolved through
+/// <c>ResolveLinkTarget</c> and the final target must lie under the equally-resolved root.</para>
 /// <para>The read STREAMS. It used to be <c>File.ReadAllLinesAsync</c> — the entire file into a
 /// <c>string[]</c> whatever its size — with the window sliced afterwards, so a single large file in
 /// the workspace was a multi-hundred-megabyte allocation on a process that never restarts. Memory now
@@ -42,6 +46,11 @@ public sealed class SandboxedFileReader : ISandboxedFileReader
     private readonly SandboxedFileReaderOptions caps;
     private readonly ILogger<SandboxedFileReader> logger;
 
+    /// <summary>The root with its own links resolved, computed once. The candidate's REAL path is
+    /// compared against this rather than the configured spelling — a root reached through a link
+    /// (macOS's <c>/tmp</c>, a mapped tree) would otherwise refuse every read it serves.</summary>
+    private readonly string realRoot;
+
     public SandboxedFileReader(
         WorkspaceRoot root,
         SandboxedFileReaderOptions caps,
@@ -51,6 +60,7 @@ public sealed class SandboxedFileReader : ISandboxedFileReader
         this.root = root;
         this.caps = caps;
         this.logger = logger;
+        realRoot = ResolveRealPath(root.FullPath);
     }
 
     public string Sandbox => root.FullPath;
@@ -236,8 +246,57 @@ public sealed class SandboxedFileReader : ISandboxedFileReader
             return false;
         }
 
-        fullPath = candidate;
+        // The lexical pass above never touched the disk, so a symlink or junction INSIDE the root that
+        // points outside it still spells fine. The read follows links transparently; the guard must
+        // follow them first. Links that stay inside the root are legitimate — a checkout may link
+        // within itself — so the refusal is about where the target LIVES, not about links as such.
+        var real = ResolveRealPath(candidate);
+        if (real != realRoot
+            && !real.StartsWith(realRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        // The resolved path is what gets read: the verified target, not the spelling that led to it.
+        fullPath = real;
         return true;
+    }
+
+    /// <summary>The path with every EXISTING segment's links resolved, walked root-down so a junction
+    /// in the middle of the chain is seen, not only one at the leaf — <c>ResolveLinkTarget</c> on the
+    /// full path alone resolves the leaf and nothing above it. Segments that do not exist yet are
+    /// appended verbatim: there is nothing on disk to follow, and the caller's own existence check
+    /// answers those.</summary>
+    private static string ResolveRealPath(string absolutePath)
+    {
+        var current = Path.GetPathRoot(absolutePath) ?? string.Empty;
+        var segments = absolutePath[current.Length..]
+            .Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+
+        for (var i = 0; i < segments.Length; i++)
+        {
+            current = Path.Combine(current, segments[i]);
+            FileSystemInfo info = Directory.Exists(current)
+                ? new DirectoryInfo(current)
+                : new FileInfo(current);
+            if (!info.Exists)
+            {
+                for (var rest = i + 1; rest < segments.Length; rest++)
+                {
+                    current = Path.Combine(current, segments[rest]);
+                }
+
+                return current;
+            }
+
+            var target = info.ResolveLinkTarget(returnFinalTarget: true);
+            if (target is not null)
+            {
+                current = target.FullName;
+            }
+        }
+
+        return Path.TrimEndingDirectorySeparator(current);
     }
 }
 

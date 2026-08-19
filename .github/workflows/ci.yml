@@ -38,3 +38,8 @@ jobs:
 
       - name: Plan lifecycle
         run: node .claude/rules/shared/tools/plan-lifecycle.mjs
+
+      # Every submodule pin must equal its remote's tip — "a rule change and the pin bumps are one
+      # task" is a check now, not a habit (see .claude/rules/shared/README.md, Editing discipline).
+      - name: Pin check
+        run: node .claude/rules/shared/tools/pin-check.mjs

@@ -4,6 +4,11 @@
 > it; this document records what the emitter here actually writes, so the two halves can be compared
 > without reading each other's code. Emitter: [`src/Mcp.Telemetry`](../src/Mcp.Telemetry).
 >
+> Since 2026-08-19 the full wire tree — all 34 leaf fields — is pinned by name on the emitter side in
+> `tests/Mcp.Tests/TelemetryWireShapeTests.cs`: a rename or an addition is a red build HERE, where the
+> change is made, not a silent zero in the consumer. Editing that test's list IS editing the schema;
+> carry the consumer's codec and fixture in the same change.
+>
 > Design record: [PLAN_usage_telemetry.md](PLAN_usage_telemetry.md).
 
 ## Where it lands

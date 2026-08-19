@@ -27,7 +27,10 @@ flowchart TD
     ROOTED -->|no| RESOLVE["GetFullPath(root + path)"]
     RESOLVE --> INSIDE{"starts with root + separator?"}
     INSIDE -->|no| OUT
-    INSIDE -->|yes| EXISTS{"file exists?"}
+    INSIDE -->|yes| REAL["resolve links segment by segment<br/>ResolveLinkTarget, root-down"]
+    REAL --> REALIN{"real path under<br/>the real root?"}
+    REALIN -->|no| OUT
+    REALIN -->|yes| EXISTS{"file exists?"}
     EXISTS -->|no| ABSENT["Refused — does not exist"]
     EXISTS -->|yes| STREAM["stream the file line by line<br/>File.ReadLinesAsync"]
     STREAM --> KEEP{"in the window,<br/>and under both caps?"}
@@ -62,8 +65,13 @@ flowchart TD
 
 ## Behaviours that are guarantees, not conveniences
 
-- **Resolve, then compare.** The guard resolves the full path and compares it against the resolved root.
-  Checking the *string* for `..` does not work: `a/../../b` and a symlink both spell fine.
+- **Resolve, then compare — twice.** The lexical pass (`GetFullPath` + prefix compare) stops `..`
+  traversal, which a string scan does not: `a/../../b` spells fine. It cannot see NTFS links, because
+  `GetFullPath` never touches the disk — so until 2026-08-19 a junction inside the root pointing outside
+  it read straight through, while SECURITY.md claimed otherwise. The REAL-PATH pass closes that: every
+  existing segment resolved through `ResolveLinkTarget` (root-down, so a junction mid-chain is seen, not
+  only at the leaf), compared against the equally-resolved root. Links that stay inside the root still
+  read — the refusal is about where the target lives, not about links as such.
 - **A denial is a `Refused`, not a `Failed`.** The guard working is the opposite event from the disk
   breaking, and a ledger that files both under one flag can count neither.
 - **A read returns a line WINDOW**, and every result reports `startLine`/`endLine`/`totalLines`, so
