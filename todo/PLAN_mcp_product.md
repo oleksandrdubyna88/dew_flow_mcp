@@ -22,7 +22,8 @@
 > authentication and cancellation.
 >
 > Related: the RAG repo's `todo/PLAN_rag_product.md` (what supplies the retrieval tools) and
-> `todo/PLAN_experiment_matrix.md` (how their behaviour is judged).
+> `research/PLAN_experiment_matrix.md` (how their behaviour is judged — IMPLEMENTED 2026-08-20, and split:
+> the harness half of it is `dew_flow_benchmark`).
 
 ## Where this stands
 
@@ -59,7 +60,8 @@ same footing as code:
   invisible in any single call and shows up only across a set.
 
 The lesson is not "write nicer docs". It is that **a tool's description is a measured artefact**, and a
-change to it is an arm of the experiment matrix — `dew_flow_rag_qln · todo/PLAN_experiment_matrix.md` —
+change to it is an arm of the experiment matrix — `dew_flow_rag_qln · research/PLAN_experiment_matrix.md`,
+whose harness is `dew_flow_benchmark` —
 like any retrieval change.
 
 ## Build order
