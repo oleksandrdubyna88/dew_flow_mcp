@@ -1,0 +1,94 @@
+# The management surface — the one route group this server exposes over HTTP. Everything else it does
+# is the MCP protocol itself, over SSE or stdio, and neither is a request you can write down here.
+#
+# Both routes exist to answer a question about the RUNNING process rather than about a configuration,
+# so both assertions are about that distinction: health is computed from contributors rather than
+# being the constant it used to be, and the surface reports what this build serves rather than what it
+# was asked to serve.
+
+# @name mcp_health_is_computed_from_contributors_not_a_constant
+# @prod
+GET {{baseUrl}}/api/mcp/health
+Accept: application/json
+
+?? status == 200
+?? header content-type matches ^application\/json
+
+{{
+  const assert = require('node:assert');
+  const body = response.parsedBody;
+  test('the components travel WITH the verdict, so a caller can see what was actually checked', () => {
+    assert.ok(Array.isArray(body.components),
+      'components must be an array — a bare status is the constant this endpoint stopped being');
+  });
+  test('the verdict is one the contract defines', () => {
+    assert.ok(['ok', 'degraded', ''].includes(body.status), `unknown verdict: ${JSON.stringify(body.status)}`);
+  });
+  // NOTE for the next reader, because this WILL look wrong: a server started without --spool
+  // registers no contributor, so the honest answer here is `ok` with an empty components list —
+  // "everything that was checked is fine" over "nothing was checked". Those are different
+  // sentences and only the second field distinguishes them, which is exactly why the components
+  // are not summarised away. Read both, never the status alone.
+  test('each component that IS reported names itself and says whether it is healthy', () => {
+    for (const component of body.components) {
+      assert.ok(component.component.length > 0, 'a component with no name cannot be acted on');
+      assert.strictEqual(typeof component.healthy, 'boolean');
+      assert.strictEqual(typeof component.detail, 'string');
+    }
+  });
+}}
+
+###
+# The fingerprint is what makes "which build is this" answerable without trusting a version string.
+# @name mcp_surface_reports_what_this_build_serves
+# @prod
+GET {{baseUrl}}/api/mcp/surface
+Accept: application/json
+
+?? status == 200
+?? header content-type matches ^application\/json
+
+{{
+  const assert = require('node:assert');
+  const body = response.parsedBody;
+  test('the tools are echoed, not summarised away', () => {
+    assert.ok(Array.isArray(body.tools) && body.tools.length > 0,
+      'a surface serving no tools is a server nothing can call');
+  });
+  test('both hashes are present — a consumer COMPARES them and never re-derives them', () => {
+    assert.ok(body.toolsHash.length > 0, 'no toolsHash');
+    assert.ok(body.descriptionsHash.length > 0, 'no descriptionsHash');
+  });
+  test('the answer names the process it came from', () => {
+    assert.strictEqual(typeof body.pid, 'number');
+    assert.ok(body.app.length > 0);
+  });
+  test('takenAt is a real instant, so a stale fingerprint is visible as one', () => {
+    assert.ok(!Number.isNaN(Date.parse(body.takenAt)), `unparseable takenAt: ${body.takenAt}`);
+  });
+}}
+
+###
+# Both routes are GET-only, and that is part of the contract rather than an accident of the framework:
+# a management surface that accepted a POST would be a management surface something could change.
+# @name posting_to_the_health_route_is_405
+POST {{baseUrl}}/api/mcp/health
+Content-Type: application/json
+
+{}
+
+?? status == 405
+
+###
+# @name an_unknown_route_under_the_group_is_404
+GET {{baseUrl}}/api/mcp/nothing-here
+
+?? status == 404
+
+###
+# @uncovered "degraded" — the verdict is a BODY value, not a status code, and reaching it needs a
+#            contributor that reports unhealthy. No request can make a healthy component fail, and
+#            whether any contributor is registered at all is a process ARGUMENT (--spool) rather
+#            than anything a request can change. The fold itself is unit-tested where it lives.
+# @uncovered 504 from the group's request timeout — these endpoints answer in milliseconds by
+#            construction, so provoking it would mean making one of them slow on purpose.
