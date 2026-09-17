@@ -18,6 +18,17 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      # BEFORE the build, because a formatting complaint is cheaper to read than a build log and
+      # this costs seconds. `--verify-no-changes` REPORTS and never rewrites: CI must not push a
+      # reformat into somebody's branch, it must say the branch is not formatted and stop.
+      #
+      # It reads `.editorconfig`. Measured while adding it: with the file's rules the repository is
+      # ALREADY clean, so this needed no reformat commit — the plan expected one. On a Windows
+      # checkout the same command reports hundreds of ENDOFLINE errors, which is `core.autocrlf`
+      # rewriting the working copy and not a difference git or this runner ever sees.
+      - name: Formatted
+        run: dotnet format dew_flow_mcp.slnx --verify-no-changes --no-restore
+
       - name: Build
         run: dotnet build dew_flow_mcp.slnx -c Release
 
