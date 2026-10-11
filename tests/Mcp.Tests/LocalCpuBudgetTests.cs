@@ -84,22 +84,29 @@ public sealed partial class LocalCpuBudgetTests
 /// runner ignored its config, nine would meet and the probe that saw it goes red.</summary>
 internal static class ConcurrencyGauge
 {
+    private const int Probes = 9;
     private static int _inside;
     private static int _peak;
 
+    /// <summary>The probe's assertion. Skipped when the run was started with an explicit max-threads
+    /// switch: that is a deliberate override the rule allows, and a red probe would report the person's
+    /// choice as a defect.</summary>
+    public static void AssertNeverMoreThanTheCap()
+    {
+        if (Environment.GetCommandLineArgs().Any(arg => arg.StartsWith("--max-threads", StringComparison.Ordinal)))
+            Assert.Skip("the run set its own max-threads; the default cap is not what is being run");
+        Meet().Should().BeLessThanOrEqualTo(8, "the runner must never run more tests at once than its cap");
+    }
+
     // Blocking on purpose: xUnit caps how many tests RUN at once, and a probe that awaited would hand its
     // thread back and let the runner start more, measuring the scheduler instead of the cap.
-    public static int Meet()
+    private static int Meet()
     {
-        var now = Interlocked.Increment(ref _inside);
-        int seen;
-        while ((seen = Volatile.Read(ref _peak)) < now && Interlocked.CompareExchange(ref _peak, now, seen) != seen) { }
+        RaisePeakTo(Interlocked.Increment(ref _inside));
         try
         {
-            var until = DateTime.UtcNow.AddMilliseconds(500);
-            while (DateTime.UtcNow < until && Volatile.Read(ref _inside) < 9) Thread.Sleep(10);
-            var inside = Volatile.Read(ref _inside);
-            while ((seen = Volatile.Read(ref _peak)) < inside && Interlocked.CompareExchange(ref _peak, inside, seen) != seen) { }
+            WaitForCompany();
+            RaisePeakTo(Volatile.Read(ref _inside));
             return Volatile.Read(ref _peak);
         }
         finally
@@ -107,14 +114,27 @@ internal static class ConcurrencyGauge
             Interlocked.Decrement(ref _inside);
         }
     }
+
+    private static void WaitForCompany()
+    {
+        var until = DateTime.UtcNow.AddMilliseconds(500);
+        while (DateTime.UtcNow < until && Volatile.Read(ref _inside) < Probes) Thread.Sleep(10);
+    }
+
+    private static void RaisePeakTo(int value)
+    {
+        int seen;
+        do { seen = Volatile.Read(ref _peak); }
+        while (seen < value && Interlocked.CompareExchange(ref _peak, value, seen) != seen);
+    }
 }
 
-public sealed class ConcurrencyProbe1 { [Fact] public void Never_more_than_the_cap_at_once() => ConcurrencyGauge.Meet().Should().BeLessThanOrEqualTo(8); }
-public sealed class ConcurrencyProbe2 { [Fact] public void Never_more_than_the_cap_at_once() => ConcurrencyGauge.Meet().Should().BeLessThanOrEqualTo(8); }
-public sealed class ConcurrencyProbe3 { [Fact] public void Never_more_than_the_cap_at_once() => ConcurrencyGauge.Meet().Should().BeLessThanOrEqualTo(8); }
-public sealed class ConcurrencyProbe4 { [Fact] public void Never_more_than_the_cap_at_once() => ConcurrencyGauge.Meet().Should().BeLessThanOrEqualTo(8); }
-public sealed class ConcurrencyProbe5 { [Fact] public void Never_more_than_the_cap_at_once() => ConcurrencyGauge.Meet().Should().BeLessThanOrEqualTo(8); }
-public sealed class ConcurrencyProbe6 { [Fact] public void Never_more_than_the_cap_at_once() => ConcurrencyGauge.Meet().Should().BeLessThanOrEqualTo(8); }
-public sealed class ConcurrencyProbe7 { [Fact] public void Never_more_than_the_cap_at_once() => ConcurrencyGauge.Meet().Should().BeLessThanOrEqualTo(8); }
-public sealed class ConcurrencyProbe8 { [Fact] public void Never_more_than_the_cap_at_once() => ConcurrencyGauge.Meet().Should().BeLessThanOrEqualTo(8); }
-public sealed class ConcurrencyProbe9 { [Fact] public void Never_more_than_the_cap_at_once() => ConcurrencyGauge.Meet().Should().BeLessThanOrEqualTo(8); }
+public sealed class ConcurrencyProbe1 { [Fact] public void Never_more_than_the_cap_at_once() => ConcurrencyGauge.AssertNeverMoreThanTheCap(); }
+public sealed class ConcurrencyProbe2 { [Fact] public void Never_more_than_the_cap_at_once() => ConcurrencyGauge.AssertNeverMoreThanTheCap(); }
+public sealed class ConcurrencyProbe3 { [Fact] public void Never_more_than_the_cap_at_once() => ConcurrencyGauge.AssertNeverMoreThanTheCap(); }
+public sealed class ConcurrencyProbe4 { [Fact] public void Never_more_than_the_cap_at_once() => ConcurrencyGauge.AssertNeverMoreThanTheCap(); }
+public sealed class ConcurrencyProbe5 { [Fact] public void Never_more_than_the_cap_at_once() => ConcurrencyGauge.AssertNeverMoreThanTheCap(); }
+public sealed class ConcurrencyProbe6 { [Fact] public void Never_more_than_the_cap_at_once() => ConcurrencyGauge.AssertNeverMoreThanTheCap(); }
+public sealed class ConcurrencyProbe7 { [Fact] public void Never_more_than_the_cap_at_once() => ConcurrencyGauge.AssertNeverMoreThanTheCap(); }
+public sealed class ConcurrencyProbe8 { [Fact] public void Never_more_than_the_cap_at_once() => ConcurrencyGauge.AssertNeverMoreThanTheCap(); }
+public sealed class ConcurrencyProbe9 { [Fact] public void Never_more_than_the_cap_at_once() => ConcurrencyGauge.AssertNeverMoreThanTheCap(); }
