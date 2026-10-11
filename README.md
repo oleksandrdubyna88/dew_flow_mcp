@@ -93,9 +93,13 @@ A duplicate tool name throws at startup, naming both providers, rather than sile
 ## Build and test
 
 ```bash
-dotnet build dew_flow_mcp.slnx
-./tests/Mcp.Tests/bin/Debug/net10.0/Mcp.Tests.exe
+node .claude/rules/shared/tools/low-priority.mjs dotnet build dew_flow_mcp.slnx -m:4
+node .claude/rules/shared/tools/low-priority.mjs ./tests/Mcp.Tests/bin/Debug/net10.0/Mcp.Tests.exe
 ```
+
+Local runs take at most 8 test threads (`tests/Mcp.Tests/xunit.runner.json`, copied to the output) and run at
+lowered CPU priority through the shared rules' `low-priority.mjs` (BelowNormal on Windows, nice 19 elsewhere;
+nothing is lowered under `CI`). Run `git submodule update --init` first, so `.claude/rules/shared` exists.
 
 Tests are **xUnit v3 on Microsoft Testing Platform**: there is no VSTest testhost, so `dotnet test` aborts
 with a `testhost.deps.json` error — a tooling mismatch, not a test failure. Run the executable. Filters are

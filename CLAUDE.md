@@ -22,13 +22,16 @@ is the cautionary example. **Read first:** [README.md](README.md), then
 ## Commands
 
 ```bash
-# Build
-dotnet build dew_flow_mcp.slnx -c Debug
+# Local builds and test runs are capped and lowered (shared rule common.local-cpu-budget): at most 8
+# test threads (tests/Mcp.Tests/xunit.runner.json), BelowNormal (Windows) / nice 19, through the mount's wrapper.
+
+# Build (-m:4 per csharp.dotnet-build)
+node .claude/rules/shared/tools/low-priority.mjs dotnet build dew_flow_mcp.slnx -c Debug -m:4
 
 # Run tests — ALWAYS via the test project's executable, NEVER `dotnet test`
 # (xUnit v3 / Microsoft Testing Platform: there is no VSTest testhost, so `dotnet test` aborts)
-./tests/Mcp.Tests/bin/Debug/net10.0/Mcp.Tests.exe
-./tests/Mcp.Tests/bin/Debug/net10.0/Mcp.Tests.exe --filter-class "*WorkspaceToolTests"
+node .claude/rules/shared/tools/low-priority.mjs ./tests/Mcp.Tests/bin/Debug/net10.0/Mcp.Tests.exe
+node .claude/rules/shared/tools/low-priority.mjs ./tests/Mcp.Tests/bin/Debug/net10.0/Mcp.Tests.exe --filter-class "*WorkspaceToolTests"
 
 # Run the server
 dotnet run --project src/Mcp.Host                        # HTTP/SSE, the default

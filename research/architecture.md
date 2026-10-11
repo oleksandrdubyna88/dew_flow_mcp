@@ -240,6 +240,16 @@ discover by deploying first.
 `.github/workflows/ci.yml` builds the solution in Release and runs the test executable. Tests are run as
 an executable, never through `dotnet test` (xUnit v3 on Microsoft Testing Platform has no VSTest host).
 
+Local runs follow the shared rule `common.local-cpu-budget` (2026-10-11): at most 8 test threads, set in
+`tests/Mcp.Tests/xunit.runner.json` and copied to the output, and lowered CPU priority through
+`.claude/rules/shared/tools/low-priority.mjs`. CI is exempt and unchanged. `LocalCpuBudgetTests` checks four things:
+
+- the config and its Content item;
+- the copy the running suite actually read;
+- the documented commands;
+- an observed peak: nine probe classes meet in one gauge and fail if nine ever ran at once. Uncapped, all nine
+  failed (measured before the config existed).
+
 ### Public presentation
 
 This repository is public, and since 2026-08-17 that is a stated position rather than a visibility flag.
