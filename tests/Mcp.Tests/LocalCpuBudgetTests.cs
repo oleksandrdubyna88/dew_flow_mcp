@@ -44,8 +44,8 @@ public sealed partial class LocalCpuBudgetTests
         foreach (var project in projects)
         {
             File.ReadAllText(project).Should().Contain(
-                "<Content Include=\"xunit.runner.json\" CopyToOutputDirectory=\"PreserveNewest\" />",
-                $"{project} must copy xunit.runner.json to its output, or the runner never reads it");
+                "<Content Include=\"xunit.runner.json\" CopyToOutputDirectory=\"PreserveNewest\" Condition=\"'$(CI)' != 'true'\" />",
+                $"{project} must copy xunit.runner.json to its output for local runs (not on CI, where an exact 8 would RAISE a small runner)");
             CapIn(Path.Combine(Path.GetDirectoryName(project)!, "xunit.runner.json"))
                 .Should().BeInRange(1, FamilyCap, $"{project} caps its test threads");
         }
@@ -54,7 +54,9 @@ public sealed partial class LocalCpuBudgetTests
     [Fact]
     public void The_running_suite_reads_a_cap_of_eight_or_fewer()
     {
-        // What THIS run was configured with: the file the runner reads, in the runner's own folder.
+        // What THIS run was configured with: the file the runner reads, in the runner's own folder. A CI build
+        // does not copy it on purpose (CI is exempt, and an exact 8 would raise a 4-vCPU runner).
+        if (IsCi()) Assert.Skip("CI builds do not copy the cap; CI keeps its own thread count");
         var copied = Path.Combine(AppContext.BaseDirectory, "xunit.runner.json");
         File.Exists(copied).Should().BeTrue("the cap only counts once it reaches the output folder");
         CapIn(copied).Should().BeInRange(1, FamilyCap);
@@ -73,6 +75,9 @@ public sealed partial class LocalCpuBudgetTests
         lines.Should().OnlyContain(line => line.Contains("low-priority.mjs"),
             "a documented test run goes through the mount's low-priority.mjs");
     }
+
+    private static bool IsCi() =>
+        Environment.GetEnvironmentVariable("CI") is { Length: > 0 } ci && !ci.Equals("false", StringComparison.OrdinalIgnoreCase) && ci != "0";
 
     [GeneratedRegex(@"\.Tests\.exe")]
     private static partial Regex TestExe();
