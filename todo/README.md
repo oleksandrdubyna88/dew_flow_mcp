@@ -13,6 +13,7 @@ Definition of Done.
 
 | plan | status | scope |
 |---|---|---|
+| [PLAN_test_leftovers_E3.md](PLAN_test_leftovers_E3.md) | plan only, 2026-10-16 — waits for the shared rules' E1 release | Stories of epic E3 of `dew_flow_conventions · todo/PLAN_test_leftovers_rollout.md`: every temp folder `tests/Mcp.Tests` makes is named `testsToDelete-mcp-…`, claimed, removed by the test that made it, collected by the next run when a run was killed, and kept so by a guard |
 | [PLAN_mcp_product.md](PLAN_mcp_product.md) | **Phase 3 shipped 2026-08-17**; inversion and both transports built and parity-tested; the tool set is one placeholder | What remains: the three tool families and HTTP auth. Public-repository hygiene is **done** — LICENSE, NOTICE, THIRD-PARTY-NOTICES, README, VERSIONING, CONTRIBUTING, SECURITY, and an explicit `<Version>`; taken first because the repository was already public with no licence, which is "all rights reserved" by silence. Usage metering shipped earlier (see below). Of the rest, the `rt_` family is unblocked and lives here; `rag_`/`graf_` are gated on `dew_flow_rag_qln` supplying `IToolProvider` implementations, which it does not yet |
 
 ## Promoted
