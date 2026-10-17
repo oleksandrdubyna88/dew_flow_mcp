@@ -3,7 +3,8 @@
 > Status: **plan only, nothing implemented yet, 2026-10-16.** Stories of epic E3 of the parent plan
 > `dew_flow_conventions · todo/PLAN_test_leftovers_rollout.md` (§ *Epics*, E3). Scope: the `.claude/rules/shared` pin,
 > a new `tests/Mcp.Tests/Leftovers/` folder (helper, owner liveness, start-of-run sweep, end-of-run audit, guard), the
-> 11 test files that create temp folders today, one CI step, and `research/architecture.md` § CI.
+> 11 test files that create temp folders today, one CI step, a new `research/module_tests.md`, and
+> `research/architecture.md` § CI.
 >
 > Split by Opus, 2026-10-16. Models per story below. No cornerstone: E3 is not one (parent, E3 entry).
 
@@ -144,18 +145,26 @@ would leave `main` red between them.
   2. Read the released `common/test-leftovers.md` and confirm, one by one: the `## Tokens` table has the header
      `| token | family | repository |` and a row whose first cell is `` `mcp` ``; rule §1–§4 and §7 say what *The
      contract this document encodes* cites (the 63-character limit, the owner shape, the sibling `.owner`, the 2-second
-     tolerance, the 10-minute age, the exemption grammar); `tools/janitor.sh` exists. A difference is a stop: report it
+     tolerance, the 10-minute age, the exemption grammar); `tools/janitor.sh` exists and takes `--token <t>` (sweeps
+     only `testsToDelete-<t>-…`, combinable with `--dry-run`; S4 sc. 9 uses it). A difference is a stop: report it
      to the epic's owner; S2–S4 are briefed against the cited text.
   3. `git add .claude/rules/shared` and one commit:
      `chore(rules): pin shared conventions to release <short sha> — test leftovers: owner, start-of-run sweep, janitor, guard grammar`.
+  4. **Re-check S2's constants against the released text, before S2 merges.** With the pin on the release, compare
+     each constant S2 writes with the released rule: `RepoToken` = the `## Tokens` row (`mcp`); `Prefix` and the
+     `Owned.Pattern` / `Owned.FullName` spelling = rule §1 (prefix, both separators, case-insensitive, id 6–12 of
+     `[A-Za-z0-9]`, 63 characters); `LeftoversSweep.MinAge` = rule §4 (10 minutes); `StartToleranceSeconds` and the
+     `Owner` format and parse expression = rule §3 (`<host>@<os>:<pid>[:<start>]`, host compared case-insensitively).
+     The comparison is a table in S1's PR. A mismatch updates S2 (its constants, scenarios and this document) FIRST —
+     S2 does not merge with a constant the released rule does not say.
 - **Scenarios.** No behaviour changes here, so no new test; the checks below are the evidence, each recorded in the PR.
 - **Commands.** `node .claude/rules/shared/tools/pin-check.mjs` (green after the bump); `node
   .claude/rules/shared/tools/plan-lifecycle.mjs`; `node .claude/rules/shared/tools/gate-snippet-check.mjs`; `node
   .claude/rules/shared/tools/build-flags-check.mjs`; `node .github/scripts/branch-protection.mjs --selftest`;
   `node .claude/rules/shared/tools/low-priority.mjs dotnet build dew_flow_mcp.slnx -c Debug -m:4`; the test executable
   (the release may carry other rule changes — every `plans` step must stay green).
-- **DoD.** The pin equals the `release` tip; all five `plans` steps green locally and on CI; the three facts of step 2
-  recorded in the PR; nothing else in the diff.
+- **DoD.** The pin equals the `release` tip; all five `plans` steps green locally and on CI; the facts of step 2 and
+  the constants table of step 4 recorded in the PR; nothing else in the diff.
 
 ## S2 — The C# owned-resource helper and owner liveness
 
@@ -181,6 +190,9 @@ public static class Owned
     public const int StartToleranceSeconds = 2;                          // rule §3
     public static readonly Regex Pattern =                               // what the sweep, the audit and the guard match
         new("^teststodelete[-_]" + RepoToken + "[-_]", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    public static readonly Regex FullName =                              // a whole name: rule §1's id is 6–12 of [A-Za-z0-9]
+        new("^teststodelete[-_]" + RepoToken + "[-_].+[-_][A-Za-z0-9]{6,12}$",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     public static string TempRoot();                       // Path.GetTempPath() — the one place a test learns the temp root
     public static string NameFor(string what);             // OwnedPrefix + what + "-" + IdLength chars of [A-Za-z0-9]
@@ -210,6 +222,7 @@ public sealed class OwnedDir : IDisposable                // one folder; `using 
     public static OwnedDir Create(string what, string? parent = null, Action<string>? warn = null);
     internal static OwnedDir Create(string what, string? parent, Action<string>? warn, Func<string> nextName); // test seam: the names to try
     public void Dispose();                                // Removal.Quietly(Path, warn); idempotent; never throws
+    internal static IReadOnlyList<OwnedDir> Undisposed(); // the process-wide registry: created, not yet disposed (S4 audit)
 }
 
 public sealed class OwnedScope : IDisposable              // many folders, one Dispose — a test class's field
@@ -229,7 +242,10 @@ internal static class Removal
   `-`; MAY hold `-`, spaces and non-ASCII; `OwnedPrefix.Length + what.Length + 1 + IdLength <= MaxName` — here
   `what` ≤ 38. Invalid ⇒ `ArgumentException` naming the value, before anything exists.
 - **The id**: `RandomNumberGenerator.GetString("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", 6)`
-  (.NET 8+, unbiased) — never `Path.GetRandomFileName()` (it carries a `.`), never `CreateTempSubdirectory`.
+  (.NET 8+, unbiased) — never `Path.GetRandomFileName()` (it carries a `.`), never `CreateTempSubdirectory`. The
+  helper WRITES 6; every reader of a whole name (`Owned.FullName`) ACCEPTS rule §1's 6–12, so a name made by another
+  implementation of the contract with a longer id still reads as one. Selection by the sweep, the audit and the guard
+  stays the anchored prefix `Owned.Pattern` (rule §4); `FullName` never narrows it.
 - **`Owner.This`**: `Host` = `Dns.GetHostName()` with every run of `@`, `:` or whitespace replaced by `-`, then `@` and
   the tag `windows` | `linux` | `macos` from `OperatingSystem.IsWindows()/IsLinux()/IsMacOS()` — any other platform
   throws `PlatformNotSupportedException` (so the helper refuses to create: no claim, no folder). **Not**
@@ -256,6 +272,11 @@ internal static class Removal
   5. Return the `OwnedDir`. Steps 2–3 retry at most five names; then throw.
   The caller registers the cleanup on the same statement (`using var` or `OwnedScope.Dir`). Nothing is ever written
   inside `dir`.
+- **The registry of undisposed instances.** Step 5 also adds the new `OwnedDir` to one process-wide
+  `ConcurrentDictionary<OwnedDir, byte>`; the FIRST `Dispose()` removes it (before the removal is tried, so a removal
+  that gives up is reported by its own warning, not twice). `OwnedScope` holds `OwnedDir`s, so its folders are in the
+  registry too. `Undisposed()` is a snapshot. It is what lets S4's audit see a folder made under a CUSTOM `parent`
+  (outside the temp root), which a scan of the temp root's claims cannot.
 - **`Removal.Quietly(dir, warn)`**: up to five tries, 100 ms apart (`Thread.Sleep`), each: if the folder exists, first
   remove every TOP-LEVEL entry whose `Attributes` carry `FileAttributes.ReparsePoint` as a link (a `DirectoryInfo` ⇒
   `Directory.Delete(link)` non-recursive, which removes a junction or a directory symlink and never its target; a
@@ -301,14 +322,17 @@ before the body is written). Every scenario that counts what a call left behind 
 
 1. **A name carries the prefix, the token, what, and six random characters.** `Owned.NameFor("pg")` matches
    `^testsToDelete-mcp-pg-[A-Za-z0-9]{6}$`; two calls differ; `NameFor("a-b ")` (a separator, a trailing space) is
-   accepted; `NameFor(new string('x', 38))` is 63 characters.
+   accepted; `NameFor(new string('x', 38))` is 63 characters. `Owned.FullName` matches every `NameFor` result, and
+   `testsToDelete-mcp-pg-` + an id of 6 and of 12 `[A-Za-z0-9]` characters (and the lowercase `_` spelling); it does
+   not match an id of 5 or of 13 characters, or one holding a `.` (`clxdyztb.njt`).
 2. **A bad `what` throws before anything exists.** `""`, `"a/b"`, `"a\\b"`, `"-x"`, `"a\u0001b"`, `"a\u007fb"`,
    `"a\0b"`, 39 × `x` ⇒ `ArgumentException`, and the private parent's entry list is unchanged.
 3. **A folder and its claim, side by side, never inside.** `OwnedDir.Create("path Unicode пробел", parent)` makes a
    folder whose name starts with `testsToDelete-mcp-path Unicode пробел-`, empty, and a sibling `<folder>.owner` that
    `Owner.Parse`s to `Owner.This`.
 4. **Disposal removes the folder and the claim, and is idempotent.** After `Dispose()` neither exists; a second
-   `Dispose()` writes no warning.
+   `Dispose()` writes no warning. Between `Create` and `Dispose` the instance is in `OwnedDir.Undisposed()`; after the
+   first `Dispose` it is not (also when the removal gave up, scenario 6).
 5. **Unwind: a test body that throws still leaves nothing.** `var scope = new OwnedScope(); string path = ""; try {
    path = scope.Dir("unwind", parent); throw new InvalidOperationException("the failing body"); } catch
    (InvalidOperationException) { } finally { scope.Dispose(); }` ⇒ neither `path` nor `path + ".owner"` exists, and the
@@ -438,7 +462,8 @@ Every scenario passes `tmp` = a private `OwnedDir` — never the real temp root.
 - **Files.** New `tests/Mcp.Tests/Leftovers/LeftoversGuard.cs`, `LeftoversGuardTests.cs`, `LeftoversAudit.cs`,
   `LeftoversAuditTests.cs`; new `tests/Mcp.Tests/RepositoryRoot.cs`; `LocalCpuBudgetTests.cs` (uses it);
   `LeftoversSweepFixture.cs` (gains `DisposeAsync`); the 11 files of the migration table; `Owned.cs` (one exemption
-  comment); `.github/workflows/ci.yml`; `research/architecture.md`.
+  comment — harness setup, added BEFORE scenario 1's RED run); `.github/workflows/ci.yml`; new
+  `research/module_tests.md`; `research/architecture.md`.
 
 **The guard.** `LeftoversGuard.Scan(string repoRoot) → GuardReport(int FilesScanned, IReadOnlyList<Finding> Findings)`,
 `Finding(string File, int Line, string Class, string Text)`; pure apart from reading files. A port of the shape of
@@ -455,7 +480,12 @@ Every scenario passes `tmp` = a private `OwnedDir` — never the real temp root.
   `FilesScanned == 0`, which the real-repository test reports as `scanned nothing under <root> — discovery broke; the
   repository is not clean`.
 - **Comments.** A line whose trimmed text starts with `//` or `#` is skipped for matching (doc comments included —
-  `LogRetentionTests.cs:79` mentions `Directory.Delete` in one) but read for exemptions.
+  `LogRetentionTests.cs:79` mentions `Directory.Delete` in one) but read for exemptions. **Block comments** — `/* … */`,
+  on one line or over many — are stripped from `.cs`, `.mjs`, `.js` and `.cjs` text BEFORE matching: each character
+  inside one is replaced by a space and every newline is kept, so line numbers do not move; code after a closing `*/`
+  on the same line is still matched. A `/*` inside a string literal (`"src/**/*.cs"`, a verbatim `@"…"`, a JS
+  template) opens nothing — the stripper walks string literals, so a glob in a string cannot swallow the code after
+  it. Exemption markers are read from the ORIGINAL text, so `/* testsToDelete-exempt: … */` still counts.
 - **Classes** (rule §7; a hit outside a valid exemption is a finding):
   - `raw-temp`: `CreateTempSubdirectory\s*\(`, `GetTempPath2?\s*\(`, `GetTempFileName\s*\(`,
     `GetEnvironmentVariable\(\s*"(TEMP|TMP|TMPDIR)"`, `\bmkdtemp(Sync)?\s*\(`, `\btmpdir\s*\(`,
@@ -511,19 +541,28 @@ old prefix without its `mcp-`:
 | `WorkspaceToolTests.cs:285`, `:301` | `_owned.Dir("outside")` |
 | `WorkspaceToolTests.cs:402` | `var home = _owned.Dir("workspace"); var root = Path.Combine(home, "root");` then `Directory.CreateDirectory(Path.Combine(root, "sub"))` as today — the workspace root is a child of an OWNED folder (rule §1: it dies with its container), so `:259-260`'s `outside.txt` lands in `home`, is removed with it, and each theory row has its own |
 | `WorkspaceToolTests.cs:243`, `:276` | `Owned.TempRoot()` in place of `Path.GetTempPath()` — the meaning is unchanged (any absolute directory) |
-| `Owned.cs` (`TempRoot`) | the line above `Path.GetTempPath()`: `// testsToDelete-exempt: raw-temp — the helper is the one place a test learns the temp root` |
+| `Owned.cs` (`TempRoot`) | the line above `Path.GetTempPath()`: `// testsToDelete-exempt: raw-temp — the helper is the one place a test learns the temp root` — **harness setup, not migration**: it lands before scenario 1's RED run, so that RED counts only the 11 files below |
 
 Assertions do not change, with one exception that is the point: `WorkspaceToolTests.The_provider_reports_which_workspace_it_is_scoped_to`
 (`:387-393`) still compares with `root`, which is now `home/root`.
 
-**The end-of-run audit.** `LeftoversAudit.ClaimedBy(string tmp, Owner owner) → IReadOnlyList<string>`: every depth-1
-folder of `tmp` matching `Owned.Pattern` whose sibling claim parses to exactly `owner` (host, pid and start), plus every
-such claim whose folder is missing. `LeftoversSweepFixture` implements `IAsyncDisposable`; `DisposeAsync` — which
-xUnit v3 calls after the last test of the assembly — computes `ClaimedBy(Owned.TempRoot(), Owner.This)`, removes each
-entry with `Removal.Quietly` (so the machine is clean either way), and, when the list was not empty, throws
-`InvalidOperationException("mcp tests: this run left <n> folder(s) it claimed — <paths>; a test made scratch outside a disposed scope")`.
-A green run's teardown leaves nothing it claimed, so this is the whole-suite form of the epic's goal sentence, and it
-catches the one leak the guard cannot see — a helper call whose `OwnedDir` nobody disposes. A run that already failed
+**The end-of-run audit.** Two checks, one verdict:
+
+- `LeftoversAudit.ClaimedBy(string tmp, Owner owner) → IReadOnlyList<string>`: every depth-1 folder of `tmp` matching
+  `Owned.Pattern` whose sibling claim parses to exactly `owner` (host, pid and start), plus every such claim whose
+  folder is missing.
+- `LeftoversAudit.Undisposed() → IReadOnlyList<string>`: the paths of `OwnedDir.Undisposed()` (S2's process-wide
+  registry) — every `OwnedDir`/`OwnedScope` folder created and never disposed, **wherever its `parent` was**, including
+  a custom parent outside the temp root that the claim scan cannot see.
+
+`LeftoversSweepFixture` implements `IAsyncDisposable`; `DisposeAsync` — which xUnit v3 calls after the last test of the
+assembly — first disposes every instance `Undisposed()` names (each through its own `Dispose`, so the registry
+empties), then computes `ClaimedBy(Owned.TempRoot(), Owner.This)` and removes each entry with `Removal.Quietly` (so
+the machine is clean either way), and, when either list was not empty, throws
+`InvalidOperationException("mcp tests: this run left <n> folder(s) it claimed — <paths>; a test made scratch outside a disposed scope")`
+(the union of both lists, each path once). A green run's teardown leaves nothing it claimed, so this is the whole-suite
+form of the epic's goal sentence, and it catches the one leak the guard cannot see — a helper call whose `OwnedDir`
+nobody disposes, under any parent. A run that already failed
 may add this line when a failed test left a file handle open on Windows; that is the same failure, named twice.
 
 **CI.** `build-test` gains, before `Build`, the step the other two jobs already have:
@@ -538,20 +577,42 @@ may add this line when a failed test left a file handle open on Windows; that is
 **Docs.** `research/architecture.md` § CI (`:238-251`): one paragraph — the helper (`tests/Mcp.Tests/Leftovers`, names
 `testsToDelete-mcp-<what>-<id>`, a sibling `.owner`), the start-of-run sweep (assembly fixture, owner liveness, 10
 minutes), the end-of-run audit, the guard and its classes, the CI submodule step, and the host-wide janitor
-`bash .claude/rules/shared/tools/janitor.sh --dry-run` (Git for Windows' bash on Windows, never WSL's); the test
-count at `:40` updated to the real number. No `module_tests.md` is created — this repository documents tests in
-`architecture.md`.
+`bash .claude/rules/shared/tools/janitor.sh --token mcp --dry-run` (Git for Windows' bash on Windows, never WSL's);
+the test count at `:40` updated to the real number; the module map names `research/module_tests.md`.
+
+**`research/module_tests.md` — new, created in this story.** The shared `common/knowledge-base.md` requires it by
+name in every repository (the record `common/scenario-tests.md` point 7 describes), and none exists here yet. The
+facts it carries, each true at merge time:
+
+- **Where the harness is** — `tests/Mcp.Tests` (xUnit v3 on Microsoft Testing Platform), and inside it
+  `tests/Mcp.Tests/Leftovers/` (helper, sweep, audit, guard).
+- **How it is run** — the exact commands, identical to CI's `build-test` job: `dotnet build dew_flow_mcp.slnx -c
+  Release` and the test executable (`./tests/Mcp.Tests/bin/Release/net10.0/Mcp.Tests`), never `dotnet test`; locally
+  through `node .claude/rules/shared/tools/low-priority.mjs`; `--filter-namespace "Mcp.Tests.Leftovers"` for this
+  epic's tests; the janitor command above.
+- **The leftovers flows, each `covered` or `not covered`** with the test that covers it: the helper (name, claim
+  beside, dispose, unwind, never-throw teardown, links unlinked — S2 sc. 1–8); owner liveness (S2 sc. 9–11); the
+  start-of-run sweep (S3 sc. 1–7); the end-of-run audit (both checks, S4 sc. 7, 7a, 8); the guard (S4 sc. 1, 3–6);
+  the janitor reading this helper's claim (S4 sc. 9, by hand — `not covered` in CI, with why).
+- **What it does not prove** — a SIGKILL of the real executable (the kill is built by hand, S3 sc. 1); macOS (no CI
+  leg); the §5 container carve-out (not recognised, the recorded deviation); the guard reads text, so a temp path
+  built by reflection or in a generated file is invisible to it; the audit runs only when the executable reaches
+  `DisposeAsync`.
+- **When it runs** — every pull request (`build-test`), and the janitor by hand on a machine that stopped running
+  these tests.
 
 **Hand clean-up**, once per machine, recorded in the PR and not code: list the temp root's folders named exactly
 `mcp-<one of the 17 old prefixes>` + 8 characters + `.` + 3 (Windows) or + 6 characters (Linux, macOS), and
 `outside.txt` containing `secret`; look at the list; delete only those.
 
-**Scenarios** (RED first: scenario 1 is written and run BEFORE any migration).
+**Scenarios** (RED first: scenario 1 is written and run BEFORE any migration — and AFTER the harness setup: the
+`Owned.cs` exemption comment is in place first, so `Owned.TempRoot()`'s own `Path.GetTempPath()` is not counted).
 
 1. **This repository passes the guard.** `Scan(RepositoryRoot.Path)` ⇒ `FilesScanned > 0` and no findings; the
-   failure message lists every finding as `file:line — class — text`. **RED before the migration: exactly 21
-   `raw-temp` findings in 11 files** (the 19 creation sites and `WorkspaceToolTests.cs:243`, `:276`) — the list goes in
-   the PR.
+   failure message lists every finding as `file:line — class — text`. **RED before the migration, with the `Owned.cs`
+   exemption already in place: exactly 21 `raw-temp` findings in 11 files** (the 19 creation sites and
+   `WorkspaceToolTests.cs:243`, `:276`) — the list goes in the PR. A 22nd finding naming `Owned.cs` means the setup
+   step was skipped: add the exemption and re-run; it is not the RED.
 2. **The escape target stays inside an owned folder.** New test in `WorkspaceToolTests`:
    `The_escape_target_is_written_inside_an_owned_folder_never_into_the_temp_root` — `var (_, root) = Build();` then the
    folder name of `Directory.GetParent(root)` matches `Owned.Pattern`. **RED before the migration** with the real
@@ -569,6 +630,11 @@ count at `:40` updated to the real number. No `module_tests.md` is created — t
    `// testsToDelete-exempt: raw-temp — the one place a test learns the temp root` ⇒ 0; `// testsToDelete-exempt:
    raw-temp — needed` ⇒ 1 (`exemption`); `// testsToDelete-exempt: nonsense — a perfectly fine reason here` ⇒ 1; a
    commented-out `// Directory.CreateTempSubdirectory("x")` ⇒ 0; a file under `tests/X/bin/` ⇒ not scanned.
+   Block comments: `/* Path.GetTempPath() */` on one line ⇒ 0; a block opened on line 1 and closed on line 3 with
+   `Path.GetTempPath()` on line 2 ⇒ 0; `*/ var t = Path.GetTempPath();` closing that block ⇒ 1, reported at ITS line
+   (line numbers unmoved); `var glob = "src/**/*.cs"; var t = Path.GetTempPath();` ⇒ 1 (a `/*` inside a string opens
+   no comment); `/* testsToDelete-exempt: raw-temp — the one place a test learns the temp root */` above a
+   `Path.GetTempPath()` ⇒ 0. RED first: written before the stripper exists, the multi-line case is observed giving 1.
 4. **A scan of nothing is red, not clean.** An empty tree ⇒ `FilesScanned == 0`; a root that does not exist ⇒
    `FilesScanned == 0` and no throw.
 5. **The token is registered.** On the real mount, `TokenFindings(rule, Owned.RepoToken)` ⇒ none. Break-its on rule
@@ -578,6 +644,11 @@ count at `:40` updated to the real number. No `module_tests.md` is created — t
 7. **The audit names only what THIS run claimed.** In a private `tmp`: a folder claimed by `Owner.This` ⇒ listed; one
    claimed by a dead pid, one by `other@<tag>`, one unclaimed, one of another token ⇒ not listed; an orphan claim of
    `Owner.This` ⇒ listed.
+7a. **The audit sees an undisposed folder under ANY parent.** RED first (written before the registry exists, observed
+   failing): an `OwnedDir.Create("custom", parent: <a private OwnedDir that is NOT under the temp root's depth 1>)` left
+   undisposed ⇒ `LeftoversAudit.Undisposed()` names its path, while `ClaimedBy(Owned.TempRoot(), Owner.This)` does
+   not; after its `Dispose()` ⇒ `Undisposed()` no longer names it. The test disposes everything it made before it
+   ends, so the real audit at the end of the run is not affected.
 8. **The audit has teeth** (observed by hand, recorded in the PR, then reverted): remove `: IDisposable` and
    `Dispose` from ONE migrated class (`ToolSurfaceTests`), run the executable ⇒ it exits non-zero with the audit's
    message naming three `testsToDelete-mcp-surface-…` folders; restore ⇒ green, and the temp root holds none of them.
@@ -585,15 +656,26 @@ count at `:40` updated to the real number. No `module_tests.md` is created — t
    into a warning silently.
 9. **No leftover after a full run** (by hand, recorded in the PR): before the migration, one full run leaves N new
    `mcp-…` folders and `outside.txt` in the temp root (count them); after it, zero new entries of either, and
-   `bash .claude/rules/shared/tools/janitor.sh --dry-run`, run from this repository, prints no `testsToDelete-mcp-`
-   line.
+   `bash .claude/rules/shared/tools/janitor.sh --token mcp --dry-run`, run from this repository, prints no
+   `testsToDelete-mcp-` line.
+   **The janitor reads THIS helper's claim** (by hand, recorded, on Windows under Git Bash AND on Linux): plant one
+   folder `testsToDelete-mcp-janitor-<id>` in the temp root with a sibling claim whose text is the C# helper's own
+   format — `new Owner(Owner.This.Host, UnmatchablePid.Next(), <a start>).Format()`, i.e. this host's DNS name, this
+   OS's tag, an unmatchable pid (premise asserted) and a start — and age folder and claim to 11 minutes
+   (`Directory.SetLastWriteTimeUtc` / `File.SetLastWriteTimeUtc`, or `touch -d`). Then
+   `JANITOR_MIN_AGE_MINUTES=10 bash .claude/rules/shared/tools/janitor.sh --token mcp --dry-run` ⇒ it lists that folder
+   for removal. Then remove folder and claim. Both observations — the Windows and the Linux listing line — go in the
+   PR. If the janitor does not list it, the owner formats of the two implementations disagree: stop and report to
+   E1, never adjust the C# format to pass.
 
 - **Commands.** As S2, `--filter-class "*LeftoversGuardTests"` (RED, then GREEN), `--filter-class "*WorkspaceToolTests"`,
   the whole executable on Windows and Linux; `dotnet format dew_flow_mcp.slnx --verify-no-changes --no-restore` in
   Linux or WSL; `node .claude/rules/shared/tools/plan-lifecycle.mjs`.
-- **DoD.** Scenarios 1 and 2 observed RED with the counts above, then GREEN; every break-it observed red; scenario 8's
-  teeth observed and reverted; scenario 9 recorded; CI green on all four jobs with the new `build-test` step;
-  `architecture.md` updated; this document's status line becomes `> Status: **E3 shipped, <YYYY-MM-DD>; promotes with
+- **DoD.** The `Owned.cs` exemption in place before scenario 1's RED; scenarios 1, 2 and 7a observed RED with the
+  counts above, then GREEN; every break-it observed red (the block-comment cases included); scenario 8's teeth
+  observed and reverted; scenario 9 recorded, the janitor's listing of the planted claim on Windows and on Linux
+  included; CI green on all four jobs with the new `build-test` step; `research/module_tests.md` created with every
+  flow marked; `architecture.md` updated; this document's status line becomes `> Status: **E3 shipped, <YYYY-MM-DD>; promotes with
   its parent.**` — never the word *implemented* while it sits in `todo/` — and its `todo/README.md` row says the same.
   The parent and this document promote together, after the last epic.
 
@@ -616,8 +698,41 @@ boundary, so the copies need not rediscover it:
 | `Dns.GetHostName()`, never `Environment.MachineName` | yes | same — the janitor reads `hostname` |
 | Per-test disposal through `IDisposable` + `OwnedScope` | yes | same; xUnit v3 only |
 | Assembly-fixture sweep and end-of-run audit | yes | same, plus the kinds that repository creates (containers, databases) |
+| The audit's second check: a process-wide registry of undisposed `OwnedDir`/`OwnedScope` instances | yes | same — it is the only check that sees a folder under a custom parent |
+| `Owned.FullName` accepting rule §1's 6–12-character id | yes | same — write 6, accept 6–12 |
 | Guard classes | all, with the carve-out NOT recognised | a repository that starts containers implements the §5 carve-out in full |
 | Read-only files (git objects) inside a folder | not needed — no repositories are made here | a copy that makes repositories clears the read-only attribute before `Directory.Delete` |
+
+## Plan-gate round 1 (2026-10-17)
+
+The coai plan gate's first round over this document; judged by Opus. Accepted (applied above):
+
+1. S4 sc. 9 plants a `testsToDelete-mcp-janitor-<id>` folder with a claim in the C# helper's own format (this host,
+   the OS tag, an unmatchable pid, a start), aged 11 minutes, and records `janitor.sh --token mcp --dry-run` listing
+   it, on Windows (Git Bash) and Linux (a duplicate finding of two reviewers, applied once).
+2. S4 creates `research/module_tests.md` (harness location, exact commands, the flows covered / not covered, the
+   limits) — the knowledge-base rule requires it by name.
+3. The `Owned.cs` exemption comment is harness setup, added before sc. 1's RED run, so the RED is exactly 21
+   findings in 11 files.
+4. S1 re-checks S2's constants (token, prefix, min age, owner format) against the released rule before S2 merges; a
+   mismatch updates S2 first.
+5. The end-of-run audit also checks a process-wide registry of created-but-undisposed `OwnedDir`/`OwnedScope`
+   instances, which covers folders under a custom parent (S2 registry, S4 audit, sc. 7a).
+6. The guard strips `/* … */` block comments, multi-line included, before matching, string literals respected
+   (S4 *Comments*, sc. 3).
+7. `Owned.FullName` accepts rule §1's id of 6–12 `[A-Za-z0-9]`, though the helper writes 6 (S2, sc. 1).
+
+Rejected:
+
+- An xUnit self-test that a throwing assembly-fixture dispose turns the exit code red — already an explicit RED
+  observation in S4 sc. 8 (stop and report if it does not).
+- Separate CI step wiring for the guard — the guard is a test in the executable; a finding already fails `build-test`.
+- Treating a zombie process as `gone` — transient, and keeping it is the safe side; liveness belongs to the E1
+  contract, not to this helper.
+- A rollback note — a `git revert` of the merge is the normal flow.
+
+Also reflected from the E1 contract, settled: `janitor.sh --token <t>` exists in the release (S1 step 2, S4 docs and
+sc. 9).
 
 ## Judge's notes on the parent's E3 entry
 
