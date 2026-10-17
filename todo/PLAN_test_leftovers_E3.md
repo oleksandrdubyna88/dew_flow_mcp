@@ -400,8 +400,14 @@ before the body is written). Every scenario that counts what a call left behind 
      `foreign host` when the host differs, else `unknown`. **Remove** = `Removal.Quietly(dir, …)` (links first, then
      the folder, then the claim); `false` ⇒ an `Errors` entry.
   2. **Orphan claims.** Files of `tmp` whose name matches `Owned.Pattern` and ends in `.owner`, whose folder does not
-     exist, and whose age is ≥ `minAge` ⇒ deleted (S2's claim-first order makes a young orphan a creation in
-     progress — never touched).
+     exist, and whose age is ≥ `minAge` ⇒ judged by their OWNER, never by age alone (rule §2: "its owner judges it —
+     `gone` removes the claim; `live` and `unknown` keep it"; the conventions port, `leftovers-sweep.mjs:156-169`, does
+     the same): the claim is parsed and `Liveness.State` decides — `Gone` ⇒ the claim is deleted; `Live` ⇒ preserved
+     `live`; `Unknown` ⇒ preserved `foreign host` / `unknown`; a claim that does not parse ⇒ preserved `unreadable`.
+     Age only selects (S2's claim-first order makes a young orphan a creation in progress — never touched). The
+     concrete `live` case is a **suspended claim-first creator**: a process stopped in a debugger, or descheduled
+     under load, between `FileMode.CreateNew` of the claim and the folder's create — its claim is ten minutes old and
+     folderless, and deleting it would let a second run take the same name.
   It never touches a name `Owned.Pattern` does not match: not another repository's token, not the bare prefix, not the
   old `mcp-…` names (below).
 - `LeftoversSweepFixture` — `public sealed class`, public parameterless constructor (xUnit v3's requirement for an
@@ -438,8 +444,13 @@ Every scenario passes `tmp` = a private `OwnedDir` — never the real temp root.
    `testsToDelete-conventions-a-abc123`, `testsToDelete-mcpx-a-abc123`, `mcp-workspace-abc123` all survive untouched
    and appear in no list; `TESTSTODELETE-MCP-a-xyz123` and `teststodelete_mcp_a_xyz123` with a dead claim are removed
    (case-insensitive, both separators).
-4. **Orphan claims.** An old `testsToDelete-mcp-gone-abc123.owner` with no folder ⇒ removed; a young one ⇒ kept; an old
-   `testsToDelete-other-x-abc123.owner` ⇒ kept.
+4. **Orphan claims are judged by owner, never by age alone.** Four EQUALLY old orphan claims with no folder:
+   `testsToDelete-mcp-o1-abc123.owner` claimed by THIS process (the suspended claim-first creator's state) ⇒ preserved
+   `live`; `…-o2-…` claimed by `UnmatchablePid` ⇒ removed; `…-o3-…` claimed by `other@<tag>:1:1` ⇒ preserved
+   `foreign host`; `…-o4-…` holding `hands off` ⇒ preserved `unreadable`. Only the `gone` one disappears; the other
+   three still exist and each is in `Preserved` with exactly its reason. A young dead-claimed orphan ⇒ kept, unlisted;
+   an old `testsToDelete-other-x-abc123.owner` ⇒ kept, unlisted. RED against an age-only rule: `o1`, `o3` and `o4`
+   vanish.
 5. **The sweep never fails the run.** `Run` on a `tmp` that does not exist ⇒ returns with one `Errors` entry, no throw;
    the internal fixture constructor with a sweep that throws ⇒ completes, the `report` seam got the error line, and
    `LastRun` is empty.
