@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Mcp.Diagnostics;
+using Mcp.Tests.Leftovers;
 using Xunit;
 
 namespace Mcp.Tests;
@@ -10,8 +11,12 @@ namespace Mcp.Tests;
 /// <para>The key, the default and the signature are the family's, shared with <c>RagLogging</c> and
 /// <c>BenchLogging</c>. This repository first shipped its own answer to the same question and had to be
 /// brought back — a second answer is a mirror that has already drifted.</para></summary>
-public sealed class LogRetentionTests
+public sealed class LogRetentionTests : IDisposable
 {
+    private readonly OwnedScope _owned = new();
+
+    public void Dispose() => _owned.Dispose();
+
     private static readonly DateTimeOffset Now = new(2026, 8, 16, 12, 0, 0, TimeSpan.Zero);
 
     [Fact]
@@ -65,7 +70,7 @@ public sealed class LogRetentionTests
     [Fact]
     public void A_logs_folder_that_does_not_exist_yet_is_not_an_error()
     {
-        var root = Directory.CreateTempSubdirectory("mcp-retention-empty").FullName;
+        var root = _owned.Dir("retention-empty");
 
         var prune = () => McpLogging.PruneLogFolders(root, retentionDays: 30, Now);
 
@@ -112,9 +117,9 @@ public sealed class LogRetentionTests
         Days(root).Should().Equal("2020-01-01");
     }
 
-    private static string Root(params (string Day, string File)[] folders)
+    private string Root(params (string Day, string File)[] folders)
     {
-        var root = Directory.CreateTempSubdirectory("mcp-retention").FullName;
+        var root = _owned.Dir("retention");
         foreach (var (day, file) in folders)
         {
             var folder = Path.Combine(root, McpLogging.LogFolder, day);

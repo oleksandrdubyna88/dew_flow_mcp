@@ -2,6 +2,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Mcp.Contracts;
 using Mcp.Telemetry;
+using Mcp.Tests.Leftovers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Xunit;
@@ -13,8 +14,12 @@ namespace Mcp.Tests;
 /// <para>This is the emitter side of a cross-repository contract, so these tests assert the exact
 /// property names and the exact unattributed reasons the consumer reads — two suites can both be green
 /// while a wire disagrees, because each compares its own list against itself.</para></summary>
-public sealed class TelemetryCorrelationTests
+public sealed class TelemetryCorrelationTests : IDisposable
 {
+    private readonly OwnedScope _owned = new();
+
+    public void Dispose() => _owned.Dispose();
+
     [Fact]
     public void A_process_that_declares_nothing_is_unattributed_with_a_reason()
     {
@@ -114,9 +119,9 @@ public sealed class TelemetryCorrelationTests
             .Should().Be("the caller declared no phase");
     }
 
-    private static async Task<JsonElement> OneLine(TelemetryCorrelation correlation)
+    private async Task<JsonElement> OneLine(TelemetryCorrelation correlation)
     {
-        var root = Directory.CreateTempSubdirectory("mcp-correlation").FullName;
+        var root = _owned.Dir("correlation");
         var sink = new SpoolUsageSink(
             new SpoolOptions { Directory = root, App = "mcp-test", Correlation = correlation },
             new FakeTimeProvider(new DateTimeOffset(2026, 8, 15, 9, 30, 0, TimeSpan.Zero)),

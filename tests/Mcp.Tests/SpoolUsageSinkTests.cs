@@ -2,6 +2,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Mcp.Contracts;
 using Mcp.Telemetry;
+using Mcp.Tests.Leftovers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Xunit;
@@ -10,8 +11,12 @@ namespace Mcp.Tests;
 
 /// <summary>The spool is the whole transport: what it writes here is what the benchmark ingests there,
 /// so these tests are the emitter half of a cross-repository contract.</summary>
-public sealed class SpoolUsageSinkTests
+public sealed class SpoolUsageSinkTests : IDisposable
 {
+    private readonly OwnedScope _owned = new();
+
+    public void Dispose() => _owned.Dispose();
+
     [Fact]
     public async Task A_recorded_call_lands_as_one_json_line_carrying_the_schema_version()
     {
@@ -130,7 +135,7 @@ public sealed class SpoolUsageSinkTests
     {
         // A file where the day folder should go: creating the directory fails, which is the shape of a
         // read-only mount or a revoked permission.
-        var root = Directory.CreateTempSubdirectory("mcp-spool-broken").FullName;
+        var root = _owned.Dir("spool-broken");
         await File.WriteAllTextAsync(System.IO.Path.Combine(root, "2026-08-15"), "not a directory", TestContext.Current.CancellationToken);
         var sink = Sink(root, capacity: 64);
 
@@ -154,7 +159,7 @@ public sealed class SpoolUsageSinkTests
         // life of the process.
         var logger = new RecordingLogger<SpoolUsageSink>();
         var sink = new SpoolUsageSink(
-            new SpoolOptions { Directory = Directory.CreateTempSubdirectory("mcp-spool-fault").FullName + "\0x", App = "mcp-test", Capacity = 64 },
+            new SpoolOptions { Directory = _owned.Dir("spool-fault") + "\0x", App = "mcp-test", Capacity = 64 },
             new FakeTimeProvider(new DateTimeOffset(2026, 8, 15, 9, 30, 0, TimeSpan.Zero)),
             logger);
 
@@ -170,9 +175,9 @@ public sealed class SpoolUsageSinkTests
     private static async Task<int> CountLines(string path) =>
         File.Exists(path) ? (await File.ReadAllLinesAsync(path)).Length : 0;
 
-    private static (SpoolUsageSink Sink, string Root) Build(int capacity = 64)
+    private (SpoolUsageSink Sink, string Root) Build(int capacity = 64)
     {
-        var root = Directory.CreateTempSubdirectory("mcp-spool").FullName;
+        var root = _owned.Dir("spool");
         return (Sink(root, capacity), root);
     }
 

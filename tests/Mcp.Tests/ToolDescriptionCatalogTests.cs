@@ -1,13 +1,18 @@
 using FluentAssertions;
 using Mcp.Application;
+using Mcp.Tests.Leftovers;
 using Xunit;
 
 namespace Mcp.Tests;
 
 /// <summary>The rule this catalog exists for: a description can change without a rebuild, and the
 /// compiled literal is the FLOOR — never something a file can take away.</summary>
-public sealed class ToolDescriptionCatalogTests
+public sealed class ToolDescriptionCatalogTests : IDisposable
 {
+    private readonly OwnedScope _owned = new();
+
+    public void Dispose() => _owned.Dispose();
+
     private const string BuiltIn = "the description compiled into the provider";
 
     [Fact]
@@ -99,7 +104,7 @@ public sealed class ToolDescriptionCatalogTests
     [Fact]
     public void A_directory_that_does_not_exist_is_refused_rather_than_read_as_empty()
     {
-        var missing = Path.Combine(Directory.CreateTempSubdirectory("mcp-descriptions").FullName, "nope");
+        var missing = Path.Combine(_owned.Dir("descriptions"), "nope");
 
         var load = () => ToolDescriptionCatalog.Load(missing, string.Empty);
 
@@ -108,9 +113,9 @@ public sealed class ToolDescriptionCatalogTests
 
     /// <summary>Lays out <c>&lt;temp&gt;/&lt;set&gt;/&lt;tool&gt;.md</c>; an empty set writes to the
     /// root.</summary>
-    private static string Sets(params (string Set, string Tool, string Text)[] files)
+    private string Sets(params (string Set, string Tool, string Text)[] files)
     {
-        var root = Directory.CreateTempSubdirectory("mcp-descriptions").FullName;
+        var root = _owned.Dir("descriptions");
         foreach (var (set, tool, text) in files)
         {
             var folder = Path.Combine(root, set);

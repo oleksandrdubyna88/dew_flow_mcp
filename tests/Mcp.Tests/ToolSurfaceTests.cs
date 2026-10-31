@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Mcp.Application;
 using Mcp.Contracts;
+using Mcp.Tests.Leftovers;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -11,8 +12,12 @@ namespace Mcp.Tests;
 /// instruction about which tool to use when moved a score 16.5 points of 63, while swapping the toolbox
 /// from 4 tools to 18 moved it 1. A wording that can only change by rebuilding the binary is a wording
 /// nobody runs ten variants of.</para></summary>
-public sealed class ToolSurfaceTests
+public sealed class ToolSurfaceTests : IDisposable
 {
+    private readonly OwnedScope _owned = new();
+
+    public void Dispose() => _owned.Dispose();
+
     [Fact]
     public void A_host_that_configures_nothing_advertises_every_registered_tool()
     {
@@ -133,9 +138,9 @@ public sealed class ToolSurfaceTests
     private static IReadOnlySet<string> Names(params string[] tools) =>
         new HashSet<string>(tools, StringComparer.Ordinal);
 
-    private static string DescriptionSet(string set, string tool, string text)
+    private string DescriptionSet(string set, string tool, string text)
     {
-        var root = Directory.CreateTempSubdirectory("mcp-surface").FullName;
+        var root = _owned.Dir("surface");
         var folder = Path.Combine(root, set);
         Directory.CreateDirectory(folder);
         File.WriteAllText(Path.Combine(folder, tool + ".md"), text);

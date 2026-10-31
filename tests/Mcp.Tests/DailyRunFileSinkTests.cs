@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Mcp.Diagnostics;
+using Mcp.Tests.Leftovers;
 using Serilog.Events;
 using Serilog.Parsing;
 using Xunit;
@@ -11,8 +12,12 @@ namespace Mcp.Tests;
 /// what the 24/7 deployment premise says. Together they produce one file growing for months.
 /// <para>The reconciliation is a segment at UTC midnight: the run stays identifiable by its pid, and no
 /// single file holds more than a day.</para></summary>
-public sealed class DailyRunFileSinkTests
+public sealed class DailyRunFileSinkTests : IDisposable
 {
+    private readonly OwnedScope _owned = new();
+
+    public void Dispose() => _owned.Dispose();
+
     private const string Template = "[{Utc:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}";
 
     [Fact]
@@ -89,7 +94,7 @@ public sealed class DailyRunFileSinkTests
         sink.CurrentPath.Should().Be(afterRoll);
     }
 
-    private static string TempRoot() => Directory.CreateTempSubdirectory("mcp-daily-log").FullName;
+    private string TempRoot() => _owned.Dir("daily-log");
 
     private static string Relative(string root, string path) =>
         Path.GetRelativePath(Path.Combine(root, McpLogging.LogFolder), path).Replace('\\', '/');

@@ -69,3 +69,9 @@ dotnet_style_prefer_collection_expression = true:suggestion
 
 [*.{csproj,props,targets,slnx}]
 indent_size = 2
+
+# Cyclomatic complexity of at most 4 (the family's C# doctrine, rule csharp.doctrine §6) for the guard's files, MEASURED by
+# CA1502 against tests/Mcp.Tests/CodeMetricsConfig.txt (the threshold lives there, an analyzer reads no number from here).
+# Scoped to the guard on purpose: the rest of the helper folder predates the measure.
+[tests/Mcp.Tests/Leftovers/LeftoversGuard*.cs]
+dotnet_diagnostic.CA1502.severity = error

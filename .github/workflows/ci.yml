@@ -18,6 +18,10 @@ jobs:
         with:
           persist-credentials: false
 
+      # The leftovers tests read the mounted conventions (the owner vectors, the `## Tokens` table), and a
+      # missing file FAILS them — an uninitialised submodule is a broken setup, not a clean one.
+      - run: git submodule update --init --depth 1 .claude/rules/shared
+
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           dotnet-version: 10.0.x
@@ -40,6 +44,94 @@ jobs:
       # runner executable. `dotnet test` has no VSTest host here and would abort — never use it.
       - name: Test
         run: ./tests/Mcp.Tests/bin/Release/net10.0/Mcp.Tests
+
+      # The end-of-run audit has teeth. LeftoversSelfTest leaks a folder on purpose, and ONLY when
+      # MCP_LEFTOVERS_SELFTEST is set; this step sets it, AFTER the normal Test step, and is green only on a
+      # NON-zero exit that carries the audit's first line (the counts and the case's own group word, no path) and the folder's
+      # name on a per-folder line under that word, and on an empty, listable temp root. A listing error is red, never ignored. If xUnit did not
+      # fail the run on an assembly-fixture cleanup exception this step would be red on its first run:
+      # the audit must never become a warning silently.
+      - name: The audit fails a run that leaves a claimed folder
+        run: |
+          set -o pipefail
+          owner="u$(id -u)"
+          for entry in "1:never disposed:selftest" "failed-dispose:disposed but not removed:selftest-failed"; do
+            IFS=: read -r value words what <<< "$entry"
+            if MCP_LEFTOVERS_SELFTEST="$value" ./tests/Mcp.Tests/bin/Release/net10.0/Mcp.Tests --filter-class "*LeftoversSelfTest" 2>&1 | tee selftest.log; then
+              echo "the end-of-run audit did not fail the run ($value)"; exit 1; fi
+            # (a) the audit's FIRST line: the counts and the group summary, and no path on it ...
+            first=$(grep -E "(^|[[:space:]]:[[:space:]])mcp tests: this run left [0-9]+ folder\(s\) it claimed.*[0-9]+ $words" selftest.log | grep -v "testsToDelete-[uw][0-9]" || true)
+            [ -n "$first" ] || { echo "the run failed, but not with the audit's first line (counts and '$words', no path) ($value)"; exit 1; }
+            # (b) ... and the folder named on its own per-folder line, under the case's own group word.
+            grep -Eq "^[[:space:]]+$words: .*/testsToDelete-[uw][0-9]{1,10}-mcp-$what-[A-Za-z0-9]{6}" selftest.log \
+              || { echo "the audit's message does not name the folder on a line of its own under '$words' ($value)"; exit 1; }
+            left=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -iname "teststodelete-${owner}-mcp-$what-*") \
+              || { echo "the temp root could not be listed"; exit 1; }
+            [ -z "$left" ] || { echo "the audit left the folder behind: $left"; exit 1; }
+          done
+
+  # The same suite on Windows, because the test-leftovers helper (tests/Mcp.Tests/Leftovers) has a Windows
+  # half — the kernel-owner read, the process probe, the exclusive create — that nothing proves from Linux,
+  # and the migrated classes must dispose on Windows too (an open handle stops a recursive delete there).
+  # The WHOLE executable runs; the premises that only hold on Linux (the janitor cross-check, the
+  # read-only-folder refusals) are named skips with their reason.
+  #
+  # No `Formatted` step: on a Windows checkout `dotnet format` reports ENDOFLINE noise from `core.autocrlf`
+  # (see the note on the Linux job), and the Linux job already gates formatting. The runner executes as an
+  # administrator, so its new files are likely owned by `BUILTIN\Administrators`: the first test of the
+  # Leftovers namespace, RunnerFactsTests, prints who owns what, and every Windows assertion is written
+  # against that measurement.
+  build-test-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - run: git submodule update --init --depth 1 .claude/rules/shared
+
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build
+        run: dotnet build dew_flow_mcp.slnx -c Release
+
+      - name: Test
+        run: ./tests/Mcp.Tests/bin/Release/net10.0/Mcp.Tests.exe
+
+      # The same teeth as on Linux, in PowerShell: LeftoversSelfTest leaks a folder on purpose when MCP_LEFTOVERS_SELFTEST is set, and
+      # this step is green only on a NON-zero exit that carries the audit's first line, names the folder under the case's own words,
+      # and on a temp root that holds nothing of the case afterwards. Both values; a listing error is red, never ignored.
+      - name: The audit fails a run that leaves a claimed folder
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $exe = './tests/Mcp.Tests/bin/Release/net10.0/Mcp.Tests.exe'
+          $cases = @(
+            @{ Value = '1'; Words = 'never disposed'; What = 'selftest' },
+            @{ Value = 'failed-dispose'; Words = 'disposed but not removed'; What = 'selftest-failed' }
+          )
+          foreach ($case in $cases) {
+            $env:MCP_LEFTOVERS_SELFTEST = $case.Value
+            $log = (& $exe --filter-class '*LeftoversSelfTest' 2>&1 | Out-String)
+            $code = $LASTEXITCODE
+            Remove-Item Env:MCP_LEFTOVERS_SELFTEST
+            Write-Host $log
+            if ($code -eq 0) { throw "the end-of-run audit did not fail the run ($($case.Value))" }
+            # (a) the audit's FIRST line: the counts and the group summary, and no path on it ...
+            $firstLines = @($log -split "`r?`n" | Where-Object { $_ -match ('mcp tests: this run left \d+ folder\(s\) it claimed.*\d+ ' + [regex]::Escape($case.Words)) -and $_ -notmatch 'testsToDelete-[uw]\d' })
+            if ($firstLines.Count -eq 0) { throw "the run failed, but not with the audit's first line (counts and '$($case.Words)', no path) ($($case.Value))" }
+            $what = [regex]::Escape($case.What)
+            $named = '(?m)^\s*' + [regex]::Escape($case.Words) + ': .*[\\/]testsToDelete-[uw][0-9]{1,10}-mcp-' + $what + '-[A-Za-z0-9]{6}\s*$'
+            # (b) ... and the folder named on its own per-folder line, under the case's own group word.
+            if ($log -notmatch $named) { throw "the audit's message does not name the folder on a line of its own under '$($case.Words)' ($($case.Value))" }
+            $left = @(Get-ChildItem -Force -LiteralPath $env:TMP -ErrorAction Stop | Where-Object { $_.Name -match ('^testsToDelete-[uw][0-9]{1,10}-mcp-' + $what + '-') })
+            if ($left.Count -gt 0) { throw "the audit left the folder behind: $($left.FullName -join ', ')" }
+          }
+          # Actions appends `exit $LASTEXITCODE` to a pwsh step: the self-test's EXPECTED non-zero exit would leak out as the
+          # step's result (measured on PR #58, 2026-10-31). Every check above throws on failure, so reaching here is green.
+          exit 0
 
   # The management surface over the wire, against a running host: routing, the group prefix, the
   # status codes, the serialized shape. What the unit tests cannot see is the composition — that the

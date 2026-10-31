@@ -4,6 +4,7 @@ using Mcp.Application;
 using Mcp.Bridge;
 using Mcp.Contracts;
 using Mcp.Server;
+using Mcp.Tests.Leftovers;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using Workspace.Application;
@@ -16,8 +17,12 @@ namespace Mcp.Tests;
 /// <para>Before this contract existed, the same tools were written twice and the two surfaces drifted
 /// far enough to score 11/47 against 4/47 on identical tasks. These tests are what make that
 /// unbuildable — they fail the moment either presentation grows a tool of its own.</para></summary>
-public sealed class SurfaceParityTests
+public sealed class SurfaceParityTests : IDisposable
 {
+    private readonly OwnedScope _owned = new();
+
+    public void Dispose() => _owned.Dispose();
+
     [Fact]
     public void The_protocol_and_the_bridge_advertise_exactly_the_same_tools()
     {
@@ -112,11 +117,11 @@ public sealed class SurfaceParityTests
 
     /// <summary>A catalog serving one of two tools, with that tool's description read from a file.
     /// </summary>
-    private static ToolCatalog ConfiguredCatalog(out string overriddenDescription)
+    private ToolCatalog ConfiguredCatalog(out string overriddenDescription)
     {
         overriddenDescription = "the wording an operator supplied without a rebuild";
 
-        var descriptions = Directory.CreateTempSubdirectory("mcp-parity-descriptions").FullName;
+        var descriptions = _owned.Dir("parity-descriptions");
         var set = Path.Combine(descriptions, "concise-v1");
         Directory.CreateDirectory(set);
         File.WriteAllText(Path.Combine(set, "kept.md"), overriddenDescription);
@@ -144,9 +149,9 @@ public sealed class SurfaceParityTests
             .Select(schema => McpServerTool.Create(new CatalogToolFunction(schema, catalog)))
             .Select(tool => tool.ProtocolTool.Name);
 
-    private static ToolCatalog BuildWorkspaceCatalog(out string root)
+    private ToolCatalog BuildWorkspaceCatalog(out string root)
     {
-        root = Directory.CreateTempSubdirectory("mcp-parity").FullName;
+        root = _owned.Dir("parity");
         var reader = new Workspace.Infrastructure.SandboxedFileReader(
             new Workspace.Infrastructure.WorkspaceRoot(root),
             new Workspace.Infrastructure.SandboxedFileReaderOptions(),

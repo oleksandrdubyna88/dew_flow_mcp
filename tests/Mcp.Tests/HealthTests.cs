@@ -2,6 +2,7 @@ using FluentAssertions;
 using Mcp.Api;
 using Mcp.Contracts;
 using Mcp.Telemetry;
+using Mcp.Tests.Leftovers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Xunit;
@@ -11,8 +12,12 @@ namespace Mcp.Tests;
 /// <summary>What `/health` is for: an orchestrator polling a process that runs for weeks must be able
 /// to see a component that has stopped working. The endpoint used to answer the constant `"ok"`, which
 /// answers for the ROUTE and says nothing about the server behind it.</summary>
-public sealed class HealthTests
+public sealed class HealthTests : IDisposable
 {
+    private readonly OwnedScope _owned = new();
+
+    public void Dispose() => _owned.Dispose();
+
     [Fact]
     public async Task A_dead_telemetry_writer_shows_up_as_degraded_with_its_drop_count()
     {
@@ -56,15 +61,15 @@ public sealed class HealthTests
 
     /// <summary>A file where the day folder should go — a read-only mount or a revoked permission in
     /// the shape a test can build.</summary>
-    private static SpoolUsageSink BrokenSpool()
+    private SpoolUsageSink BrokenSpool()
     {
-        var root = Directory.CreateTempSubdirectory("mcp-health-broken").FullName;
+        var root = _owned.Dir("health-broken");
         File.WriteAllText(System.IO.Path.Combine(root, "2026-08-15"), "not a directory");
         return Sink(root);
     }
 
-    private static SpoolUsageSink HealthySpool() =>
-        Sink(Directory.CreateTempSubdirectory("mcp-health").FullName);
+    private SpoolUsageSink HealthySpool() =>
+        Sink(_owned.Dir("health"));
 
     private static SpoolUsageSink Sink(string root) =>
         new(new SpoolOptions { Directory = root, App = "mcp-test", Capacity = 64 },

@@ -1,6 +1,6 @@
 # PLAN — Test leftovers, E3: one C# helper, nineteen sites, a sweep and a guard for `tests/Mcp.Tests`
 
-> Status: **plan only, nothing implemented yet, 2026-10-31 — re-split against release 115bbf8; plan only.** Stories of
+> Status: **IMPLEMENTED, 2026-10-31.** Stories of
 > epic E3 of the parent plan `dew_flow_conventions · todo/PLAN_test_leftovers_rollout.md` (§ *Epics*, E3). Scope: a new
 > `tests/Mcp.Tests/Leftovers/` folder (the token file, helper, owner record, liveness, the kernel-owner and identity
 > reads, start-of-run sweep, end-of-run audit, guard, a janitor cross-check and an audit self-test), the 11 test files
@@ -13,7 +13,7 @@
 > day (§ *Plan-gate round 2*). Models per story below. No cornerstone: E3 is not one (parent, E3 entry).
 
 **Committed together with this document** (one commit, the shared `common/planning-docs.md` § *A plan split into epics
-and stories*): its row in [todo/README.md](README.md) under *Currently open*:
+and stories*): its row in [todo/README.md](../todo/README.md) under *Currently open*:
 
 ```
 | [PLAN_test_leftovers_E3.md](PLAN_test_leftovers_E3.md) | plan only, 2026-10-31 — re-split against release 115bbf8; the producer PR waits for R6's sweep-only records and the barrier checklist | Stories of epic E3 of `dew_flow_conventions · todo/PLAN_test_leftovers_rollout.md`: every temp folder `tests/Mcp.Tests` makes is named `testsToDelete-<owner>-mcp-…`, claimed first, removed by the test that made it, collected by the same user's next run when a run was killed, and kept so by a guard |
@@ -25,6 +25,162 @@ run's folders are collected at the start of the same user's next run, only on th
 (S3); a guard over `tests/`, scripts and CI is red on every class of the rule's §7, on an unregistered or misassigned
 token and on a scan of nothing (S4); the three stories land as ONE producer pull request, merged only under the
 condition in *Order*.
+
+## Deviations
+
+What shipped differently from the plan above, recorded at promotion (2026-10-31). The plan text is kept as it was
+written; where it and the list below disagree, the list is what runs. Each item names its evidence.
+
+**Recorded in the plan's own DoD.** The §5 container carve-out is not recognised (this repository starts no container;
+a `docker run` without `--rm` is a finding). Legacy names are listed with their exact command and never collected.
+`owner-blind` in C# is a rule about the WORD (owner decision 3; first shipped as a literal rule and widened by review fix C: a glob, a character
+class, a regex, a bare word and a separator in another literal are findings too), with the shipped classifier judging scripts and workflows.
+macOS is not built (the helper refuses with a clear message). The Windows runner's measured owner
+(`BUILTIN\Administrators`, an elevated job) is recorded by `RunnerFactsTests` in the job log; both ownership outcomes are
+asserted through the two `WindowsOwnership` fixtures, never from the runner's own files.
+
+**S2 (commits 5b94c81, 3237394, 876cdfd).**
+- `Liveness.State`, scenario 12 and the State lines of scenario 13 moved from commit 2 to commit 3, with the owner
+  record they need (the plan's Order has it so; commit 2's message says so).
+- A temporary `ScratchDir` (a raw-temp scratch folder, exempt) served commit 2's tests of the primitives; commit 3 deleted
+  it and those tests use `OwnedDir`.
+- `DirectoryLinks.cs` moved out of `WorkspaceToolTests` (the link-or-junction helper was a private method there; no other
+  change to that file).
+- `Owner.RunRecord` takes a `warn` seam; a reparse point is `Identity.IsLink`; `Native` carries helpers beyond the plan's
+  list (`WindowsEntryOf`, `FinalPathOfFollowing`, `OwnerSidOf`, among them).
+- Scenario 9e checks the claim's identity after the write as well as before (a post-write identity check: a claim
+  replaced after its exclusive create is not the one that was written).
+- Scenario 3's `AsciiLower("SØREN")` is `sØren` — corrected against the vectors `w06`/`w07` of
+  `tools/fixtures/owner-vectors.json` (the plan's expectation lower-cased the non-ASCII letter).
+
+**S3 (commit 3432878).**
+- The legacy-name handling follows Node's legacy order (`leftovers-sweep.mjs`), not the plan's prose order.
+- Scenario 5e is keyed on the claim's path (`claimPath`), not on the folder's.
+- A restore that fails reports a `quarantine-conflict` line and keeps the quarantine, retried every run.
+- The claim's identity is captured with the folder's and re-checked before its removal (stricter than the plan).
+- Extra tests beyond the plan's list; the fixture's report format is `mcp tests: leftovers — removed n, preserved n, listed n`
+  with indented lines; the quarantine word is written in two pieces in the tests (the guard reads them).
+
+**S4 (this commit's branch).**
+- `LeftoversGuard.Scan(root, mountRoot = null, node = "node")` — not `Scan(root)`. The break-it trees are private folders with
+  no mount, and scripts are judged by the REAL mount's classifier, so the mount is a parameter (default: the scanned root);
+  `node` is the seam for "node missing". The token checks are separate calls (`TokenFindings`, `RegisteredTokenFindings`,
+  `ConstantFindings`), not part of `Scan`, because a scan of a tree with no mounted rule must not report a missing rule.
+- **The shipped classifier's answers win over the plan's expected counts** (each recorded once with
+  `node .claude/rules/shared/tools/sweeper-scan.mjs --root <a git-initialised tree of the same files>`, which printed 9
+  owner-blind lines — the ones the tests expect): `<prefix>-"$OWNER"-*` reads **broad** (the plan expected 0; the quote is
+  not an owner start, `<prefix>-$OWNER-*` and `-${OWNER}-*` are owner-aware); `glob.glob(P + "*")` in Python and
+  `glob(P + "*")` in JavaScript read **null** (the plan expected 1; the header of `prefix-bindings.mjs` names "a glob built
+  by concatenation" as a limit) — the tests pin the limit at 0 and use `shutil.rmtree(P + n)` / `fs.rmSync(P + n)` for the
+  traced case.
+- **Decision 3 and `legacy-name` compose:** `$"<prefix>-{RepoToken}-"` is `legacy-name` AND `owner-blind` (the plan counted
+  one); `<prefix>-conventions-*` and `<prefix>-u*` in a script are also `legacy-name` (the plan counted their `owner-blind`
+  only). Line-level counts in the tests are the sets, not the plan's single class.
+- The RED before the migration is **21 `raw-temp` findings in 11 files**, as planned, after one setup edit the plan did not
+  list: `OwnedTests.cs` (S2) carried a reason string that named the framework temp API, which is a finding by the guard's
+  own detector; reworded, not exempted. The repository scan (scenario 1) is its own class, `LeftoversRepositoryGuardTests`, so
+  the guard's commit is green on its own and the scan turns green with the migration.
+- The CI self-test step differs from the plan's YAML in three places, each measured with the shipped classifier over the
+  workflow itself (the guard scans the workflow it ships in): the loop variable is `entry` (`case` is a reserved word); the
+  folder listing builds the owner as `owner="u$(id -u)"` and matches `-iname "teststodelete-${owner}-mcp-$what-*"` (the plan's
+  `teststodelete-*-mcp-…` is a **broad** glob to the classifier); and the message check is `.*/testsToDelete-[uw]…` (a `.*`
+  directly before the prefix reads as a leading-star glob).
+- `LeftoversJanitorTests` asserts the `foreign:` line on a **second, un-narrowed** dry run. With `--token mcp` the janitor's
+  inventory is `testsToDelete-<owner>-mcp-…` of the caller's owner only (`janitor.sh:157`), so another owner's name is
+  named nowhere — the plan expected a `foreign:` line under `--token`. The narrowed run asserts exit 0, the `would run:` line
+  and the absence of the other owner's name; the un-narrowed run's exit code is the whole temp root's business and is not
+  asserted. The plants live in a PRIVATE temp root handed to the janitor as `TMPDIR` (it reads it as `Path.GetTempPath` does)
+  and not in the real one the plan names: run in the real temp root, the janitor's `find` raced the other tests of the run
+  creating and removing folders there and exited 1 ("a listing failed") in 3 runs of 6 (measured); in a private root 8 runs
+  of 8 were green.
+- The guard's docker classes read one line at a time (no backslash-continuation joining); a literal default of a shell
+  expansion (`${V:-w}`) must be an owner form, as in the Node guard; an image tag is judged wherever a test builds it (no
+  pushed-image exception). The one-constant check walks the file system (not `git ls-files`), so an untracked file counts.
+  `TokenFindings` returns the single owner-grammar finding for a token like `u1000` (the Node reference adds a "not a row"
+  finding after it).
+- `LeftoversAudit.Run(tmp, owner, registry, mine)` takes the registry and the kernel-owner seam so a test can drive the
+  real run on a private temp root; an orphan claim is listed by its claim path; a linked folder is not followed.
+  `LeftoversSweepFixture` gained an optional `audit` seam. The self-test's `failed-dispose` case locks a subfolder INSIDE
+  the owned folder (Linux, mode 0o555) — no parent of the temp root is ever touched.
+- `research/architecture.md:40` no longer states a test count (the knowledge-base rule: name no count that moves).
+- Mutation checks, in the working tree and reverted: removing any one detector of the guard turns its fixture red (24
+  mutations, reported with the producer PR); dropping the audit's throw turns `A_run_that_left_a_folder_throws…` red and the CI step
+  red ("did not fail the run"); dropping the registry entry on the first `Dispose()` turns the unreclaimed-registry test red
+  and the second self-test case red (the message then names the folder under "claimed in the temp root", not "disposed but
+  not removed"). One mutant survived and is equivalent: deleting the explicit `owner-blind` branch of the exemption parser
+  (the marker then fails as an unknown class, the same `exemption` finding).
+- The plan reached this branch by merging `origin/main` (it was merged after the branch was cut); the merge commit goes with
+  the squash.
+- **Not run, by hand only:** the Windows janitor cross-check (scenario 9, Git for Windows' bash), the elevated run (S2 scenario 14), the
+  hand clean-up record and the barrier checklist of *Order* (merge conditions (b)–(d)). The Windows job ran green at `c9a790c`: 441
+  tests, 421 passed, 20 skipped.
+
+**Review fixes (the Opus review of the producer branch, applied in the commits after `c9a790c`).**
+- **A** — the end-of-run audit passes `Owner.This`, never the run's record, and `ClaimedBy` returns nothing when `TESTSTODELETE_RUN` makes
+  this process write another record: under rule §3 every child writes the run's record, so the first child to finish deleted its siblings' folders.
+- **B** — the audit removes through `LeftoversSweep.RemoveCaptured` (the folder's and claim's identity captured at discovery, re-checked, the
+  quarantine rename), never `Removal.Quietly` on a path read earlier.
+- **C** — `owner-blind` in `.cs` flags the word `teststodelete` in any spelling unless an owner segment, the exempt word, the quarantine word or an
+  environment variable name follows; a glob, a regex over a class, `"word" + "-"` and `$"{"word"}-"` were silent before.
+- **D** — `Owned.TempRoot` outside the helper's folder is a `raw-temp` finding; the two read-only uses in `WorkspaceToolTests` carry the marker.
+- **E** — `LeftoversGuardTests.cs` is scanned like every file (the exclusion list is empty); its fixtures carry a section sign inside each detector word.
+- **F** — the guard is split into `GuardFiles`, `GuardText`, `GuardDocker`, `GuardExemptions`, `GuardScripts`, `GuardTokens`; CA1502 (threshold 4, scoped to
+  `LeftoversGuard*.cs`) fails the build on a longer method.
+- **G** — the classifier's module URL and the script paths travel in `process.argv`; each script's lines are read once.
+- **H** — the audit throws `LeftoversAuditException` (`NeverDisposed`, `DisposedNotRemoved`, `ClaimedInTempRoot`); the first line is unchanged, then one folder per
+  line, then a remedy line.
+- **I** — the sweep fixture names up to 20 preserved entries (path and reason), then one line for the rest.
+- **J** — `OwnedScope.Dispose` tries every folder and rethrows an `AggregateException` after the last.
+- **K** — `TryClaim` and `MakeFolder` catch any exception, remove the claim under its captured identity and rethrow; `Removal.Quietly` reads the entry with
+  `Native.IdentityOf`, unlinks a link without following it, and deletes the claim only once the entry is gone.
+- **L** — Windows: `CheckWhat` refuses `<>:"|?*`; the junction fallback is `cmd.exe` with an argument list and a killing timeout; the foreign-owner fallback
+  folder is an `OwnedDir`; a `ScopeTests` case a link-following reader fails on an elevated runner (the target is made the caller's); the audit's link test
+  uses `DirectoryLinks.CreateOrSkip`; the audit self-test runs in PowerShell on the Windows job.
+- **M** — the token file's pair is checked against an identity kept outside the copied folder (`RepositoryIdentity`, with the solution file's name).
+- **N** — this list, and `research/module_tests.md`.
+
+**Review round 2 (applied after `f4219c2`).**
+- **O** — no test runs a generated script: the "answered from the read-once copy" test no longer writes and executes a stand-in for `node` that ended in `rm -f`; `GuardScripts.Judge` takes the
+  classifier's answer as text over a script that is not on disk (`LeftoversGuardScriptsTests`). The `DirectoryLinks.Run` timeout test already ran only `sleep` and asserts the process is dead.
+- **P** — a classifier verdict whose `line` is below 1 or past that script's line count, or whose file is not one of the scripts sent, is an invalid answer: the whole answer becomes the one unjudged
+  `owner-blind` finding (lines -1, 0, count+1, `int.MaxValue`, an unknown file and non-verdict text are tested; lines 0 and -1 were an `IndexOutOfRangeException`, count+1 a finding at a line that does not exist).
+- **Q** — `LeftoversGuard.Scan` scans each file as it is read and keeps only the lines of scripts and workflows for the classifier; it no longer holds every file's text until the classifier finishes. A memory
+  refactor with the existing guard tests as the proof (dropping the retained scripts turns 13 of them red).
+- **R** — the audit message's first line already carried the counts and the group summary only (H), the paths on the per-folder lines below; so no change to the exception. The two CI steps (bash and PowerShell)
+  now check (a) a line with `mcp tests: this run left <n> folder(s) it claimed … <n> <group word>` and no path on it, and (b) a per-folder line (leading blanks) `<group word>: …/testsToDelete-<owner>-mcp-<case>-<id>`;
+  run against the real code for both `MCP_LEFTOVERS_SELFTEST` values they pass, and they fail when the audit's throw is removed and when the paths are put back on the first line.
+
+**Lessons from the E4 review (the Rust port of the same contract; applied after `b9d6e6d`).** Each item was first checked in this code.
+- **Guard read through spelling (same gap — fixed).** Seven planted lines — `"testsTo" + "Delete-"`, `string.Concat("testsTo", "Delete-*")`, `$"{"testsTo"}{"Delete-"}"`, an escape in the word,
+  `@"^tests[T]oDelete-"`, `Path.Combine("/tmp", "x")` and `GetEnvironmentVariable("TM" + "P")` — were caught 0 of 7 (measured with the new break-it cases against the guard with the new reading switched off:
+  16 of the 16 new positive cases red). `GuardLiterals` now folds each C# line the way the compiler reads its literals (escapes decoded, `+` / `string.Concat` / literal interpolation holes joined, a
+  one-character class read as its character) and the guard applies the word, piece and temp-root rules to the folded line as well as the original. A literal holding a piece of the prefix word
+  (five characters or more, case-insensitive, crossing the join: `testsTo`, `sToDel`, `oDelete`) is an `owner-blind` finding; a `/tmp` or `/var/tmp` literal is `raw-temp` (tests only, as the other
+  raw-temp spellings). Pinned allowances (`LeftoversGuard.FoldingAllowances`, a test pins the four): `Owned.cs`, `LeftoversGuard.cs`, and the two files that build the guard's fixtures out of the word
+  (`LeftoversGuardTests.cs`, `LeftoversGuardScriptsTests.cs`); the exemption marker word now comes from `LeftoversGuard.CamelWord`, and one fixture in `LeftoversSweepTests` names the word through `Owned.Prefix`.
+  **Remaining limit:** it is a spelling check, one line at a time; a name that a source generator, an embedded resource, a char array, a file read at run time or a value computed across lines assembles
+  is invisible to it (`research/module_tests.md`, *What it does not prove*).
+- **Windows caller SID (not present).** `Scope.WindowsIsMine` reads `WindowsIdentity.GetCurrent()` on every call (`Scope.cs`), which opens the thread token first and the process token when the thread has none; nothing is cached
+  (`OwnerToken` caches only the derived `w<digits>` string, from the account name).
+- **Quarantine pass (same gap — fixed).** The pass parsed the pid out of a quarantine name and handed it to the probe; a leading-zero `007` reached the real probe as 7, and `0`, past-2^53, Windows `1` or a pid past the OS bound
+  reached any injected probe (the default `ProbeProcess` bounded all but the leading zero). `Liveness.AskablePid` (canonical digits, 1 to 2^53-1, Linux at most `int.MaxValue`, Windows at most `uint.MaxValue` and never 1) now runs first;
+  an unaskable pid is unknown and the quarantine stays.
+- **Orphan-claim pass (same gap — fixed).** A claim whose folder sat in a sibling quarantine (the renamer alive, or the restore pending) was deleted when its owner was gone, leaving the folder with nobody's mark. The sweep's pass
+  and the end-of-run audit's orphan scan now skip a claim whose name has a sibling quarantine in the temp root or a `quarantine-conflict` entry in the report.
+- **Rename into quarantine (partly present).** .NET's `Directory.Move` on Linux refuses an existing target (measured: the empty folder at the drawn name survived) but by checking first and then renaming, and a taken name was an
+  error that left the folder uncollected. The rename is now `Native.RenameExclusively` (`renameat2` with `RENAME_NOREPLACE`; reserve-then-rename where the file system lacks the flag; `Directory.Move` on Windows) and a taken name
+  draws another suffix, at most `Owned.MaxDraws` times, then the folder stays where it is with one error.
+- **Windows ownership read (partly present).** `IsMine` already reads the final path and the owner SID from ONE handle (`Native.WindowsEntryOf`) and the identity is the 128-bit `FileIdInfo` (class 18). The claim read was the gap:
+  it checked the identity with one open and read through a second open by path, so a pipe or device swapped in between was left to `FileStream`'s implicit refusal. `Native.ReadVerifiedRegular` opens once (no link followed), requires
+  `GetFileType` = `FILE_TYPE_DISK`, a regular file and the identity judged, and reads from that handle. The Windows test (`ScopeTests`) was written on Linux and has not run there; the Windows job is its first run. The POSIX read still
+  opens a FIFO swapped in after the identity check by path (the open would block); the folder's sticky bit keeps another user from doing it, and it is not closed here.
+- **The helper's own tests (same gap — fixed).** `RunnerFactsTests` wrote its probe file straight into the temp root under an exemption marker; the file is now inside an `OwnedDir` and the marker is gone.
+
+**Review round 3 (applied after `5dac43c`).**
+- **Claim read, POSIX (was open).** `Scope.ReadClaimText` read through `FileStream` after the identity check by path, so a FIFO swapped in between blocked the open for ever (the "not closed here" of the E4-lessons item above). It now goes through `Native.ReadVerifiedRegular` on Linux too: `open(2)` with `O_RDONLY|O_NONBLOCK|O_NOFOLLOW|O_CLOEXEC` (`O_NOFOLLOW` is 0x8000 on ARM), `statx(fd, "", AT_EMPTY_PATH)`, a regular file with the judged (device, inode), then at most 513 bytes from that descriptor. RED before: a FIFO swapped in through the scope-key seam hung past 5 s, and another regular file read as text (`ScopeTests`, two Linux tests).
+- **Rename fallback clean-up (was open).** `Native.LinuxRenameExclusively` ended its placeholder clean-up in `catch (Exception) { }`; it now catches only `IOException`, `UnauthorizedAccessException` and `InvalidOperationException` (an unreadable identity) and lets anything else propagate. The fallback is `Native.RenameByReservation(from, to, afterFailedRename)`, the seam being the hook that runs after the failed rename. RED before: a hook throwing `InvalidCastException` came back as the rename's `IOException` (`NativeTests`).
+- **Rename fallback placeholder (was open).** The clean-up removed the placeholder with `Directory.Delete` after a check by path that it was some folder. It now keeps the placeholder's identity from the `mkdir` and calls `rmdir(2)` (P/Invoke: an EMPTY folder only, a link never followed) only while the entry at the name is still a folder of the caller's uid with that (device, inode). RED before: an empty folder renamed onto the placeholder after the failed rename was deleted (`NativeTests`).
+- **Audit orphan scan (N+1 listing).** `LeftoversAudit.OfOrphan` listed the temp root's quarantines once per orphan claim; `Discover` now lists them once per audit and passes the set in (`Discover` takes the lister as an optional seam). RED before: 5 orphan claims gave 5 listings, expected 1 (`LeftoversAuditTests`).
 
 ## The contract this document encodes
 

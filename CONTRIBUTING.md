@@ -27,6 +27,10 @@ Work follows the conventions in [.claude/rules/](.claude/rules/), which are not 
 
 Run the tests as an executable, never `dotnet test` — see [README.md](README.md#build-and-test).
 
+A test that needs a scratch folder makes it with `OwnedScope.Dir(...)` and never with a temp API: a guard test refuses
+`Path.GetTempPath`, `CreateTempSubdirectory`, a bare `testsToDelete` literal and the other classes of the shared rule
+`common/test-leftovers.md`, and a run that leaves a folder it claimed is red.
+
 ## The one boundary that is not negotiable
 
 **No editing tools, and no knowledge of retrieval.** This repository reads; the write path stays in the

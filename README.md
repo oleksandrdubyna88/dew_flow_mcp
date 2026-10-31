@@ -105,6 +105,10 @@ Tests are **xUnit v3 on Microsoft Testing Platform**: there is no VSTest testhos
 with a `testhost.deps.json` error — a tooling mismatch, not a test failure. Run the executable. Filters are
 MTP syntax: `--filter-class`, `--filter-method`, `--filter-namespace`.
 
+Tests never make a temp folder by hand: a scratch folder comes from `OwnedScope.Dir("what")` (`tests/Mcp.Tests/Leftovers`), is named
+`testsToDelete-<owner>-mcp-<what>-<id>`, and a run that leaves one fails. After a killed run, `bash
+.claude/rules/shared/tools/janitor.sh --token mcp --dry-run` lists what is left (see [research/module_tests.md](research/module_tests.md)).
+
 ## Documentation
 
 - [research/architecture.md](research/architecture.md) — the system as it is, with diagrams
