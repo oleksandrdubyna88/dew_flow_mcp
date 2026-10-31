@@ -17,14 +17,7 @@ public sealed partial class LocalCpuBudgetTests
 {
     internal const int FamilyCap = 8;
 
-    private static readonly string Root = FindRoot();
-
-    private static string FindRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && dir.GetFiles("*.slnx").Length == 0) dir = dir.Parent;
-        return dir?.FullName ?? throw new InvalidOperationException($"no .slnx above {AppContext.BaseDirectory}");
-    }
+    private static readonly string Root = RepositoryRoot.Path;
 
     private static int CapIn(string jsonPath)
     {

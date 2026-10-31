@@ -18,6 +18,10 @@ jobs:
         with:
           persist-credentials: false
 
+      # The leftovers tests read the mounted conventions (the owner vectors, the `## Tokens` table), and a
+      # missing file FAILS them — an uninitialised submodule is a broken setup, not a clean one.
+      - run: git submodule update --init --depth 1 .claude/rules/shared
+
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           dotnet-version: 10.0.x
@@ -40,6 +44,35 @@ jobs:
       # runner executable. `dotnet test` has no VSTest host here and would abort — never use it.
       - name: Test
         run: ./tests/Mcp.Tests/bin/Release/net10.0/Mcp.Tests
+
+  # The same suite on Windows, because the test-leftovers helper (tests/Mcp.Tests/Leftovers) has a Windows
+  # half — the kernel-owner read, the process probe, the exclusive create — that nothing proves from Linux.
+  # UNTIL the migration of the old test folders lands the job runs the Leftovers namespace only; from that
+  # commit on it runs the whole executable, which is what proves every migrated class disposes on Windows.
+  #
+  # No `Formatted` step: on a Windows checkout `dotnet format` reports ENDOFLINE noise from `core.autocrlf`
+  # (see the note on the Linux job), and the Linux job already gates formatting. The runner executes as an
+  # administrator, so its new files are likely owned by `BUILTIN\Administrators`: the first test of the
+  # Leftovers namespace, RunnerFactsTests, prints who owns what, and every Windows assertion is written
+  # against that measurement.
+  build-test-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - run: git submodule update --init --depth 1 .claude/rules/shared
+
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build
+        run: dotnet build dew_flow_mcp.slnx -c Release
+
+      - name: Test
+        run: ./tests/Mcp.Tests/bin/Release/net10.0/Mcp.Tests.exe --filter-namespace Mcp.Tests.Leftovers
 
   # The management surface over the wire, against a running host: routing, the group prefix, the
   # status codes, the serialized shape. What the unit tests cannot see is the composition — that the
