@@ -47,8 +47,8 @@ jobs:
 
       # The end-of-run audit has teeth. LeftoversSelfTest leaks a folder on purpose, and ONLY when
       # MCP_LEFTOVERS_SELFTEST is set; this step sets it, AFTER the normal Test step, and is green only on a
-      # NON-zero exit that carries the audit's own message with the case's own words before the folder's
-      # name, and on an empty, listable temp root. A listing error is red, never ignored. If xUnit did not
+      # NON-zero exit that carries the audit's first line (the counts and the case's own group word, no path) and the folder's
+      # name on a per-folder line under that word, and on an empty, listable temp root. A listing error is red, never ignored. If xUnit did not
       # fail the run on an assembly-fixture cleanup exception this step would be red on its first run:
       # the audit must never become a warning silently.
       - name: The audit fails a run that leaves a claimed folder
@@ -59,9 +59,12 @@ jobs:
             IFS=: read -r value words what <<< "$entry"
             if MCP_LEFTOVERS_SELFTEST="$value" ./tests/Mcp.Tests/bin/Release/net10.0/Mcp.Tests --filter-class "*LeftoversSelfTest" 2>&1 | tee selftest.log; then
               echo "the end-of-run audit did not fail the run ($value)"; exit 1; fi
-            grep -q "mcp tests: this run left" selftest.log || { echo "the run failed, but not with the audit's message ($value)"; exit 1; }
-            grep -E "$words: .*/testsToDelete-[uw][0-9]{1,10}-mcp-$what-[A-Za-z0-9]{6}" selftest.log >/dev/null \
-              || { echo "the audit's message does not name the folder under '$words' ($value)"; exit 1; }
+            # (a) the audit's FIRST line: the counts and the group summary, and no path on it ...
+            first=$(grep -E "(^|[[:space:]]:[[:space:]])mcp tests: this run left [0-9]+ folder\(s\) it claimed.*[0-9]+ $words" selftest.log | grep -v "testsToDelete-[uw][0-9]" || true)
+            [ -n "$first" ] || { echo "the run failed, but not with the audit's first line (counts and '$words', no path) ($value)"; exit 1; }
+            # (b) ... and the folder named on its own per-folder line, under the case's own group word.
+            grep -Eq "^[[:space:]]+$words: .*/testsToDelete-[uw][0-9]{1,10}-mcp-$what-[A-Za-z0-9]{6}" selftest.log \
+              || { echo "the audit's message does not name the folder on a line of its own under '$words' ($value)"; exit 1; }
             left=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -iname "teststodelete-${owner}-mcp-$what-*") \
               || { echo "the temp root could not be listed"; exit 1; }
             [ -z "$left" ] || { echo "the audit left the folder behind: $left"; exit 1; }
@@ -116,10 +119,13 @@ jobs:
             Remove-Item Env:MCP_LEFTOVERS_SELFTEST
             Write-Host $log
             if ($code -eq 0) { throw "the end-of-run audit did not fail the run ($($case.Value))" }
-            if ($log -notmatch 'mcp tests: this run left') { throw "the run failed, but not with the audit's message ($($case.Value))" }
+            # (a) the audit's FIRST line: the counts and the group summary, and no path on it ...
+            $firstLines = @($log -split "`r?`n" | Where-Object { $_ -match ('mcp tests: this run left \d+ folder\(s\) it claimed.*\d+ ' + [regex]::Escape($case.Words)) -and $_ -notmatch 'testsToDelete-[uw]\d' })
+            if ($firstLines.Count -eq 0) { throw "the run failed, but not with the audit's first line (counts and '$($case.Words)', no path) ($($case.Value))" }
             $what = [regex]::Escape($case.What)
             $named = '(?m)^\s*' + [regex]::Escape($case.Words) + ': .*[\\/]testsToDelete-[uw][0-9]{1,10}-mcp-' + $what + '-[A-Za-z0-9]{6}\s*$'
-            if ($log -notmatch $named) { throw "the audit's message does not name the folder under '$($case.Words)' ($($case.Value))" }
+            # (b) ... and the folder named on its own per-folder line, under the case's own group word.
+            if ($log -notmatch $named) { throw "the audit's message does not name the folder on a line of its own under '$($case.Words)' ($($case.Value))" }
             $left = @(Get-ChildItem -Force -LiteralPath $env:TMP -ErrorAction Stop | Where-Object { $_.Name -match ('^testsToDelete-[uw][0-9]{1,10}-mcp-' + $what + '-') })
             if ($left.Count -gt 0) { throw "the audit left the folder behind: $($left.FullName -join ', ')" }
           }

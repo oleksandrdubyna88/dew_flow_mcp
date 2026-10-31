@@ -37,7 +37,7 @@ flowchart TD
     GONE --> END["last test done"]
     KEPT --> END
     END --> AUDIT["LeftoversSweepFixture.DisposeAsync: the audit<br/>registry (never disposed / disposed but not removed)<br/>+ temp root (claims of THIS PROCESS's own record — never a run's,<br/>so a sibling child's folders are not touched)"]
-    AUDIT -->|something left| RED["removes it by identity (the sweep's quarantine path),<br/>throws ONE LeftoversAuditException:<br/>'mcp tests: this run left n folder(s) it claimed — …', one folder per line, a remedy<br/>xUnit exits non-zero"]
+    AUDIT -->|something left| RED["removes it by identity (the sweep's quarantine path),<br/>throws ONE LeftoversAuditException:<br/>first line: 'mcp tests: this run left n folder(s) it claimed — ' and the counts per group, no path; then one folder per line under its group's words; then a remedy<br/>xUnit exits non-zero"]
     AUDIT -->|nothing| GREEN["green"]
     KILLED["a killed run"] -.->|collected by| SWEEP
     GUARD["LeftoversGuard (a test): tests (its own tests too), src, scripts, workflows<br/>eight classes + token identity read from outside the copied folder;<br/>red on a scan of nothing"] -.->|keeps the tests on the helper| TEST

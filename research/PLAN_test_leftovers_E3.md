@@ -139,6 +139,17 @@ asserted through the two `WindowsOwnership` fixtures, never from the runner's ow
 - **M** — the token file's pair is checked against an identity kept outside the copied folder (`RepositoryIdentity`, with the solution file's name).
 - **N** — this list, and `research/module_tests.md`.
 
+**Review round 2 (applied after `f4219c2`).**
+- **O** — no test runs a generated script: the "answered from the read-once copy" test no longer writes and executes a stand-in for `node` that ended in `rm -f`; `GuardScripts.Judge` takes the
+  classifier's answer as text over a script that is not on disk (`LeftoversGuardScriptsTests`). The `DirectoryLinks.Run` timeout test already ran only `sleep` and asserts the process is dead.
+- **P** — a classifier verdict whose `line` is below 1 or past that script's line count, or whose file is not one of the scripts sent, is an invalid answer: the whole answer becomes the one unjudged
+  `owner-blind` finding (lines -1, 0, count+1, `int.MaxValue`, an unknown file and non-verdict text are tested; lines 0 and -1 were an `IndexOutOfRangeException`, count+1 a finding at a line that does not exist).
+- **Q** — `LeftoversGuard.Scan` scans each file as it is read and keeps only the lines of scripts and workflows for the classifier; it no longer holds every file's text until the classifier finishes. A memory
+  refactor with the existing guard tests as the proof (dropping the retained scripts turns 13 of them red).
+- **R** — the audit message's first line already carried the counts and the group summary only (H), the paths on the per-folder lines below; so no change to the exception. The two CI steps (bash and PowerShell)
+  now check (a) a line with `mcp tests: this run left <n> folder(s) it claimed … <n> <group word>` and no path on it, and (b) a per-folder line (leading blanks) `<group word>: …/testsToDelete-<owner>-mcp-<case>-<id>`;
+  run against the real code for both `MCP_LEFTOVERS_SELFTEST` values they pass, and they fail when the audit's throw is removed and when the paths are put back on the first line.
+
 ## The contract this document encodes
 
 The released rule: `dew_flow_conventions · common/test-leftovers.md` at the `release` tip **`115bbf8`** (promoted
