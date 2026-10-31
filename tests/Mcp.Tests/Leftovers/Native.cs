@@ -159,12 +159,16 @@ internal static partial class Native
     internal static bool RenameByReservation(string from, string to, Action? afterFailedRename = null)
     {
         if (!MakeDirectoryExclusively(to)) return false; // the reservation: the name is taken, or now is
+        var reserved = ReservedIdentity(to);
         if (Libc.Rename(from, to) == 0) return true;
         var failure = Failure($"rename {from} to {to}", Marshal.GetLastPInvokeError());
         try
         {
             afterFailedRename?.Invoke();
-            if (IdentityOf(to) is { IsDirectory: true, IsLink: false }) Directory.Delete(to, recursive: false); // our own empty placeholder, nothing else
+            if (reserved is { } placeholder && IdentityOf(to) is { IsDirectory: true, IsLink: false } now && now.Uid == GetUid() && now.Dev == placeholder.Dev && now.Ino == placeholder.Ino)
+            {
+                _ = Libc.Rmdir(to); // rmdir(2) takes an EMPTY folder only and never follows a link; a failure (not empty, gone) is not ours to chase
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
@@ -173,6 +177,20 @@ internal static partial class Native
         }
 
         throw failure;
+    }
+
+    /// <summary>The identity of the placeholder just made, kept so the clean-up removes THAT folder and no other; null when it cannot be read (nothing is then removed).</summary>
+    [SupportedOSPlatform("linux")]
+    private static Identity? ReservedIdentity(string path)
+    {
+        try
+        {
+            return IdentityOf(path);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException)
+        {
+            return null;
+        }
     }
 
     /// <summary><c>kill(pid, 0)</c>: 0 when the process exists and may be signalled, else the errno.</summary>
@@ -457,6 +475,9 @@ internal static partial class Native
 
         [LibraryImport("libc", EntryPoint = "open", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
         internal static partial int Open(string path, int flags);
+
+        [LibraryImport("libc", EntryPoint = "rmdir", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+        internal static partial int Rmdir(string path);
 
         [LibraryImport("libc", EntryPoint = "rename", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
         internal static partial int Rename(string from, string to);

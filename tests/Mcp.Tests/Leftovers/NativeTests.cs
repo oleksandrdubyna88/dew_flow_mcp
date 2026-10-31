@@ -257,4 +257,50 @@ public sealed class NativeTests : IDisposable
         var unexpected = Record.Exception(() => Native.RenameByReservation(Path.Combine(scratch, "missing"), Path.Combine(scratch, "t2"), () => throw new InvalidCastException("a bug")));
         unexpected.Should().BeOfType<InvalidCastException>("anything but the expected failures propagates");
     }
+
+    [Fact]
+    [SupportedOSPlatform("linux")]
+    public void The_reservation_fallback_keeps_an_empty_folder_that_took_the_placeholders_place()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Skip("the reservation fallback is the Linux form");
+            return;
+        }
+
+        var scratch = _owned.Dir("scratch");
+        var target = Path.Combine(scratch, "target");
+        var stranger = Path.Combine(scratch, "stranger");
+        Directory.CreateDirectory(stranger); // made while the placeholder exists: a different inode, the caller's, empty
+
+        var failure = Record.Exception(() => Native.RenameByReservation(Path.Combine(scratch, "missing"), target, () => Native.RenameOnto(stranger, target)));
+
+        failure.Should().BeOfType<IOException>();
+        Directory.Exists(target).Should().BeTrue("it is not the folder this call reserved, so it is not this call's to remove");
+    }
+
+    [Fact]
+    [SupportedOSPlatform("linux")]
+    public void The_reservation_fallback_keeps_a_link_and_a_full_folder_that_took_the_placeholders_place()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Skip("the reservation fallback is the Linux form");
+            return;
+        }
+
+        var scratch = _owned.Dir("scratch");
+        var real = Path.Combine(scratch, "real");
+        Directory.CreateDirectory(real);
+        File.WriteAllText(Path.Combine(real, "keep.txt"), "kept");
+        var target = Path.Combine(scratch, "target");
+
+        Record.Exception(() => Native.RenameByReservation(Path.Combine(scratch, "missing"), target, () =>
+        {
+            Directory.Delete(target);
+            Directory.CreateSymbolicLink(target, real);
+        })).Should().BeOfType<IOException>();
+        Directory.ResolveLinkTarget(target, returnFinalTarget: false).Should().NotBeNull("a link is never removed, and never followed");
+        File.ReadAllText(Path.Combine(real, "keep.txt")).Should().Be("kept");
+    }
 }
