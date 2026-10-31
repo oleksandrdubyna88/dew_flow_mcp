@@ -40,8 +40,9 @@ public sealed record GuardReport(int FilesScanned, IReadOnlyList<Finding> Findin
 /// Every detector word below is spelled in two pieces, and the guard scans ITS OWN file clean: a test pins it.</summary>
 public static class LeftoversGuard
 {
-    /// <summary>The files the scan never reads: the guard's own tests carry the violations as fixture strings. A test pins this list.</summary>
-    public static IReadOnlyList<string> ExcludedFiles { get; } = ["tests/Mcp.Tests/Leftovers/LeftoversGuardTests.cs"];
+    /// <summary>The files the scan never reads: none. The guard's own tests spell their fixtures in pieces, as every other file does, and
+    /// the guard scans them clean. A test pins that the list stays empty.</summary>
+    public static IReadOnlyList<string> ExcludedFiles { get; } = [];
 
     private const string TokenFile = "tests/Mcp.Tests/Leftovers/OwnedToken.cs";
     private const string HelperFile = "tests/Mcp.Tests/Leftovers/Owned.cs";

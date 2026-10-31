@@ -3,9 +3,9 @@ using Xunit;
 
 namespace Mcp.Tests.Leftovers;
 
-/// <summary>The guard of rule §7 over this repository's tests, scripts and CI (S4 scenarios 3-6). THIS FILE IS EXCLUDED FROM
-/// THE SCAN — it carries the violations as fixture strings — and it is the only one: a test pins the list. The prefix word
-/// is still assembled from pieces at run time, because a literal here would travel into every copy of this file. Every
+/// <summary>The guard of rule §7 over this repository's tests, scripts and CI (S4 scenarios 3-6). THIS FILE IS SCANNED LIKE ANY OTHER:
+/// the violations it carries as fixture strings are spelled in pieces (<see cref="Fx"/>, and the prefix word is the variable
+/// <c>P</c>), so the guard reads none of them as the word, and a test pins that the exclusion list stays empty. Every
 /// tree is written at run time into a private <see cref="OwnedDir"/>; the scripts in it are judged by the SHIPPED classifier
 /// through the real mount, so each expected count is what the mount's own scan prints for the same text.</summary>
 public sealed class LeftoversGuardTests : IDisposable
@@ -23,13 +23,13 @@ public sealed class LeftoversGuardTests : IDisposable
     public static TheoryData<string, string, string, string> BreakIt()
     {
         var d = new TheoryData<string, string, string, string>();
-        void Add(string id, string file, string text, string expected) => d.Add(id, file, text, expected);
+        void Add(string id, string file, string text, string expected) => d.Add(Fx(id), file, Fx(text), expected);
 
         // raw-temp
-        Add("cs create-temp-subdirectory", "tests/X/A.cs", "var d = Directory.CreateTempSubdirectory(\"x\");", "raw-temp");
-        Add("cs get-temp-path without a call", "tests/X/A.cs", "var f = Path.GetTempPath;", "raw-temp");
-        Add("cs get-temp-path2", "tests/X/A.cs", "var f = Path.GetTempPath2();", "raw-temp");
-        Add("cs get-temp-file-name", "tests/X/A.cs", "var f = Path.GetTempFileName();", "raw-temp");
+        Add("cs create-temp-subdirectory", "tests/X/A.cs", "var d = Directory.Create§TempSubdirectory(\"x\");", "raw-temp");
+        Add("cs get-temp-path without a call", "tests/X/A.cs", "var f = Path.GetTemp§Path;", "raw-temp");
+        Add("cs get-temp-path2", "tests/X/A.cs", "var f = Path.GetTemp§Path2();", "raw-temp");
+        Add("cs get-temp-file-name", "tests/X/A.cs", "var f = Path.GetTemp§FileName();", "raw-temp");
         Add("cs env TMPDIR", "tests/X/A.cs", "var t = Environment.GetEnvironmentVariable(\"TMPDIR\");", "raw-temp");
         Add("cs env TEMP", "tests/X/A.cs", "var t = Environment.GetEnvironmentVariable( \"TEMP\" );", "raw-temp");
         Add("cs RUNNER_TEMP is not one", "tests/X/A.cs", "var t = Environment.GetEnvironmentVariable(\"RUNNER_TEMP\");", "");
@@ -37,76 +37,76 @@ public sealed class LeftoversGuardTests : IDisposable
         Add("workflow mktemp", ".github/workflows/w.yml", "      - run: d=$(mktemp -d)", "raw-temp");
         Add("ps1 $env:TEMP", "b.ps1", "$d = $env:TEMP", "raw-temp");
         Add("ps1 New-TemporaryFile", "b.ps1", "$f = New-TemporaryFile", "raw-temp");
-        Add("mjs mkdtempSync", ".github/scripts/a.mjs", "const d = fs.mkdtempSync(path.join(base, 'x-'));", "raw-temp");
-        Add("mjs tmpdir", ".github/scripts/a.mjs", "const d = os.tmpdir();", "raw-temp");
-        Add("mjs process.env.TMPDIR", ".github/scripts/a.mjs", "const d = process.env.TMPDIR;", "raw-temp");
-        Add("py mkdtemp", "c.py", "d = tempfile.mkdtemp()", "raw-temp");
-        Add("py temp_dir", "c.py", "d = temp_dir()", "raw-temp");
+        Add("mjs mkd§tempSync", ".github/scripts/a.mjs", "const d = fs.mkd§tempSync(path.join(base, 'x-'));", "raw-temp");
+        Add("mjs tmpdir", ".github/scripts/a.mjs", "const d = os.tmp§dir();", "raw-temp");
+        Add("mjs process.env.§TMPDIR", ".github/scripts/a.mjs", "const d = process.env.§TMPDIR;", "raw-temp");
+        Add("py mkd§temp", "c.py", "d = tempfile.mkd§temp()", "raw-temp");
+        Add("py temp_dir", "c.py", "d = temp§_dir()", "raw-temp");
         Add("sh mktemp is not a cs word", "tests/X/A.cs", "var s = \"mktemp\";", "");
 
         // raw-worktree
-        Add("cs worktree add", "tests/X/A.cs", "Run(\"git\", \"worktree\", \"add\", dir);", "raw-worktree");
-        Add("sh git worktree add", "a.sh", "git worktree add x", "raw-worktree");
+        Add("cs work§tree add", "tests/X/A.cs", "Run(\"git\", \"work§tree\", \"add\", dir);", "raw-worktree");
+        Add("sh git work§tree add", "a.sh", "git work§tree add x", "raw-worktree");
 
         // docker-run and docker-name
-        Add("docker run without --rm", ".github/workflows/w.yml", "      - run: docker run -d img", "docker-run");
-        Add("docker run --rm owner-form name", ".github/workflows/w.yml", $"      - run: docker run --rm --name {P}-u1000-mcp-x-abc123 img", "");
-        Add("docker run --rm unowned name", ".github/workflows/w.yml", "      - run: docker run --rm --name cache img", "docker-name");
-        Add("docker run --rm legacy name", ".github/workflows/w.yml", $"      - run: docker run --rm --name {P}-mcp-x-abc123 img", "docker-name,legacy-name");
-        Add("docker name is a whole expansion", "a.sh", "docker run --rm --name \"${name}\" img", "");
-        Add("docker name is a command substitution", "a.sh", "docker run --rm --name \"$(mk name)\" img", "");
-        Add("docker name default that is not an owner form", "a.sh", "docker run --rm --name \"${NAME:-cache}\" img", "docker-name");
-        Add("docker volume create", "a.sh", "docker volume create cache", "docker-name");
-        Add("docker network create with an option", "a.sh", "docker network create --driver bridge cache", "docker-name");
-        Add("docker volume create owner form", "a.sh", $"docker volume create {P}-u1000-mcp-v-abc123", "");
-        Add("cs WithName", "tests/X/A.cs", "var b = new Builder().WithName(\"pg\");", "docker-name");
-        Add("cs WithName owner form", "tests/X/A.cs", $"var b = new Builder().WithName(\"{P}-u1000-mcp-pg-abc123\");", "");
-        Add("docker compose -p", "a.sh", "docker compose -p cache up", "docker-name");
-        Add("docker compose --project-name", "a.sh", "docker compose --project-name=cache up", "docker-name");
-        Add("COMPOSE_PROJECT_NAME", ".github/workflows/w.yml", "        COMPOSE_PROJECT_NAME: cache", "docker-name");
-        Add("docker build -t", "a.sh", "docker build -t cache .", "docker-name");
+        Add("docker r§un without --rm", ".github/workflows/w.yml", "      - run: docker r§un -d img", "docker-run");
+        Add("docker r§un --rm owner-form name", ".github/workflows/w.yml", $"      - run: docker r§un --rm --na§me {P}-u1000-mcp-x-abc123 img", "");
+        Add("docker r§un --rm unowned name", ".github/workflows/w.yml", "      - run: docker r§un --rm --na§me cache img", "docker-name");
+        Add("docker r§un --rm legacy name", ".github/workflows/w.yml", $"      - run: docker r§un --rm --na§me {P}-mcp-x-abc123 img", "docker-name,legacy-name");
+        Add("docker name is a whole expansion", "a.sh", "docker r§un --rm --na§me \"${name}\" img", "");
+        Add("docker name is a command substitution", "a.sh", "docker r§un --rm --na§me \"$(mk name)\" img", "");
+        Add("docker name default that is not an owner form", "a.sh", "docker r§un --rm --na§me \"${NAME:-cache}\" img", "docker-name");
+        Add("docker volume cre§ate", "a.sh", "docker volume cre§ate cache", "docker-name");
+        Add("docker network cre§ate with an option", "a.sh", "docker network cre§ate --driver bridge cache", "docker-name");
+        Add("docker volume cre§ate owner form", "a.sh", $"docker volume cre§ate {P}-u1000-mcp-v-abc123", "");
+        Add("cs WithName", "tests/X/A.cs", "var b = new Builder().With§Name(\"pg\");", "docker-name");
+        Add("cs WithName owner form", "tests/X/A.cs", $"var b = new Builder().With§Name(\"{P}-u1000-mcp-pg-abc123\");", "");
+        Add("docker comp§ose -p", "a.sh", "docker comp§ose -p cache up", "docker-name");
+        Add("docker comp§ose --project-name", "a.sh", "docker comp§ose --project-name=cache up", "docker-name");
+        Add("COMPOSE_PROJECT§_NAME", ".github/workflows/w.yml", "        COMPOSE_PROJECT§_NAME: cache", "docker-name");
+        Add("docker bu§ild -t", "a.sh", "docker bu§ild -t cache .", "docker-name");
 
         // shared-store, ryuk-off
-        Add("TRUNCATE TABLE", ".github/workflows/w.yml", "      - run: psql -c \"TRUNCATE TABLE users\"", "shared-store");
-        Add("DROP DATABASE", "a.sh", "psql -c 'DROP DATABASE shop'", "shared-store");
-        Add("DROP TABLE of an owner-form name", "a.sh", $"psql -c 'DROP TABLE {P}-u1000-mcp-t-abc123'", "");
-        Add("FLUSHALL", "a.sh", "redis-cli FLUSHALL", "shared-store");
-        Add("deleteMany all", ".github/scripts/a.mjs", "await coll.deleteMany({});", "shared-store");
+        Add("TRUN§CATE TABLE", ".github/workflows/w.yml", "      - run: psql -c \"TRUN§CATE TABLE users\"", "shared-store");
+        Add("DR§OP DATABASE", "a.sh", "psql -c 'DR§OP DATABASE shop'", "shared-store");
+        Add("DR§OP TABLE of an owner-form name", "a.sh", $"psql -c 'DR§OP TABLE {P}-u1000-mcp-t-abc123'", "");
+        Add("FLUSH§ALL", "a.sh", "redis-cli FLUSH§ALL", "shared-store");
+        Add("deleteMany all", ".github/scripts/a.mjs", "await coll.delete§Many({});", "shared-store");
         Add("the prose word truncated", "tests/X/A.cs", "var s = \"the output was truncated\";", "");
-        Add("a commented truncate", "tests/X/A.cs", "// TRUNCATE TABLE users", "");
+        Add("a commented truncate", "tests/X/A.cs", "// TRUN§CATE TABLE users", "");
         Add("ryuk off", ".github/workflows/w.yml", "        TESTCONTAINERS_RYUK_DISABLED: \"true\"", "ryuk-off");
         Add("ryuk on", ".github/workflows/w.yml", "        TESTCONTAINERS_RYUK_DISABLED: \"false\"", "");
 
         // exemptions
-        Add("exempt raw-temp", "tests/X/A.cs", $"// {Marker} raw-temp — the one place a test learns the temp root\nvar t = Path.GetTempPath();", "");
-        Add("exempt raw-temp on the same line", "tests/X/A.cs", $"var t = Path.GetTempPath(); // {Marker} raw-temp — the one place a test learns the temp root", "");
-        Add("exempt raw-temp in a block comment", "tests/X/A.cs", $"/* {Marker} raw-temp — the one place a test learns the temp root */\nvar t = Path.GetTempPath();", "");
-        Add("exempt two lines above does not reach", "tests/X/A.cs", $"// {Marker} raw-temp — the one place a test learns the temp root\n\nvar t = Path.GetTempPath();", "raw-temp");
-        Add("exempt for another class does not reach", "tests/X/A.cs", $"// {Marker} raw-worktree — the one place a test learns the temp root\nvar t = Path.GetTempPath();", "raw-temp");
-        Add("exempt with a placeholder reason", "tests/X/A.cs", $"// {Marker} raw-temp — needed\nvar t = Path.GetTempPath();", "exemption,raw-temp");
-        Add("exempt with a todo reason", "tests/X/A.cs", $"// {Marker} raw-temp — todo fix this later on\nvar t = Path.GetTempPath();", "exemption,raw-temp");
-        Add("exempt with two words", "tests/X/A.cs", $"// {Marker} raw-temp — only twowords\nvar t = Path.GetTempPath();", "exemption,raw-temp");
-        Add("exempt with an unknown class", "tests/X/A.cs", $"// {Marker} nonsense — a perfectly fine reason here\nvar t = Path.GetTempPath();", "exemption,raw-temp");
-        Add("exempt with no class", "tests/X/A.cs", $"// {Marker}\nvar t = Path.GetTempPath();", "exemption,raw-temp");
-        Add("exempt shared-store with a lock", "a.sh", $"-- {Marker} shared-store — pg:5432 users; reuse intentional; lock: pg_advisory_lock(42)\npsql -c 'TRUNCATE TABLE users'", "");
-        Add("exempt shared-store without a lock", "a.sh", $"-- {Marker} shared-store — pg:5432 users; reuse intentional\npsql -c 'TRUNCATE TABLE users'", "exemption,shared-store");
+        Add("exempt raw-temp", "tests/X/A.cs", $"// {Marker} raw-temp — the one place a test learns the temp root\nvar t = Path.GetTemp§Path();", "");
+        Add("exempt raw-temp on the same line", "tests/X/A.cs", $"var t = Path.GetTemp§Path(); // {Marker} raw-temp — the one place a test learns the temp root", "");
+        Add("exempt raw-temp in a block comment", "tests/X/A.cs", $"/* {Marker} raw-temp — the one place a test learns the temp root */\nvar t = Path.GetTemp§Path();", "");
+        Add("exempt two lines above does not reach", "tests/X/A.cs", $"// {Marker} raw-temp — the one place a test learns the temp root\n\nvar t = Path.GetTemp§Path();", "raw-temp");
+        Add("exempt for another class does not reach", "tests/X/A.cs", $"// {Marker} raw-worktree — the one place a test learns the temp root\nvar t = Path.GetTemp§Path();", "raw-temp");
+        Add("exempt with a placeholder reason", "tests/X/A.cs", $"// {Marker} raw-temp — needed\nvar t = Path.GetTemp§Path();", "exemption,raw-temp");
+        Add("exempt with a todo reason", "tests/X/A.cs", $"// {Marker} raw-temp — todo fix this later on\nvar t = Path.GetTemp§Path();", "exemption,raw-temp");
+        Add("exempt with two words", "tests/X/A.cs", $"// {Marker} raw-temp — only twowords\nvar t = Path.GetTemp§Path();", "exemption,raw-temp");
+        Add("exempt with an unknown class", "tests/X/A.cs", $"// {Marker} nonsense — a perfectly fine reason here\nvar t = Path.GetTemp§Path();", "exemption,raw-temp");
+        Add("exempt with no class", "tests/X/A.cs", $"// {Marker}\nvar t = Path.GetTemp§Path();", "exemption,raw-temp");
+        Add("exempt shared-store with a lock", "a.sh", $"-- {Marker} shared-store — pg:5432 users; reuse intentional; lock: pg_advisory_lock(42)\npsql -c 'TRUN§CATE TABLE users'", "");
+        Add("exempt shared-store without a lock", "a.sh", $"-- {Marker} shared-store — pg:5432 users; reuse intentional\npsql -c 'TRUN§CATE TABLE users'", "exemption,shared-store");
         Add("ryuk-off under another class's exemption", ".github/workflows/w.yml", $"        # {Marker} shared-store — pg:5432 users; reuse intentional; lock: pg_advisory_lock(42)\n        TESTCONTAINERS_RYUK_DISABLED: \"true\"", "ryuk-off");
         Add("ryuk-off under its own exemption", ".github/workflows/w.yml", $"        # {Marker} ryuk-off — the reaper is slow on this runner\n        TESTCONTAINERS_RYUK_DISABLED: \"true\"", "exemption,ryuk-off");
 
         // comments
-        Add("a commented-out raw-temp", "tests/X/A.cs", "// Directory.CreateTempSubdirectory(\"x\")", "");
-        Add("a doc-commented raw-temp", "tests/X/A.cs", "/// Directory.CreateTempSubdirectory(\"x\")", "");
+        Add("a commented-out raw-temp", "tests/X/A.cs", "// Directory.Create§TempSubdirectory(\"x\")", "");
+        Add("a doc-commented raw-temp", "tests/X/A.cs", "/// Directory.Create§TempSubdirectory(\"x\")", "");
         Add("a shell comment", "a.sh", "# mktemp -d", "");
-        Add("a block comment on one line", "tests/X/A.cs", "/* Path.GetTempPath() */", "");
-        Add("a block comment over three lines", "tests/X/A.cs", "/*\n Path.GetTempPath()\n*/", "");
-        Add("code after a block comment closes", "tests/X/A.cs", "/* x */ var t = Path.GetTempPath();", "raw-temp");
-        Add("a slash-star inside a string opens nothing", "tests/X/A.cs", "var glob = \"src/**/*.cs\"; var t = Path.GetTempPath();", "raw-temp");
-        Add("a slash-star inside a verbatim string opens nothing", "tests/X/A.cs", "var s = @\"a \"\"/*\"\" b\"; var t = Path.GetTempPath();", "raw-temp");
-        Add("a slash-star inside a char literal pair opens nothing", "tests/X/A.cs", "var c = '/'; var d = '*'; var t = Path.GetTempPath();", "raw-temp");
-        Add("a quote char literal opens no string", "tests/X/A.cs", "var q = '\"'; /* x */ var t = Path.GetTempPath();", "raw-temp");
-        Add("a slash-star inside a line comment opens nothing", "tests/X/A.cs", "// see /* here\nvar t = Path.GetTempPath();", "raw-temp");
-        Add("a block comment in mjs", ".github/scripts/a.mjs", "/* os.tmpdir() */", "");
-        Add("a template string holding a slash-star in mjs", ".github/scripts/a.mjs", "const g = `src/**/*.cs`; const d = os.tmpdir();", "raw-temp");
+        Add("a block comment on one line", "tests/X/A.cs", "/* Path.GetTemp§Path() */", "");
+        Add("a block comment over three lines", "tests/X/A.cs", "/*\n Path.GetTemp§Path()\n*/", "");
+        Add("code after a block comment closes", "tests/X/A.cs", "/* x */ var t = Path.GetTemp§Path();", "raw-temp");
+        Add("a slash-star inside a string opens nothing", "tests/X/A.cs", "var glob = \"src/**/*.cs\"; var t = Path.GetTemp§Path();", "raw-temp");
+        Add("a slash-star inside a verbatim string opens nothing", "tests/X/A.cs", "var s = @\"a \"\"/*\"\" b\"; var t = Path.GetTemp§Path();", "raw-temp");
+        Add("a slash-star inside a char literal pair opens nothing", "tests/X/A.cs", "var c = '/'; var d = '*'; var t = Path.GetTemp§Path();", "raw-temp");
+        Add("a quote char literal opens no string", "tests/X/A.cs", "var q = '\"'; /* x */ var t = Path.GetTemp§Path();", "raw-temp");
+        Add("a slash-star inside a line comment opens nothing", "tests/X/A.cs", "// see /* here\nvar t = Path.GetTemp§Path();", "raw-temp");
+        Add("a block comment in mjs", ".github/scripts/a.mjs", "/* os.tmp§dir() */", "");
+        Add("a template string holding a slash-star in mjs", ".github/scripts/a.mjs", "const g = `src/**/*.cs`; const d = os.tmp§dir();", "raw-temp");
 
         // legacy-name, owner-blind in .cs (decision 3)
         Add("legacy literal", "tests/X/A.cs", $"var n = \"{P}-mcp-x-abc123\";", "legacy-name,owner-blind");
@@ -129,7 +129,7 @@ public sealed class LeftoversGuardTests : IDisposable
         Add("a reference to Owned.LegacyPattern in src", "src/Y/Y.cs", "var m = Owned.LegacyPattern.IsMatch(n);", "owner-blind");
         Add("a commented reference to Owned.Prefix", "tests/X/A.cs", "// var p = Owned.Prefix + what;", "");
         Add("a reference to Owned.NameBase is how a test builds a name", "tests/X/A.cs", "var p = Owned.NameBase + what;", "");
-        Add("src is read for the literal classes only", "src/Y/Y.cs", "var d = Directory.CreateTempSubdirectory(\"x\");", "");
+        Add("src is read for the literal classes only", "src/Y/Y.cs", "var d = Directory.Create§TempSubdirectory(\"x\");", "");
 
         // owner-blind in .cs: the word itself, whatever follows it (a glob, a class, a pattern, a bare word)
         Add("a directory listing by the bare word and a star", "tests/X/A.cs", $"foreach (var d in Directory.GetDirectories(Owned.TempRoot(), \"{P}*\")) Directory.Delete(d, true);", "owner-blind,raw-temp");
@@ -188,20 +188,20 @@ public sealed class LeftoversGuardTests : IDisposable
     [Fact]
     public void A_finding_names_the_file_the_line_and_the_class()
     {
-        var root = Tree(("tests/X/A.cs", "var a = 1;\nvar b = 2;\nvar t = Path.GetTempPath();\n"));
+        var root = Tree(("tests/X/A.cs", "var a = 1;\nvar b = 2;\nvar t = Path.GetTemp§Path();\n"));
 
         var finding = LeftoversGuard.Scan(root, RepositoryRoot.Path).Findings.Should().ContainSingle().Subject;
 
         finding.File.Should().Be("tests/X/A.cs");
         finding.Line.Should().Be(3);
         finding.Class.Should().Be("raw-temp");
-        finding.Text.Should().Contain("GetTempPath");
+        finding.Text.Should().Contain(Fx("GetTemp§Path"));
     }
 
     [Fact]
     public void Code_after_a_block_comment_that_closes_on_its_line_is_found_at_that_line()
     {
-        var root = Tree(("tests/X/A.cs", "/*\n x\n*/ var t = Path.GetTempPath();\n"));
+        var root = Tree(("tests/X/A.cs", "/*\n x\n*/ var t = Path.GetTemp§Path();\n"));
 
         LeftoversGuard.Scan(root, RepositoryRoot.Path).Findings.Should().ContainSingle().Which.Line.Should().Be(3);
     }
@@ -217,7 +217,7 @@ public sealed class LeftoversGuardTests : IDisposable
     [Fact]
     public void A_line_that_breaks_a_class_twice_is_one_finding_of_that_class()
     {
-        var root = Tree(("tests/X/A.cs", "var a = Path.GetTempPath() + Path.GetTempFileName();"));
+        var root = Tree(("tests/X/A.cs", "var a = Path.GetTemp§Path() + Path.GetTemp§FileName();"));
 
         LeftoversGuard.Scan(root, RepositoryRoot.Path).Findings.Should().ContainSingle().Which.Class.Should().Be("raw-temp");
     }
@@ -225,12 +225,12 @@ public sealed class LeftoversGuardTests : IDisposable
     [Fact]
     public void A_file_under_a_build_output_is_not_scanned_and_the_folders_that_are_not_ours_are_never_entered()
     {
-        var violation = "var t = Path.GetTempPath();";
+        var violation = "var t = Path.GetTemp§Path();";
         var root = Tree(
             ("tests/X/A.cs", "var ok = 1;"),
             ("tests/X/bin/Debug/B.cs", violation),
             ("tests/X/obj/C.cs", violation),
-            ("http/node_modules/pkg/index.mjs", "const d = os.tmpdir();"),
+            ("http/node_modules/pkg/index.mjs", "const d = os.tmp§dir();"),
             (".git/hooks/x.sh", "d=$(mktemp -d)"),
             (".claude/rules/shared/tools/x.sh", "d=$(mktemp -d)"),
             (".http-artifacts/x.sh", "d=$(mktemp -d)"),
@@ -255,7 +255,7 @@ public sealed class LeftoversGuardTests : IDisposable
             ("tools/t.sh", "echo t"),
             ("tools/u.ps1", "Write-Host u"),
             ("tools/v.py", "print('v')"),
-            ("docs/not-scanned.cs", "var t = Path.GetTempPath();"),
+            ("docs/not-scanned.cs", "var t = Path.GetTemp§Path();"),
             ("README.md", "d=$(mktemp -d)"));
 
         var report = LeftoversGuard.Scan(root, RepositoryRoot.Path);
@@ -268,7 +268,7 @@ public sealed class LeftoversGuardTests : IDisposable
     public void The_guard_over_itself_reports_nothing_because_it_spells_its_detector_words_in_pieces()
     {
         var path = "tests/Mcp.Tests/Leftovers/LeftoversGuard.cs";
-        var root = Tree((path, File.ReadAllText(Path.Combine(RepositoryRoot.Path, path))));
+        var root = Verbatim(path);
 
         var report = LeftoversGuard.Scan(root, RepositoryRoot.Path);
 
@@ -417,12 +417,12 @@ public sealed class LeftoversGuardTests : IDisposable
     [Fact]
     public void The_token_constant_is_written_once_in_the_token_file_with_the_registered_value()
     {
-        var one = Tree((TokenFile, "public const string RepoToken = \"mcp\";"));
-        var twice = Tree((TokenFile, "public const string RepoToken = \"mcp\";"), ("tests/Other.cs", "const string RepoToken = \"mcp\";"));
-        var elsewhere = Tree(("src/Other.cs", "const string RepoToken = \"mcp\";"));
-        var other = Tree((TokenFile, "public const string RepoToken = \"mcpx\";"));
-        var commented = Tree((TokenFile, "public const string RepoToken = \"mcp\";"), ("tests/Other.cs", "// const string RepoToken = \"mcp\";"));
-        var script = Tree((TokenFile, "public const string RepoToken = \"mcp\";"), ("a.sh", "RepoToken='mcp'"));
+        var one = Tree((TokenFile, "public const string Repo§Token = \"mcp\";"));
+        var twice = Tree((TokenFile, "public const string Repo§Token = \"mcp\";"), ("tests/Other.cs", "const string Repo§Token = \"mcp\";"));
+        var elsewhere = Tree(("src/Other.cs", "const string Repo§Token = \"mcp\";"));
+        var other = Tree((TokenFile, "public const string Repo§Token = \"mcpx\";"));
+        var commented = Tree((TokenFile, "public const string Repo§Token = \"mcp\";"), ("tests/Other.cs", "// const string Repo§Token = \"mcp\";"));
+        var script = Tree((TokenFile, "public const string Repo§Token = \"mcp\";"), ("a.sh", "Repo§Token='mcp'"));
 
         var none = Tree(("tests/X/A.cs", "var a = 1;"));
 
@@ -438,23 +438,27 @@ public sealed class LeftoversGuardTests : IDisposable
     // ---- 6: the exclusion list -----------------------------------------------------------------------------------------
 
     [Fact]
-    public void The_exclusion_list_is_exactly_the_guards_own_fixtures_and_a_file_by_that_name_is_not_read()
+    public void No_file_is_excluded_and_the_guards_own_tests_are_scanned_clean()
     {
-        LeftoversGuard.ExcludedFiles.Should().Equal("tests/Mcp.Tests/Leftovers/LeftoversGuardTests.cs");
-
-        var root = Tree(
-            ("tests/Mcp.Tests/Leftovers/LeftoversGuardTests.cs", "var t = Path.GetTempPath();"),
-            ("tests/Mcp.Tests/Leftovers/LeftoversGuard.cs", "var ok = 1;"));
+        LeftoversGuard.ExcludedFiles.Should().BeEmpty();
+        var path = "tests/Mcp.Tests/Leftovers/LeftoversGuardTests.cs";
+        var root = Verbatim(path);
 
         var report = LeftoversGuard.Scan(root, RepositoryRoot.Path);
 
-        report.FilesScanned.Should().Be(1);
-        report.Findings.Should().BeEmpty();
+        report.FilesScanned.Should().Be(1, "the file is read like any other");
+        report.Findings.Should().BeEmpty(Show(report));
     }
 
     // ---- helpers -------------------------------------------------------------------------------------------------------
 
-    private string Tree(params (string Path, string Text)[] files)
+    /// <summary>A tree of the given files, each text through <see cref="Fx"/>.</summary>
+    private string Tree(params (string Path, string Text)[] files) => Written(files.Select(f => (f.Path, Fx(f.Text))));
+
+    /// <summary>A tree of the given files exactly as they are: a real file of this repository, scanned as it stands.</summary>
+    private string Verbatim(string relative) => Written([(relative, File.ReadAllText(Path.Combine(RepositoryRoot.Path, relative)))]);
+
+    private string Written(IEnumerable<(string Path, string Text)> files)
     {
         var root = _owned.Dir("guard-tree");
         foreach (var (relative, text) in files)
@@ -466,6 +470,11 @@ public sealed class LeftoversGuardTests : IDisposable
 
         return root;
     }
+
+    /// <summary>The fixtures hold the very words the guard detects, and the guard scans this file: each such word is written with a
+    /// section sign inside it (<c>Path.GetTemp§Path</c>), which the guard cannot read as the word, and the sign is dropped before the
+    /// text is written into a tree or compared. The prefix word is a variable (<c>P</c>) for the same reason.</summary>
+    private static string Fx(string text) => text.Replace("§", "", StringComparison.Ordinal);
 
     private static string Classes(GuardReport report) => string.Join(",", report.Findings.Select(f => f.Class).Order(StringComparer.Ordinal));
 
