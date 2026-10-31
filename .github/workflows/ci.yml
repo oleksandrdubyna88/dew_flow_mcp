@@ -45,10 +45,33 @@ jobs:
       - name: Test
         run: ./tests/Mcp.Tests/bin/Release/net10.0/Mcp.Tests
 
+      # The end-of-run audit has teeth. LeftoversSelfTest leaks a folder on purpose, and ONLY when
+      # MCP_LEFTOVERS_SELFTEST is set; this step sets it, AFTER the normal Test step, and is green only on a
+      # NON-zero exit that carries the audit's own message with the case's own words before the folder's
+      # name, and on an empty, listable temp root. A listing error is red, never ignored. If xUnit did not
+      # fail the run on an assembly-fixture cleanup exception this step would be red on its first run:
+      # the audit must never become a warning silently.
+      - name: The audit fails a run that leaves a claimed folder
+        run: |
+          set -o pipefail
+          owner="u$(id -u)"
+          for entry in "1:never disposed:selftest" "failed-dispose:disposed but not removed:selftest-failed"; do
+            IFS=: read -r value words what <<< "$entry"
+            if MCP_LEFTOVERS_SELFTEST="$value" ./tests/Mcp.Tests/bin/Release/net10.0/Mcp.Tests --filter-class "*LeftoversSelfTest" 2>&1 | tee selftest.log; then
+              echo "the end-of-run audit did not fail the run ($value)"; exit 1; fi
+            grep -q "mcp tests: this run left" selftest.log || { echo "the run failed, but not with the audit's message ($value)"; exit 1; }
+            grep -E "$words: .*/testsToDelete-[uw][0-9]{1,10}-mcp-$what-[A-Za-z0-9]{6}" selftest.log >/dev/null \
+              || { echo "the audit's message does not name the folder under '$words' ($value)"; exit 1; }
+            left=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -iname "teststodelete-${owner}-mcp-$what-*") \
+              || { echo "the temp root could not be listed"; exit 1; }
+            [ -z "$left" ] || { echo "the audit left the folder behind: $left"; exit 1; }
+          done
+
   # The same suite on Windows, because the test-leftovers helper (tests/Mcp.Tests/Leftovers) has a Windows
-  # half — the kernel-owner read, the process probe, the exclusive create — that nothing proves from Linux.
-  # UNTIL the migration of the old test folders lands the job runs the Leftovers namespace only; from that
-  # commit on it runs the whole executable, which is what proves every migrated class disposes on Windows.
+  # half — the kernel-owner read, the process probe, the exclusive create — that nothing proves from Linux,
+  # and the migrated classes must dispose on Windows too (an open handle stops a recursive delete there).
+  # The WHOLE executable runs; the premises that only hold on Linux (the janitor cross-check, the
+  # read-only-folder refusals) are named skips with their reason.
   #
   # No `Formatted` step: on a Windows checkout `dotnet format` reports ENDOFLINE noise from `core.autocrlf`
   # (see the note on the Linux job), and the Linux job already gates formatting. The runner executes as an
@@ -72,7 +95,7 @@ jobs:
         run: dotnet build dew_flow_mcp.slnx -c Release
 
       - name: Test
-        run: ./tests/Mcp.Tests/bin/Release/net10.0/Mcp.Tests.exe --filter-namespace Mcp.Tests.Leftovers
+        run: ./tests/Mcp.Tests/bin/Release/net10.0/Mcp.Tests.exe
 
   # The management surface over the wire, against a running host: routing, the group prefix, the
   # status codes, the serialized shape. What the unit tests cannot see is the composition — that the
