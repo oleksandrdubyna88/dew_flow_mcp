@@ -38,7 +38,7 @@ public sealed class OwnedTests : IDisposable
         full.IsMatch(Owned.NameBase.ToLowerInvariant().Replace('-', '_') + "pg_abcdef").Should().BeTrue("the underscore spelling, lower case");
         full.IsMatch(Owned.NameBase + "pg-abcde").Should().BeFalse("five characters");
         full.IsMatch(Owned.NameBase + "pg-abcdefghijklm").Should().BeFalse("thirteen characters");
-        full.IsMatch(Owned.NameBase + "pg-clxdyztb.njt").Should().BeFalse("CreateTempSubdirectory's id holds a dot");
+        full.IsMatch(Owned.NameBase + "pg-clxdyztb.njt").Should().BeFalse("the id of a framework-made temp folder holds a dot");
         full.IsMatch(Owned.NameBase.Replace(OwnerToken.This, Other) + "pg-abcdef").Should().BeFalse("another owner's name");
         Owned.Pattern().IsMatch(Owned.NameBase + "x").Should().BeTrue("selection is the anchored prefix, owner and token");
         Owned.Pattern().IsMatch("x-" + Owned.NameBase).Should().BeFalse("anchored");
