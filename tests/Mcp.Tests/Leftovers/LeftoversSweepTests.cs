@@ -155,7 +155,7 @@ public sealed class LeftoversSweepTests(LeftoversSweepFixture fixture) : IDispos
         string[] outOfScope =
         [
             "x-" + Owned.NameBase + "a-abc123",
-            "teststo" + "deletemcp-a-abc123",
+            Owned.Prefix[..^1] + OwnedToken.RepoToken + "-a-abc123", // the word glued to the token with no separator: not a name of this sweep
             Owned.Prefix + OwnerToken.This + "-conventions-a-abc123",
             Owned.Prefix + OwnerToken.This + "-mcpx-a-abc123",
             "mcp-workspace-abc123",

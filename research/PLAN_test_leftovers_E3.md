@@ -150,6 +150,32 @@ asserted through the two `WindowsOwnership` fixtures, never from the runner's ow
   now check (a) a line with `mcp tests: this run left <n> folder(s) it claimed … <n> <group word>` and no path on it, and (b) a per-folder line (leading blanks) `<group word>: …/testsToDelete-<owner>-mcp-<case>-<id>`;
   run against the real code for both `MCP_LEFTOVERS_SELFTEST` values they pass, and they fail when the audit's throw is removed and when the paths are put back on the first line.
 
+**Lessons from the E4 review (the Rust port of the same contract; applied after `b9d6e6d`).** Each item was first checked in this code.
+- **Guard read through spelling (same gap — fixed).** Seven planted lines — `"testsTo" + "Delete-"`, `string.Concat("testsTo", "Delete-*")`, `$"{"testsTo"}{"Delete-"}"`, an escape in the word,
+  `@"^tests[T]oDelete-"`, `Path.Combine("/tmp", "x")` and `GetEnvironmentVariable("TM" + "P")` — were caught 0 of 7 (measured with the new break-it cases against the guard with the new reading switched off:
+  16 of the 16 new positive cases red). `GuardLiterals` now folds each C# line the way the compiler reads its literals (escapes decoded, `+` / `string.Concat` / literal interpolation holes joined, a
+  one-character class read as its character) and the guard applies the word, piece and temp-root rules to the folded line as well as the original. A literal holding a piece of the prefix word
+  (five characters or more, case-insensitive, crossing the join: `testsTo`, `sToDel`, `oDelete`) is an `owner-blind` finding; a `/tmp` or `/var/tmp` literal is `raw-temp` (tests only, as the other
+  raw-temp spellings). Pinned allowances (`LeftoversGuard.FoldingAllowances`, a test pins the four): `Owned.cs`, `LeftoversGuard.cs`, and the two files that build the guard's fixtures out of the word
+  (`LeftoversGuardTests.cs`, `LeftoversGuardScriptsTests.cs`); the exemption marker word now comes from `LeftoversGuard.CamelWord`, and one fixture in `LeftoversSweepTests` names the word through `Owned.Prefix`.
+  **Remaining limit:** it is a spelling check, one line at a time; a name that a source generator, an embedded resource, a char array, a file read at run time or a value computed across lines assembles
+  is invisible to it (`research/module_tests.md`, *What it does not prove*).
+- **Windows caller SID (not present).** `Scope.WindowsIsMine` reads `WindowsIdentity.GetCurrent()` on every call (`Scope.cs`), which opens the thread token first and the process token when the thread has none; nothing is cached
+  (`OwnerToken` caches only the derived `w<digits>` string, from the account name).
+- **Quarantine pass (same gap — fixed).** The pass parsed the pid out of a quarantine name and handed it to the probe; a leading-zero `007` reached the real probe as 7, and `0`, past-2^53, Windows `1` or a pid past the OS bound
+  reached any injected probe (the default `ProbeProcess` bounded all but the leading zero). `Liveness.AskablePid` (canonical digits, 1 to 2^53-1, Linux at most `int.MaxValue`, Windows at most `uint.MaxValue` and never 1) now runs first;
+  an unaskable pid is unknown and the quarantine stays.
+- **Orphan-claim pass (same gap — fixed).** A claim whose folder sat in a sibling quarantine (the renamer alive, or the restore pending) was deleted when its owner was gone, leaving the folder with nobody's mark. The sweep's pass
+  and the end-of-run audit's orphan scan now skip a claim whose name has a sibling quarantine in the temp root or a `quarantine-conflict` entry in the report.
+- **Rename into quarantine (partly present).** .NET's `Directory.Move` on Linux refuses an existing target (measured: the empty folder at the drawn name survived) but by checking first and then renaming, and a taken name was an
+  error that left the folder uncollected. The rename is now `Native.RenameExclusively` (`renameat2` with `RENAME_NOREPLACE`; reserve-then-rename where the file system lacks the flag; `Directory.Move` on Windows) and a taken name
+  draws another suffix, at most `Owned.MaxDraws` times, then the folder stays where it is with one error.
+- **Windows ownership read (partly present).** `IsMine` already reads the final path and the owner SID from ONE handle (`Native.WindowsEntryOf`) and the identity is the 128-bit `FileIdInfo` (class 18). The claim read was the gap:
+  it checked the identity with one open and read through a second open by path, so a pipe or device swapped in between was left to `FileStream`'s implicit refusal. `Native.ReadVerifiedRegular` opens once (no link followed), requires
+  `GetFileType` = `FILE_TYPE_DISK`, a regular file and the identity judged, and reads from that handle. The Windows test (`ScopeTests`) was written on Linux and has not run there; the Windows job is its first run. The POSIX read still
+  opens a FIFO swapped in after the identity check by path (the open would block); the folder's sticky bit keeps another user from doing it, and it is not closed here.
+- **The helper's own tests (same gap — fixed).** `RunnerFactsTests` wrote its probe file straight into the temp root under an exemption marker; the file is now inside an `OwnedDir` and the marker is gone.
+
 ## The contract this document encodes
 
 The released rule: `dew_flow_conventions · common/test-leftovers.md` at the `release` tip **`115bbf8`** (promoted

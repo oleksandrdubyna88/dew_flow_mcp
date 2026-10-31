@@ -145,6 +145,34 @@ public sealed class LeftoversGuardTests : IDisposable
         Add("a lower-case environment name is not the variable", "tests/X/A.cs", $"var v = \"{Lower}_run\";", "legacy-name,owner-blind");
         Add("the bare word in a script is the classifier's, not the C# rule's", "a.sh", $"echo {P}", "");
 
+        // the guard reads a literal the way the compiler does: a word cannot be hidden by how it is spelled
+        var head = P[..7];
+        var tail = P[7..];
+        Add("the word split over a plus", "tests/X/A.cs", $"var n = \"{head}\" + \"{tail}-\";", "owner-blind");
+        Add("the word split over string.Concat", "tests/X/A.cs", $"var n = string.Concat(\"{head}\", \"{tail}-*\");", "owner-blind");
+        Add("the word split over interpolation holes", "tests/X/A.cs", "var n = $\"{\"" + head + "\"}{\"" + tail + "-\"}\";", "owner-blind");
+        Add("the word with a unicode escape in it", "tests/X/A.cs", $"var n = \"tests\\u0054o{tail}-*\";", "owner-blind");
+        Add("the word with a hex escape in it", "tests/X/A.cs", $"var n = \"tests\\x54o{tail}-\";", "owner-blind");
+        Add("the word with a character literal between its halves", "tests/X/A.cs", $"var n = \"tests\" + 'T' + \"o{tail}-\";", "owner-blind");
+        Add("the word with a one-character regex class", "tests/X/A.cs", $"var r = @\"^tests[T]o{tail}-\";", "owner-blind");
+        Add("the word split over a plus, an owner after it", "tests/X/A.cs", $"var n = \"{head}\" + \"{tail}-u1000-\";", "");
+        Add("a half of the word on its own", "tests/X/A.cs", $"var half = \"{head}\"; var rest = \"{tail}-\";", "owner-blind");
+        Add("a middle piece of the word in capitals", "tests/X/A.cs", $"var piece = \"{P[3..10].ToUpperInvariant()}\";", "owner-blind");
+        Add("a half of the word in src", "src/Y/Y.cs", $"var half = \"{head}\";", "owner-blind");
+        Add("the two plain words of the prefix are words", "tests/X/A.cs", "var a = \"tests\"; var b = \"Delete\"; var c = \"tests/Mcp.Tests/A.cs\";", "");
+        Add("the word split over a plus in the helper file", "tests/Mcp.Tests/Leftovers/Owned.cs", $"var n = \"{head}\" + \"{tail}-\";", "");
+        Add("the word split over a plus in the guard's fixture file", "tests/Mcp.Tests/Leftovers/LeftoversGuardTests.cs", $"var n = \"{head}\" + \"{tail}-\";", "");
+        Add("the word split over a plus in a third file of the folder", "tests/Mcp.Tests/Leftovers/LeftoversSweep.cs", $"var n = \"{head}\" + \"{tail}-\";", "owner-blind");
+        Add("a path under the raw temp root", "tests/X/A.cs", "Directory.CreateDirectory(Path.Combine(\"/tmp\", \"x\"));", "raw-temp");
+        Add("a path under the other raw temp root", "tests/X/A.cs", "var d = \"/var/tmp/x\";", "raw-temp");
+        Add("the raw temp root in two literals", "tests/X/A.cs", "var d = \"/t\" + \"mp\";", "raw-temp");
+        Add("the temp variable named in two literals", "tests/X/A.cs", "var t = Environment.GetEnvironmentVariable(\"TM\" + \"P\");", "raw-temp");
+        Add("the temp variable named with an escape", "tests/X/A.cs", "var t = Environment.GetEnvironmentVariable(\"TMP\\u0044IR\");", "raw-temp");
+        Add("a file called tmpfile is not the temp root", "tests/X/A.cs", "var d = \"/tmpfile\"; var e = \"my/tmp-file\";", "");
+        Add("a commented temp root", "tests/X/A.cs", "// var d = \"/tmp\";", "");
+        Add("an escape that is no character does not break the scan", "tests/X/A.cs", "var s = \"\\uD800 \\U00110000 \\q\" + 'x' + \"unterminated;", "");
+        Add("the raw temp root in src is read for the literal classes only", "src/Y/Y.cs", "var d = \"/tmp\";", "");
+
         // Owned.TempRoot() is the temp root: outside the helper's folder it is a raw-temp finding like any other spelling of it
         Add("a folder made under Owned.TempRoot outside the helper", "tests/X/A.cs", "Directory.CreateDirectory(Path.Combine(Owned.TempRoot(), \"x\"));", "raw-temp");
         Add("Owned.TempRoot in src", "src/Y/Y.cs", "var root = Owned.TempRoot();", "raw-temp");
@@ -457,6 +485,15 @@ public sealed class LeftoversGuardTests : IDisposable
     }
 
     // ---- 6: the exclusion list -----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void The_files_that_may_spell_the_word_in_pieces_are_these_four_and_all_of_them_exist()
+    {
+        const string folder = "tests/Mcp.Tests/Leftovers/";
+
+        LeftoversGuard.FoldingAllowances.Should().Equal(folder + "Owned.cs", folder + "LeftoversGuard.cs", folder + "LeftoversGuardTests.cs", folder + "LeftoversGuardScriptsTests.cs");
+        LeftoversGuard.FoldingAllowances.Should().OnlyContain(file => File.Exists(Path.Combine(RepositoryRoot.Path, file)));
+    }
 
     [Fact]
     public void No_file_is_excluded_and_the_guards_own_tests_are_scanned_clean()

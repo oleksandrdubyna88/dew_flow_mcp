@@ -10,7 +10,7 @@ internal static class GuardExemptions
     /// <summary>The classes a marker may exempt. <c>ryuk-off</c> and <c>owner-blind</c> accept none.</summary>
     internal static readonly string[] Exemptible = ["raw-temp", "raw-worktree", "docker-run", "docker-name", "legacy-name", "shared-store"];
 
-    private const string MarkerWord = "testsToDe" + "lete-exempt:";
+    private const string MarkerWord = LeftoversGuard.CamelWord + "-exempt:";
 
     private static readonly Dictionary<string, string> Refused = new(StringComparer.Ordinal)
     {

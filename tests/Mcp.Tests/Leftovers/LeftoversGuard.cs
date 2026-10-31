@@ -48,7 +48,22 @@ public static class LeftoversGuard
     private const string HelperFolder = "tests/Mcp.Tests/Leftovers/";
 
     // The detector words, each in two pieces: the guard is scanned like any other file, and the machine scan reads it too.
-    private const string Word = "teststo" + "delete";
+    internal const string Word = "teststo" + "delete";
+
+    /// <summary>The same word as a person writes it, for the exemption marker: <c>testsToDelete</c>.</summary>
+    internal const string CamelWord = "testsTo" + "Delete";
+
+    /// <summary>The files that may spell the word in pieces, so the folded reading (<see cref="GuardLiterals"/>: joined literals, decoded
+    /// escapes, single-character classes, pieces of the word) is not applied to them: the helper that owns the prefix, the guard that
+    /// holds the detector words, and the two files that build the guard's break-it fixtures out of the word. Pinned by a test; a fifth
+    /// file is a decision, not a convenience. Everything else names the word through <c>Owned</c> (a constant) or not at all.</summary>
+    internal static IReadOnlyList<string> FoldingAllowances { get; } =
+    [
+        HelperFile,
+        "tests/Mcp.Tests/Leftovers/LeftoversGuard.cs",
+        "tests/Mcp.Tests/Leftovers/LeftoversGuardTests.cs",
+        "tests/Mcp.Tests/Leftovers/LeftoversGuardScriptsTests.cs",
+    ];
 
     private static Regex Rx(string pattern, RegexOptions options = RegexOptions.None) => new(pattern, options | RegexOptions.CultureInvariant);
 
@@ -114,6 +129,9 @@ public static class LeftoversGuard
     /// <summary>The helper's one door to the temp root: outside the helper's folder a path made under it is a temp path no <c>OwnedDir</c> claimed.</summary>
     private static readonly Regex TempRootReference = Rx(@"\bOwned\.TempRoot\b");
 
+    /// <summary>A literal that names the raw temp root outright: <c>/tmp</c> or <c>/var/tmp</c> as a path, however the path is then built.</summary>
+    private static readonly Regex TempFolderLiteral = Rx(@"(?<![\w.-])/(?:var/)?tmp(?![\w-])");
+
     /// <summary>Scan <paramref name="repoRoot"/>: <see cref="GuardReport"/> with the number of files read and every finding. Pure
     /// apart from reading files and, when the tree holds a script or a workflow, starting <paramref name="node"/> ONCE to run the
     /// mounted conventions' classifier (read from <paramref name="mountRoot"/>, default the scanned root). A root that does not
@@ -172,7 +190,7 @@ public static class LeftoversGuard
                 .Select(g => new Finding(source.Relative, number, g.Key, string.Join(", ", g.Select(h => $"`{h.Text}`").Distinct())));
 
     private static IEnumerable<(string Class, string Text)> LineHits(SourceFile source, string line) =>
-        HitsOutsideSource(source, line).Concat(Tag("legacy-name", LegacyNameHits(line))).Concat(HitsOfCSharp(source, line));
+        HitsOutsideSource(source, line).Concat(Tag("legacy-name", LegacyNameHits(line))).Concat(HitsOfCSharp(source, line)).Concat(HitsOfFoldedLiterals(source, line));
 
     private static IEnumerable<(string Class, string Text)> Tag(string cls, IEnumerable<string> texts) => texts.Select(text => (cls, text));
 
@@ -192,6 +210,26 @@ public static class LeftoversGuard
         source.Kind is SourceKind.Tests or SourceKind.Source
             ? Tag("owner-blind", OwnerBlindHits(source, line)).Concat(Tag("raw-temp", TempRootHits(source, line)))
             : [];
+
+    /// <summary>The same two classes over the line READ AS THE COMPILER READS IT (<see cref="GuardLiterals"/>): a word or a temp root that is
+    /// spelled with an escape, in pieces joined by <c>+</c> or <c>string.Concat</c>, in a one-character class, or only as a piece of the
+    /// prefix word. Never for the files of <see cref="FoldingAllowances"/>.</summary>
+    private static IEnumerable<(string Class, string Text)> HitsOfFoldedLiterals(SourceFile source, string line) =>
+        IsFolded(source, line) ? FoldedHits(source, GuardLiterals.Fold(line)) : [];
+
+    private static bool IsFolded(SourceFile source, string line) =>
+        source.Extension == ".cs" && source.Kind is SourceKind.Tests or SourceKind.Source && !FoldingAllowances.Contains(source.Relative) && line.AsSpan().IndexOfAny('"', '\'') >= 0;
+
+    private static IEnumerable<(string Class, string Text)> FoldedHits(SourceFile source, FoldedLine folded) =>
+        Tag("owner-blind", BareWordHits(folded.Text).Concat(PieceHits(folded))).Concat(Tag("raw-temp", source.Kind == SourceKind.Tests ? FoldedTempHits(folded) : []));
+
+    /// <summary>A literal that holds a piece of the prefix word and not the whole word (a literal with the whole word is judged by what follows it).</summary>
+    private static IEnumerable<string> PieceHits(FoldedLine folded) =>
+        folded.Literals.Where(literal => !WordAnywhere.IsMatch(literal)).Select(literal => GuardLiterals.PrefixPieces.Match(literal)).Where(m => m.Success)
+            .Select(m => $"{m.Value} (a piece of the prefix word)");
+
+    private static IEnumerable<string> FoldedTempHits(FoldedLine folded) =>
+        Matches(RawTemp, folded.Text).Concat(folded.Literals.Select(literal => TempFolderLiteral.Match(literal)).Where(m => m.Success).Select(m => $"\"{m.Value}\""));
 
     private static IEnumerable<string> RawTempHits(string extension, string line) =>
         Matches(RawTemp, line).Concat(RawTempByExtension.Where(r => r.Extensions.Contains(extension)).SelectMany(r => Matches(r.Patterns, line)));

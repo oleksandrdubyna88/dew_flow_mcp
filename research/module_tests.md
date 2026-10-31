@@ -53,7 +53,7 @@ flowchart TD
 | `OwnedDir`, `OwnedScope`, `Removal` | the helper tests use: claim → register → create; exact teardown that never throws; the process-wide registry of folders not yet reclaimed |
 | `LeftoversSweep`, `LeftoversSweepFixture` | the start-of-run sweep as an assembly fixture, and (in `DisposeAsync`) the end-of-run audit |
 | `LeftoversAudit`, `LeftoversAuditException` | `Unreclaimed()`, `ClaimedBy()`, `Verdict()`, `Run()`; the failure is typed (`NeverDisposed`, `DisposedNotRemoved`, `ClaimedInTempRoot`) |
-| `LeftoversGuard` and `GuardFiles`, `GuardText`, `GuardDocker`, `GuardExemptions`, `GuardScripts`, `GuardTokens` | `Scan(root)`, `TokenFindings`, `RegisteredTokenFindings`, `ConstantFindings`; scripts judged by the mounted `sweeper-scan.mjs` through `node` (its module and the script paths travel as arguments); every method of complexity 4 or less (CA1502 fails the build) |
+| `LeftoversGuard` and `GuardFiles`, `GuardText`, `GuardLiterals`, `GuardDocker`, `GuardExemptions`, `GuardScripts`, `GuardTokens` | `Scan(root)`, `TokenFindings`, `RegisteredTokenFindings`, `ConstantFindings`; C# lines are also read the way the compiler reads their literals (`GuardLiterals`); scripts judged by the mounted `sweeper-scan.mjs` through `node` (its module and the script paths travel as arguments); every method of complexity 4 or less (CA1502 fails the build) |
 | `LeftoversSelfTest` | leaks on purpose when `MCP_LEFTOVERS_SELFTEST` is set (`1`, `failed-dispose`); skips otherwise |
 
 A test class that needs a scratch folder is `IDisposable` over an `OwnedScope`:
@@ -84,7 +84,7 @@ public sealed class ExampleTests : IDisposable
 | The helper: names, claim-first, exclusive create, never-throw teardown, the registry | covered | `OwnedTests`, `OwnerTests`, `LivenessTests`, `LivenessStateTests`, `ScopeTests`, `NativeTests` |
 | The start-of-run sweep | covered | `LeftoversSweepTests` |
 | The end-of-run audit: it takes only this process's own claims (a live sibling's folders survive), removes by identity, and fails with a typed exception | covered | `LeftoversAuditTests`, and the CI step "The audit fails a run that leaves a claimed folder" over `LeftoversSelfTest` (Linux, and in PowerShell on the Windows job) |
-| The guard, its eight classes, the bare prefix word in any spelling (a literal, a glob, a class, a pattern, a bare word), `Owned.TempRoot` outside the helper, a scan of nothing, its own test file scanned clean | covered | `LeftoversGuardTests`, `LeftoversRepositoryGuardTests` |
+| The guard, its eight classes, the bare prefix word in any spelling (a literal, a glob, a class, a pattern, a bare word; and, read as the compiler reads it, an escape, pieces joined by `+` / `string.Concat` / interpolation holes, a one-character regex class, a `/tmp` or `/var/tmp` literal, a temp variable named in pieces), `Owned.TempRoot` outside the helper, a scan of nothing, its own test file scanned clean | covered | `LeftoversGuardTests`, `LeftoversRepositoryGuardTests` |
 | The token identity (the token file's pair against the solution file's name, kept outside the copied folder) | covered | `RepositoryIdentityTests`, `LeftoversGuardTests` |
 | The janitor reading this helper's claim (Linux) | covered | `LeftoversJanitorTests`, Linux job |
 | The janitor reading this helper's claim (Windows) | **not covered** by CI — by hand: forced dry-run under Git for Windows' bash; a WSL bash reads every Windows claim as foreign | — |
@@ -97,6 +97,13 @@ public sealed class ExampleTests : IDisposable
 - macOS: no CI leg and no machine; the helper refuses to run there with a clear message.
 - The container carve-out of rule §5: this repository starts no container, so the guard does not recognise it — a
   `docker run` without `--rm` is a finding.
+- The guard of C# is a SPELLING check. It decodes escapes (`\uXXXX`, `\UXXXXXXXX`, `\x…`), joins the literals that are operands of `+`
+  or of `string.Concat` and the interpolation holes that hold only a literal, reads a one-character regex class (`[T]`) as its character,
+  and refuses any literal that holds a piece of the prefix word (five characters or more, case-insensitive, crossing the join of the two
+  halves: `testsTo`, `sToDel`, `oDelete`; `tests` and `delete` alone are words) as well as a `/tmp` or `/var/tmp` literal. It reads one line
+  at a time. A name that a source generator, an embedded resource, a char array, a file read at run time or a value computed across lines
+  assembles is still invisible to it, and so is a prefix spelled in pieces in the files of `LeftoversGuard.FoldingAllowances` (the helper
+  `Owned.cs`, the guard, and the two files that build its fixtures — a test pins the list at four).
 - The shipped tracer's own limits over scripts (the header of `tools/lib/prefix-bindings.mjs` in the mount): a glob built by
   concatenation, a name from another file, the environment or an argument. The guard reads text: a temp path built by
   reflection or in a generated file is invisible to it.
