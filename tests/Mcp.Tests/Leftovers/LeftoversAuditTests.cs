@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using FluentAssertions;
 using Xunit;
 
@@ -9,6 +10,9 @@ namespace Mcp.Tests.Leftovers;
 public sealed class LeftoversAuditTests : IDisposable
 {
     private static readonly Func<string, bool> Mine = _ => true;
+
+    /// <summary>No <c>TESTSTODELETE_RUN</c>: this process writes its own record, whatever the environment of the run that started it.</summary>
+    private static readonly Func<string, string?> NoEnv = _ => null;
 
     private readonly OwnedScope _owned = new();
 
@@ -22,7 +26,7 @@ public sealed class LeftoversAuditTests : IDisposable
     public void The_audit_names_only_what_this_run_claimed()
     {
         var tmp = _owned.Dir("audit-tmp");
-        var me = Owner.RunRecord();
+        var me = Owner.This;
         var dead = UnmatchablePid.Next();
         var foreignHost = me with { Host = "other@" + (OperatingSystem.IsWindows() ? "windows" : "linux") };
         var ours = Plant(tmp, Owned.NameFor("ours"), me);
@@ -35,7 +39,7 @@ public sealed class LeftoversAuditTests : IDisposable
         File.WriteAllText(orphan, me.Format() + "\n");
         File.WriteAllText(Path.Combine(tmp, Owned.NameFor("orphan-dead") + ".owner"), (me with { Pid = dead }).Format() + "\n");
 
-        var claimed = LeftoversAudit.ClaimedBy(tmp, me, Mine);
+        var claimed = LeftoversAudit.ClaimedBy(tmp, me, Mine, NoEnv);
 
         claimed.Should().BeEquivalentTo([ours, orphan]);
     }
@@ -45,13 +49,88 @@ public sealed class LeftoversAuditTests : IDisposable
     {
         var tmp = _owned.Dir("audit-link-tmp");
         var elsewhere = _owned.Dir("audit-link-target");
-        var me = Owner.RunRecord();
+        var me = Owner.This;
         var name = Owned.NameFor("linked");
         File.WriteAllText(Path.Combine(tmp, name) + ".owner", me.Format() + "\n");
         if (!OperatingSystem.IsWindows()) Directory.CreateSymbolicLink(Path.Combine(tmp, name), elsewhere);
         else Assert.Skip("a directory link on Windows needs a junction or a privilege; the POSIX case is the proof");
 
-        LeftoversAudit.ClaimedBy(tmp, me, Mine).Should().BeEmpty("a link is not a folder this run made");
+        LeftoversAudit.ClaimedBy(tmp, me, Mine, NoEnv).Should().BeEmpty("a link is not a folder this run made");
+    }
+
+
+    // ---- A: a sibling child of the same run -----------------------------------------------------------------------------
+
+    [Fact]
+    public void A_sibling_childs_folder_survives_the_audit_of_a_run_whose_record_it_shares()
+    {
+        // Rule §3: every child of a run writes the run's record, so the folders of a sibling that is still working carry a
+        // record this process is not. The first child to finish must not take them.
+        var tmp = _owned.Dir("audit-sibling-tmp");
+        using var sibling = LiveProcess.Start();
+        var run = sibling.Record();
+        string? Env(string name) => name == "TESTSTODELETE_RUN" ? run.Format() : null;
+        var folder = Plant(tmp, Owned.NameFor("sibling"), run);
+        File.WriteAllText(Path.Combine(folder, "data.txt"), "sibling's data");
+
+        var audit = () => LeftoversSweepFixture.RealAudit(tmp, [], Mine, Env);
+
+        audit.Should().NotThrow("nothing this process made is left");
+        File.ReadAllText(Path.Combine(folder, "data.txt")).Should().Be("sibling's data");
+        File.Exists(folder + ".owner").Should().BeTrue("the sibling's claim is not this process's to remove");
+    }
+
+    // ---- B: the removal is by identity ----------------------------------------------------------------------------------
+
+    [Fact]
+    public void A_folder_replaced_between_discovery_and_removal_survives_the_audit()
+    {
+        var tmp = _owned.Dir("audit-replaced-tmp");
+        var me = Owner.This;
+        var folder = Plant(tmp, Owned.NameFor("replaced"), me);
+        var hooks = new SweepHooks(AfterVerdict: judged =>
+        {
+            // Aside first, then the new one, then the old one is deleted: an inode freed first is reused by the next mkdir.
+            var aside = judged + "-aside";
+            Directory.Move(judged, aside);
+            Directory.CreateDirectory(judged);
+            File.WriteAllText(Path.Combine(judged, "new.txt"), "a different folder");
+            Directory.Delete(aside, recursive: true);
+        });
+
+        var run = () => LeftoversAudit.Run(tmp, me, [], Mine, NoEnv, hooks);
+
+        run.Should().Throw<InvalidOperationException>("the folder was this run's when it was found");
+        File.ReadAllText(Path.Combine(folder, "new.txt")).Should().Be("a different folder", "what stands there now was never judged");
+        Directory.GetFileSystemEntries(tmp).Select(Path.GetFileName).Should().OnlyContain(n => !n!.Contains("quarantine", StringComparison.Ordinal), "nothing was renamed away");
+    }
+
+    [Fact]
+    public void A_claim_rewritten_between_discovery_and_removal_keeps_its_folder()
+    {
+        var tmp = _owned.Dir("audit-reclaimed-tmp");
+        var me = Owner.This;
+        var folder = Plant(tmp, Owned.NameFor("reclaimed"), me);
+        using var other = LiveProcess.Start();
+        var hooks = new SweepHooks(AfterVerdict: judged => File.WriteAllText(judged + ".owner", other.Record().Format() + "\n"));
+
+        var run = () => LeftoversAudit.Run(tmp, me, [], Mine, NoEnv, hooks);
+
+        run.Should().Throw<InvalidOperationException>();
+        Directory.Exists(folder).Should().BeTrue("the claim now names another run's process");
+        File.ReadAllText(folder + ".owner").Should().Be(other.Record().Format() + "\n");
+    }
+
+    [Fact]
+    public void A_process_that_writes_the_runs_record_scans_nothing_because_the_registry_covers_its_folders()
+    {
+        var tmp = _owned.Dir("audit-run-record-tmp");
+        using var sibling = LiveProcess.Start();
+        string? Env(string name) => name == "TESTSTODELETE_RUN" ? sibling.Record().Format() : null;
+        Plant(tmp, Owned.NameFor("mine"), Owner.This);
+
+        LeftoversAudit.ClaimedBy(tmp, Owner.This, Mine, Env).Should().BeEmpty();
+        LeftoversAudit.ClaimedBy(tmp, Owner.This, Mine, NoEnv).Should().ContainSingle();
     }
 
     // ---- 7a --------------------------------------------------------------------------------------------------------------
@@ -64,7 +143,7 @@ public sealed class LeftoversAuditTests : IDisposable
         try
         {
             LeftoversAudit.Unreclaimed().Should().Contain((dir.Path, false));
-            LeftoversAudit.ClaimedBy(Owned.TempRoot(), Owner.RunRecord()).Should().NotContain(dir.Path, "it is not at the depth-1 of the temp root");
+            LeftoversAudit.ClaimedBy(Owned.TempRoot(), Owner.This, env: NoEnv).Should().NotContain(dir.Path, "it is not at the depth-1 of the temp root");
         }
         finally
         {
@@ -113,13 +192,13 @@ public sealed class LeftoversAuditTests : IDisposable
     public void A_run_that_left_a_folder_throws_one_exception_and_leaves_the_temp_root_clean()
     {
         var tmp = _owned.Dir("audit-run-tmp");
-        var me = Owner.RunRecord();
+        var me = Owner.This;
         var undisposed = OwnedDir.Create("leaked", tmp);
         var orphan = Path.Combine(tmp, Owned.NameFor("orphan") + ".owner");
         File.WriteAllText(orphan, me.Format() + "\n");
         var claimedFolder = Plant(tmp, Owned.NameFor("claimed"), me);
 
-        var run = () => LeftoversAudit.Run(tmp, me, [undisposed], Mine);
+        var run = () => LeftoversAudit.Run(tmp, me, [undisposed], Mine, NoEnv);
 
         var message = run.Should().Throw<InvalidOperationException>().Which.Message;
         message.Should().StartWith("mcp tests: this run left 3 folder(s) it claimed — never disposed: " + undisposed.Path);
@@ -133,7 +212,7 @@ public sealed class LeftoversAuditTests : IDisposable
     {
         var tmp = _owned.Dir("audit-clean-tmp");
 
-        var run = () => LeftoversAudit.Run(tmp, Owner.RunRecord(), [], Mine);
+        var run = () => LeftoversAudit.Run(tmp, Owner.This, [], Mine, NoEnv);
 
         run.Should().NotThrow();
     }
@@ -156,5 +235,34 @@ public sealed class LeftoversAuditTests : IDisposable
         Directory.CreateDirectory(dir);
         if (claim is not null) File.WriteAllText(dir + ".owner", claim.Format() + "\n");
         return dir;
+    }
+
+    /// <summary>A live process of this user that is not this one (a sibling child of the run): <c>sleep</c>, or <c>ping</c> on Windows.</summary>
+    private sealed class LiveProcess : IDisposable
+    {
+        private readonly Process _process;
+
+        private LiveProcess(Process process) => _process = process;
+
+        public static LiveProcess Start()
+        {
+            var start = OperatingSystem.IsWindows()
+                ? new ProcessStartInfo("ping") { ArgumentList = { "-n", "120", "127.0.0.1" } }
+                : new ProcessStartInfo("sleep") { ArgumentList = { "120" } };
+            start.UseShellExecute = false;
+            start.RedirectStandardOutput = true;
+            start.CreateNoWindow = true;
+            return new LiveProcess(Process.Start(start) ?? throw new InvalidOperationException("the process did not start"));
+        }
+
+        /// <summary>The owner record of that process, as a run hands it down.</summary>
+        public Owner Record() => Owner.This with { Pid = _process.Id, Start = OperatingSystem.IsLinux() ? Liveness.ReadLinuxStart(_process.Id) : null };
+
+        public void Dispose()
+        {
+            _process.Kill(entireProcessTree: true);
+            _process.WaitForExit();
+            _process.Dispose();
+        }
     }
 }

@@ -86,8 +86,6 @@ public static class LeftoversSweep
 
     private sealed class Pass(SweepOptions options)
     {
-        private const string ClaimSuffix = ".owner";
-
         // Spelled in two pieces: this file reads names, and the machine scan reads it for the bare prefix too.
         private static readonly Regex QuarantineEntry = new(
             @"^\.(.+)\." + "teststo" + @"delete-quarantine-([0-9]+)-([0-9a-f]+)\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
@@ -180,7 +178,7 @@ public static class LeftoversSweep
             }
 
             // Identity first, BEFORE the claim is read and the verdict made.
-            var captured = new Captured(real, Native.IdentityOf(dir + ClaimSuffix), Scope.ReadClaimText(dir + ClaimSuffix, _mine));
+            var captured = Captured.Of(real, dir, _mine);
             _hooks.AfterCapture?.Invoke(dir);
             var (remove, reason, _) = Judge(dir, dir + ClaimSuffix, real.WriteTime, nameOwner!);
             if (!remove)
@@ -223,7 +221,12 @@ public static class LeftoversSweep
                 return;
             }
 
-            // Still the file that was judged, with the text that was judged.
+            RemoveOrphanClaim(claim, written, read);
+        });
+
+        /// <summary>Still the file that was judged, with the text that was judged: delete it. Anything else is kept, <c>replaced</c>.</summary>
+        internal void RemoveOrphanClaim(string claim, Identity written, ClaimRead read)
+        {
             if (!SameIdentity(Native.IdentityOf(claim), written) || Scope.ReadClaimText(claim, _mine) != read)
             {
                 Keep(claim, "replaced");
@@ -232,7 +235,7 @@ public static class LeftoversSweep
 
             File.Delete(claim);
             _removed.Add(claim);
-        });
+        }
 
         // ---- the verdict ----------------------------------------------------------------------------------------
 
@@ -277,7 +280,7 @@ public static class LeftoversSweep
         /// <summary>Re-check the folder and its claim, rename it away atomically, check it again where it is, remove it, then
         /// delete its claim only while the claim is still the one captured. A change in between puts the folder back
         /// under its own name (only if that is still free) and says <c>replaced</c>.</summary>
-        private void RemoveFolder(string dir, Captured captured)
+        internal void RemoveFolder(string dir, Captured captured)
         {
             _hooks.AfterVerdict?.Invoke(dir);
             if (!Unchanged(dir, captured))
@@ -513,8 +516,55 @@ public static class LeftoversSweep
         private static string Quote(string text) =>
             OperatingSystem.IsWindows() ? $"'{text.Replace("'", "''")}'" : $"'{text.Replace("'", "'\\''")}'";
 
-        /// <summary>What identifies a candidate at the moment BEFORE it is judged: the folder's device and inode, the
-        /// claim's identity and its text.</summary>
-        private sealed record Captured(Identity Dir, Identity? Claim, ClaimRead Text);
+    }
+
+    /// <summary>What identifies a candidate at the moment BEFORE it is judged: the folder's device and inode, the
+    /// claim's identity and its text.</summary>
+    internal sealed record Captured(Identity Dir, Identity? Claim, ClaimRead Text)
+    {
+        /// <summary>The capture of <paramref name="dir"/> whose own identity is <paramref name="real"/> — the claim beside it is
+        /// read through <paramref name="mine"/>.</summary>
+        public static Captured Of(Identity real, string dir, Func<string, bool> mine) =>
+            new(real, Native.IdentityOf(dir + ClaimSuffix), Scope.ReadClaimText(dir + ClaimSuffix, mine));
+
+        /// <summary>The capture of the real directory at <paramref name="dir"/>, or null when it is not one (absent, a file, a link).</summary>
+        public static Captured? Read(string dir, Func<string, bool>? mine = null) =>
+            Native.IdentityOf(dir) is { IsDirectory: true, IsLink: false } real ? Of(real, dir, mine ?? Scope.IsMine) : null;
+    }
+
+    private const string ClaimSuffix = ".owner";
+
+    /// <summary>The ONE removal of a folder the caller found earlier — the sweep's own: the folder and its claim are re-checked
+    /// against <paramref name="captured"/>, the folder is renamed away atomically, checked again where it is, removed, and its
+    /// claim goes only while it is still the one captured. What changed since is kept and named <c>replaced</c>. Never throws.</summary>
+    internal static SweepResult RemoveCaptured(string dir, Captured captured, Func<string, bool>? mine = null, SweepHooks? hooks = null)
+    {
+        var pass = new Pass(new SweepOptions(Path.GetDirectoryName(dir)!, DateTimeOffset.UtcNow, MinAge, Liveness.ProbeProcess, mine, hooks));
+        try
+        {
+            pass.RemoveFolder(dir, captured);
+        }
+        catch (Exception ex)
+        {
+            pass.Fail("remove " + dir, ex);
+        }
+
+        return pass.Result();
+    }
+
+    /// <summary>The same for an orphan claim: it goes only while it is the file, with the text, that the caller saw.</summary>
+    internal static SweepResult RemoveCapturedClaim(string claim, Identity written, ClaimRead read, Func<string, bool>? mine = null)
+    {
+        var pass = new Pass(new SweepOptions(Path.GetDirectoryName(claim)!, DateTimeOffset.UtcNow, MinAge, Liveness.ProbeProcess, mine));
+        try
+        {
+            pass.RemoveOrphanClaim(claim, written, read);
+        }
+        catch (Exception ex)
+        {
+            pass.Fail("remove " + claim, ex);
+        }
+
+        return pass.Result();
     }
 }

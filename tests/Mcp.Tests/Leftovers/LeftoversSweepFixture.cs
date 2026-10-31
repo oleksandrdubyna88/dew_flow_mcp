@@ -14,7 +14,7 @@ public sealed class LeftoversSweepFixture : IAsyncDisposable
     private readonly Action _audit;
 
     public LeftoversSweepFixture()
-        : this(RealSweep, Console.Error.WriteLine, RealAudit)
+        : this(RealSweep, Console.Error.WriteLine, () => RealAudit(Owned.TempRoot(), OwnedDir.Unreclaimed()))
     {
     }
 
@@ -54,7 +54,11 @@ public sealed class LeftoversSweepFixture : IAsyncDisposable
         return ValueTask.CompletedTask;
     }
 
-    private static void RealAudit() => LeftoversAudit.Run(Owned.TempRoot(), Owner.RunRecord(), OwnedDir.Unreclaimed());
+    /// <summary>The audit of the real run, with the seams a test needs: the temp root, the registry, the kernel-owner question and
+    /// the environment. It looks for THIS process's own record, never the run's (<c>TESTSTODELETE_RUN</c>): under rule §3 every child
+    /// of a run writes the run's record, so the run's record would name a sibling's folders too.</summary>
+    internal static void RealAudit(string tmp, IReadOnlyList<OwnedDir> registry, Func<string, bool>? mine = null, Func<string, string?>? env = null) =>
+        LeftoversAudit.Run(tmp, Owner.This, registry, mine, env);
 
     private static SweepResult RealSweep() =>
         LeftoversSweep.Run(new SweepOptions(Owned.TempRoot(), DateTimeOffset.UtcNow, LeftoversSweep.MinAge, Liveness.ProbeProcess, Scope.IsMine));
