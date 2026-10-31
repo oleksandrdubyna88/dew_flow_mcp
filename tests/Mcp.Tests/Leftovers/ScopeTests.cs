@@ -150,6 +150,67 @@ public sealed class ScopeTests : IDisposable
     }
 
     [Fact]
+    public void On_linux_a_fifo_swapped_in_after_the_identity_check_is_unreadable_and_never_blocks()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Skip("open(2) with O_NONBLOCK on the claim — Linux only");
+            return;
+        }
+
+        LinuxFifoSwappedIn(_owned.Dir("scratch"));
+    }
+
+    [SupportedOSPlatform("linux")]
+    private static void LinuxFifoSwappedIn(string scratch)
+    {
+        var claim = Path.Combine(scratch, "claim");
+        File.WriteAllText(claim, "u1:h@linux:1\n");
+        var fifo = Path.Combine(scratch, "fifo");
+        PosixFifo.Make(fifo);
+
+        // The scope-key seam runs after the identity check and before the first byte is read: the swap lands exactly between the two.
+        var read = Task.Run(() => Scope.ReadClaimText(claim, _ =>
+        {
+            File.Move(fifo, claim, overwrite: true);
+            return true;
+        }));
+        try
+        {
+            read.Wait(TimeSpan.FromSeconds(5)).Should().BeTrue("a FIFO is refused by its type; the open must not wait for a writer");
+            read.Result.Should().BeOfType<ClaimRead.Unreadable>().Which.Reason.Should().BeNull();
+        }
+        finally
+        {
+            PosixFifo.ReleaseReaders(claim); // a hung open (the defect) would hold its thread for ever
+        }
+    }
+
+    [Fact]
+    public void On_linux_another_regular_file_swapped_in_after_the_identity_check_is_unreadable()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Skip("fstat on the opened descriptor — Linux only");
+            return;
+        }
+
+        var scratch = _owned.Dir("scratch");
+        var claim = Path.Combine(scratch, "claim");
+        var other = Path.Combine(scratch, "other");
+        File.WriteAllText(claim, "u1:h@linux:1\n");
+        File.WriteAllText(other, "u1:h@linux:2\n"); // made while the claim exists, so its inode is a different one
+
+        var read = Scope.ReadClaimText(claim, _ =>
+        {
+            File.Move(other, claim, overwrite: true);
+            return true;
+        });
+
+        read.Should().BeOfType<ClaimRead.Unreadable>("the descriptor names another file than the one judged");
+    }
+
+    [Fact]
     public void On_windows_a_pipe_a_device_or_another_file_in_place_of_the_claim_is_refused_without_a_read()
     {
         if (!OperatingSystem.IsWindows())

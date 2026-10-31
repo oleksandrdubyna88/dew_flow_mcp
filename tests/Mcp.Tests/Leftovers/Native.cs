@@ -29,7 +29,7 @@ internal static partial class Native
 {
     internal const int Enoent = 2, Esrch = 3, Eexist = 17;
 
-    private const int AtFdcwd = -100, AtSymlinkNofollow = 0x100;
+    private const int AtFdcwd = -100, AtSymlinkNofollow = 0x100, AtEmptyPath = 0x1000;
     private const uint RenameNoreplace = 1;
     private const uint StatxBasicStats = 0x7ff;
 
@@ -274,22 +274,48 @@ internal static partial class Native
     }
 
     /// <summary>At most <paramref name="limit"/> bytes of the file at <paramref name="path"/>, through ONE open handle that is checked
-    /// before any byte is read (Windows): the handle must be a disk file (<c>GetFileType</c> = <c>FILE_TYPE_DISK</c> — a named pipe or a
-    /// device swapped in since the caller looked cannot be read, and so cannot block the read), a regular file (no folder, no reparse point;
-    /// the open does not follow a link) and the very file <paramref name="expected"/> names (volume serial and 128-bit file id). Null when
-    /// any of that fails or the file cannot be opened: an unreadable claim, never a guess. Windows only: POSIX opens a claim the
-    /// ordinary way, after the same identity check.</summary>
+    /// before any byte is read, so an entry swapped in since the caller looked cannot block the read or stand in for the claim. Windows: the
+    /// handle must be a disk file (<c>GetFileType</c> = <c>FILE_TYPE_DISK</c>), a regular file (no folder, no reparse point; the open does
+    /// not follow a link) and the very file <paramref name="expected"/> names (volume serial and 128-bit file id). Linux: <c>open(2)</c> with
+    /// <c>O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC</c> (a FIFO opens at once instead of waiting for a writer; a link is refused), then
+    /// <c>statx</c> on the descriptor itself (<c>AT_EMPTY_PATH</c>): a regular file with the (device, inode) judged. Null when any of that fails
+    /// or the file cannot be opened: an unreadable claim, never a guess.</summary>
     internal static byte[]? ReadVerifiedRegular(string path, Identity expected, int limit)
     {
-        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("the verified read is the Windows form");
         try
         {
-            return WindowsReadVerifiedRegular(path, expected, limit);
+            if (OperatingSystem.IsWindows()) return WindowsReadVerifiedRegular(path, expected, limit);
+            if (OperatingSystem.IsLinux()) return LinuxReadVerifiedRegular(path, expected, limit);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             return null;
         }
+
+        throw new PlatformNotSupportedException("the leftovers helper supports Linux and Windows only");
+    }
+
+    [SupportedOSPlatform("linux")]
+    private static byte[]? LinuxReadVerifiedRegular(string path, Identity expected, int limit)
+    {
+        // O_NONBLOCK 0x800 and O_CLOEXEC 0x80000 are the same on every Linux; O_NOFOLLOW is 0x20000 on x86 and 0x8000 on ARM.
+        var noFollow = RuntimeInformation.ProcessArchitecture is Architecture.Arm or Architecture.Arm64 ? 0x8000 : 0x20000;
+        var descriptor = Libc.Open(path, 0x800 | noFollow | 0x80000); // O_RDONLY is 0
+        if (descriptor < 0) return null;
+        using var handle = new SafeFileHandle(descriptor, ownsHandle: true); // closed on every path from here
+        Span<byte> buffer = stackalloc byte[256];
+        if (Libc.Statx(descriptor, string.Empty, AtEmptyPath, StatxBasicStats, buffer) != 0) return null;
+        var now = ParseStatx(buffer);
+        if (!now.IsRegular || now.Dev != expected.Dev || now.Ino != expected.Ino) return null;
+        return ReadAll(handle, limit);
+    }
+
+    private static byte[] ReadAll(SafeFileHandle handle, int limit)
+    {
+        var buffer = new byte[limit];
+        var read = 0;
+        while (read < buffer.Length && RandomAccess.Read(handle, buffer.AsSpan(read), read) is var n and > 0) read += n;
+        return buffer[..read];
     }
 
     [SupportedOSPlatform("windows")]
@@ -300,10 +326,7 @@ internal static partial class Native
         if (handle.IsInvalid || Kernel32.GetFileType(handle) != FileTypeDisk) return null;
         var now = WindowsIdentityOfHandle(handle, path);
         if (!now.IsRegular || now.Dev != expected.Dev || now.Ino != expected.Ino) return null;
-        var buffer = new byte[limit];
-        var read = 0;
-        while (read < buffer.Length && RandomAccess.Read(handle, buffer.AsSpan(read), read) is var n and > 0) read += n;
-        return buffer[..read];
+        return ReadAll(handle, limit);
     }
 
     private static DateTimeOffset FileTime(ReadOnlySpan<byte> field) =>
@@ -420,6 +443,9 @@ internal static partial class Native
 
         [LibraryImport("libc", EntryPoint = "statx", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
         internal static partial int Statx(int dirfd, string path, int flags, uint mask, Span<byte> buffer);
+
+        [LibraryImport("libc", EntryPoint = "open", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+        internal static partial int Open(string path, int flags);
 
         [LibraryImport("libc", EntryPoint = "rename", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
         internal static partial int Rename(string from, string to);
