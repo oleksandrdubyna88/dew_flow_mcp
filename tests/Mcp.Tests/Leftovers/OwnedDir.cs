@@ -44,9 +44,8 @@ public sealed class OwnedDir : IDisposable
         for (var draw = 0; draw < Owned.MaxDraws; draw++)
         {
             var dir = System.IO.Path.Combine(parent, nextName());
-            if (!TryClaim(dir, written, beforeClaimWrite)) continue; // somebody else's claim on this name
-            afterClaim?.Invoke(dir + ".owner");
-            if (!MakeFolder(dir, written, warn)) continue;
+            if (TryClaim(dir, written, beforeClaimWrite) is not { } ours) continue; // somebody else's claim on this name
+            if (!MakeFolder(dir, written, ours, warn, afterClaim)) continue;
             var made = new OwnedDir(dir, warn);
             Registry[made] = 0;
             return made;
@@ -71,9 +70,10 @@ public sealed class OwnedDir : IDisposable
     /// <see cref="DisposeAttempted"/>.</summary>
     internal static IReadOnlyList<OwnedDir> Unreclaimed() => [.. Registry.Keys];
 
-    /// <summary>Step 2: the exclusive create of the claim, then its content. False = the name is taken (a claim already
-    /// there); any other failure is "could not claim", and nothing was left behind.</summary>
-    private static bool TryClaim(string dir, string written, Action<string>? beforeClaimWrite)
+    /// <summary>Step 2: the exclusive create of the claim, then its content. Null = the name is taken (a claim already there); the
+    /// identity of the claim just made otherwise. Any other failure — an I/O error or not — is "could not claim": the stream is
+    /// closed, the claim is removed while it is still the file created here, and the failure goes on.</summary>
+    private static Identity? TryClaim(string dir, string written, Action<string>? beforeClaimWrite)
     {
         var claim = dir + ".owner";
         FileStream stream;
@@ -83,14 +83,14 @@ public sealed class OwnedDir : IDisposable
         }
         catch (IOException ex) when (NameIsTaken(ex, claim))
         {
-            return false; // never File.Exists, which follows a link
+            return null; // never File.Exists, which follows a link
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             throw new InvalidOperationException($"owned: could not claim {dir}: {ex.Message}", ex);
         }
 
-        // Captured right after the exclusive create: a write that fails now must remove only THIS file.
+        // Captured right after the exclusive create: a failure now must remove only THIS file.
         Identity? ours = null;
         try
         {
@@ -106,32 +106,40 @@ public sealed class OwnedDir : IDisposable
                 throw new IOException("the claim was replaced by another file after it was created");
             }
 
-            return true;
+            return ours;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        catch (Exception ex)
         {
             stream.Dispose();
             RemoveClaimIfOurs(claim, ours, written);
-            throw new InvalidOperationException($"owned: could not claim {dir}: {ex.Message}", ex);
+            if (IsFailureOfTheFileSystem(ex)) throw new InvalidOperationException($"owned: could not claim {dir}: {ex.Message}", ex);
+            throw;
         }
     }
 
-    /// <summary>Step 3: the folder, exclusively. False = it already exists under the claimed name: a squatter's, left
-    /// alone, with ONE warning and this run's claim removed again (only while it still holds exactly what was written).</summary>
-    private static bool MakeFolder(string dir, string written, Action<string> warn)
+    /// <summary>An I/O or access failure becomes the helper's own <see cref="InvalidOperationException"/> (with the cause inside); any other
+    /// exception goes on as it is.</summary>
+    private static bool IsFailureOfTheFileSystem(Exception ex) => ex is IOException or UnauthorizedAccessException or InvalidOperationException;
+
+    /// <summary>Step 3: the folder, exclusively. False = it already exists under the claimed name: a squatter's, left alone, with ONE
+    /// warning and this run's claim removed again (only while it is still the file created here and holds exactly what was written).
+    /// Any failure — an I/O error or not, including the seam's — removes the claim the same way and goes on.</summary>
+    private static bool MakeFolder(string dir, string written, Identity ours, Action<string> warn, Action<string>? afterClaim)
     {
         try
         {
+            afterClaim?.Invoke(dir + ".owner");
             if (Native.MakeDirectoryExclusively(dir)) return true;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex)
         {
-            Removal.Claim(dir, warn); // inside its own handling: Claim never throws
-            throw new InvalidOperationException($"owned: could not create {dir}: {ex.Message}", ex);
+            Removal.ClaimIfOurs(dir, ours, written, warn); // inside its own handling: it never throws
+            if (IsFailureOfTheFileSystem(ex)) throw new InvalidOperationException($"owned: could not create {dir}: {ex.Message}", ex);
+            throw;
         }
 
         warn($"owned: {dir} already exists under the name this run claimed — it is not this run's and is left alone; drawing another name");
-        Removal.ClaimIfStill(dir, written, warn);
+        Removal.ClaimIfOurs(dir, ours, written, warn);
         return false;
     }
 

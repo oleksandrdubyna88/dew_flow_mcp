@@ -337,6 +337,67 @@ public sealed class OwnedTests : IDisposable
     }
 
     [Fact]
+    public void A_claim_write_that_fails_with_any_kind_of_exception_removes_the_claim_and_lets_it_through()
+    {
+        var parent = _owned.Dir("parent");
+
+        var act = () => OwnedDir.Create("x", parent, null, null, beforeClaimWrite: _ => throw new ArgumentException("not an I/O failure"));
+
+        act.Should().Throw<ArgumentException>().WithMessage("not an I/O failure");
+        Directory.GetFileSystemEntries(parent).Should().BeEmpty("the claim was created exclusively and must not outlive the failure");
+    }
+
+    [Fact]
+    public void A_failure_of_any_kind_between_the_claim_and_the_folder_removes_the_claim_and_lets_it_through()
+    {
+        var parent = _owned.Dir("parent");
+
+        var act = () => OwnedDir.Create("x", parent, null, null, afterClaim: _ => throw new DivideByZeroException("not an I/O failure"));
+
+        act.Should().Throw<DivideByZeroException>();
+        Directory.GetFileSystemEntries(parent).Should().BeEmpty("a claim with no folder and no owner to remove it would be an orphan");
+    }
+
+    [Fact]
+    public void A_link_where_the_folder_was_is_unlinked_and_neither_it_nor_what_it_points_at_is_followed()
+    {
+        var parent = _owned.Dir("parent");
+        var target = _owned.Dir("target");
+        var sentinel = _owned.Dir("sentinel");
+        File.WriteAllText(Path.Combine(sentinel, "keep.txt"), "must survive");
+        DirectoryLinks.CreateOrSkip(Path.Combine(target, "inner"), sentinel);
+        var name = Path.Combine(parent, Owned.NameFor("replaced"));
+        DirectoryLinks.CreateOrSkip(name, target);
+        File.WriteAllText(name + ".owner", Owner.This.Format() + "\n");
+
+        var removed = Removal.Quietly(name, _ => { });
+
+        removed.Should().BeTrue();
+        Native.IdentityOf(name).Should().BeNull("the link itself is gone");
+        File.Exists(name + ".owner").Should().BeFalse();
+        Directory.Exists(target).Should().BeTrue("what the link pointed at is not the helper's");
+        Native.IdentityOf(Path.Combine(target, "inner")).Should().NotBeNull("a link inside the target was never visited");
+        File.ReadAllText(Path.Combine(sentinel, "keep.txt")).Should().Be("must survive");
+    }
+
+    [Fact]
+    public void An_entry_that_is_not_a_folder_keeps_its_claim_because_it_is_not_gone()
+    {
+        var parent = _owned.Dir("parent");
+        var name = Path.Combine(parent, Owned.NameFor("file"));
+        File.WriteAllText(name, "somebody's file");
+        File.WriteAllText(name + ".owner", Owner.This.Format() + "\n");
+        var warnings = new List<string>();
+
+        var removed = Removal.Quietly(name, warnings.Add);
+
+        removed.Should().BeFalse();
+        File.ReadAllText(name).Should().Be("somebody's file", "it is not a folder this helper made");
+        File.Exists(name + ".owner").Should().BeTrue("the claim goes only when the entry is gone");
+        warnings.Should().ContainSingle();
+    }
+
+    [Fact]
     public void A_claim_another_run_put_under_the_name_since_is_not_ours_and_stays()
     {
         if (OperatingSystem.IsWindows()) Assert.Skip("deleting a file held open with no sharing — Linux only");

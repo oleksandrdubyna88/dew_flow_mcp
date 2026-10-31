@@ -9,16 +9,14 @@ internal static class Removal
     private const int Tries = 5;
     private static readonly TimeSpan Backoff = TimeSpan.FromMilliseconds(100);
 
-    /// <summary>Top-level links first (removed as links, never what they point at), then the folder, then its claim. True
-    /// only when BOTH are gone; a path already gone is success.</summary>
+    /// <summary>The entry at <paramref name="dir"/> first, read as itself (<see cref="Native.IdentityOf"/>, never following a link): a
+    /// link is unlinked and nothing it points at is visited; a folder has its top-level links unlinked, then is removed; what is
+    /// neither is not the helper's to remove. The claim goes only when the entry is GONE — re-read by identity, since
+    /// <c>Directory.Exists</c> follows links and says false for an error as it does for an absence. True only when BOTH are gone; a
+    /// path already gone is success.</summary>
     internal static bool Quietly(string dir, Action<string> warn)
     {
-        var failure = Retry(() =>
-        {
-            if (!Directory.Exists(dir)) return;
-            UnlinkTopLevelLinks(dir);
-            Directory.Delete(dir, recursive: true);
-        });
+        var failure = Retry(() => RemoveEntry(dir));
         if (failure is not null)
         {
             warn($"owned: could not remove {dir} ({failure.GetType().Name}: {failure.Message}) — left for the start-of-run sweep");
@@ -26,6 +24,22 @@ internal static class Removal
         }
 
         return Claim(dir, warn);
+    }
+
+    private static void RemoveEntry(string dir)
+    {
+        var entry = Native.IdentityOf(dir); // an unreadable entry throws: it is not "gone"
+        if (entry is null) return;
+        if (entry.Value.IsLink) Unlink(dir, entry.Value.IsDirectory);
+        else if (entry.Value.IsDirectory) RemoveFolder(dir);
+        else throw new IOException("the entry is not a folder");
+        if (Native.IdentityOf(dir) is not null) throw new IOException("the entry is still there");
+    }
+
+    private static void RemoveFolder(string dir)
+    {
+        UnlinkTopLevelLinks(dir);
+        Directory.Delete(dir, recursive: true);
     }
 
     /// <summary>Only the claim beside <paramref name="dir"/> (the helper's own, or one whose folder was never made).</summary>
@@ -38,20 +52,21 @@ internal static class Removal
         return false;
     }
 
-    /// <summary>Remove the claim beside <paramref name="dir"/> only while it still holds exactly <paramref name="written"/>:
-    /// a claim another run put there since is not ours. A claim that is not there is silence.</summary>
-    internal static void ClaimIfStill(string dir, string written, Action<string> warn)
+    /// <summary>Remove the claim beside <paramref name="dir"/> only while it is still the file created at <paramref name="ours"/> AND holds
+    /// exactly <paramref name="written"/>: a claim another run put there since is not ours. A claim that is not there is silence.</summary>
+    internal static void ClaimIfOurs(string dir, Identity ours, string written, Action<string> warn)
     {
         var claim = dir + ".owner";
         try
         {
-            if (File.ReadAllText(claim) == written) File.Delete(claim);
+            var now = Native.IdentityOf(claim);
+            if (now is not null && now.Value.Dev == ours.Dev && now.Value.Ino == ours.Ino && File.ReadAllText(claim) == written) File.Delete(claim);
         }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {
             // Already gone: nothing to remove, nothing to say.
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             warn($"owned: could not remove the claim {claim} ({ex.GetType().Name}: {ex.Message}) — left for the start-of-run sweep");
         }
@@ -64,10 +79,16 @@ internal static class Removal
     {
         foreach (var entry in new DirectoryInfo(dir).EnumerateFileSystemInfos())
         {
-            if (!entry.Attributes.HasFlag(FileAttributes.ReparsePoint)) continue;
-            if (entry is DirectoryInfo && OperatingSystem.IsWindows()) Directory.Delete(entry.FullName, recursive: false);
-            else File.Delete(entry.FullName); // unlink(2): a directory symlink too, never its target
+            if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint)) Unlink(entry.FullName, entry is DirectoryInfo);
         }
+    }
+
+    /// <summary>Remove a link AS a link: a directory link on Windows as a directory entry, otherwise <c>unlink(2)</c> — a directory
+    /// symlink too, never its target.</summary>
+    private static void Unlink(string path, bool isDirectory)
+    {
+        if (isDirectory && OperatingSystem.IsWindows()) Directory.Delete(path, recursive: false);
+        else File.Delete(path);
     }
 
     /// <summary>Five tries 100 ms apart; the last exception, or null once a try succeeds. Every exception is caught.</summary>
