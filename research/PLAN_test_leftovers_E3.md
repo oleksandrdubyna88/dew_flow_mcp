@@ -33,7 +33,8 @@ written; where it and the list below disagree, the list is what runs. Each item 
 
 **Recorded in the plan's own DoD.** The §5 container carve-out is not recognised (this repository starts no container;
 a `docker run` without `--rm` is a finding). Legacy names are listed with their exact command and never collected.
-`owner-blind` in C# is a literal rule (owner decision 3), with the shipped classifier judging scripts and workflows.
+`owner-blind` in C# is a rule about the WORD (owner decision 3; first shipped as a literal rule and widened by review fix C: a glob, a character
+class, a regex, a bare word and a separator in another literal are findings too), with the shipped classifier judging scripts and workflows.
 macOS is not built (the helper refuses with a clear message). The Windows runner's measured owner
 (`BUILTIN\Administrators`, an elevated job) is recorded by `RunnerFactsTests` in the job log; both ownership outcomes are
 asserted through the two `WindowsOwnership` fixtures, never from the runner's own files.
@@ -110,9 +111,33 @@ asserted through the two `WindowsOwnership` fixtures, never from the runner's ow
   (the marker then fails as an unknown class, the same `exemption` finding).
 - The plan reached this branch by merging `origin/main` (it was merged after the branch was cut); the merge commit goes with
   the squash.
-- **Not run, by hand or on CI only:** the Windows job (the whole executable, including the self-test's Windows halves), the
-  Windows janitor cross-check (scenario 9, Git for Windows' bash), the elevated run (S2 scenario 14), the hand clean-up
-  record and the barrier checklist of *Order* (merge conditions (b)–(d)).
+- **Not run, by hand only:** the Windows janitor cross-check (scenario 9, Git for Windows' bash), the elevated run (S2 scenario 14), the
+  hand clean-up record and the barrier checklist of *Order* (merge conditions (b)–(d)). The Windows job ran green at `c9a790c`: 441
+  tests, 421 passed, 20 skipped.
+
+**Review fixes (the Opus review of the producer branch, applied in the commits after `c9a790c`).**
+- **A** — the end-of-run audit passes `Owner.This`, never the run's record, and `ClaimedBy` returns nothing when `TESTSTODELETE_RUN` makes
+  this process write another record: under rule §3 every child writes the run's record, so the first child to finish deleted its siblings' folders.
+- **B** — the audit removes through `LeftoversSweep.RemoveCaptured` (the folder's and claim's identity captured at discovery, re-checked, the
+  quarantine rename), never `Removal.Quietly` on a path read earlier.
+- **C** — `owner-blind` in `.cs` flags the word `teststodelete` in any spelling unless an owner segment, the exempt word, the quarantine word or an
+  environment variable name follows; a glob, a regex over a class, `"word" + "-"` and `$"{"word"}-"` were silent before.
+- **D** — `Owned.TempRoot` outside the helper's folder is a `raw-temp` finding; the two read-only uses in `WorkspaceToolTests` carry the marker.
+- **E** — `LeftoversGuardTests.cs` is scanned like every file (the exclusion list is empty); its fixtures carry a section sign inside each detector word.
+- **F** — the guard is split into `GuardFiles`, `GuardText`, `GuardDocker`, `GuardExemptions`, `GuardScripts`, `GuardTokens`; CA1502 (threshold 4, scoped to
+  `LeftoversGuard*.cs`) fails the build on a longer method.
+- **G** — the classifier's module URL and the script paths travel in `process.argv`; each script's lines are read once.
+- **H** — the audit throws `LeftoversAuditException` (`NeverDisposed`, `DisposedNotRemoved`, `ClaimedInTempRoot`); the first line is unchanged, then one folder per
+  line, then a remedy line.
+- **I** — the sweep fixture names up to 20 preserved entries (path and reason), then one line for the rest.
+- **J** — `OwnedScope.Dispose` tries every folder and rethrows an `AggregateException` after the last.
+- **K** — `TryClaim` and `MakeFolder` catch any exception, remove the claim under its captured identity and rethrow; `Removal.Quietly` reads the entry with
+  `Native.IdentityOf`, unlinks a link without following it, and deletes the claim only once the entry is gone.
+- **L** — Windows: `CheckWhat` refuses `<>:"|?*`; the junction fallback is `cmd.exe` with an argument list and a killing timeout; the foreign-owner fallback
+  folder is an `OwnedDir`; a `ScopeTests` case a link-following reader fails on an elevated runner (the target is made the caller's); the audit's link test
+  uses `DirectoryLinks.CreateOrSkip`; the audit self-test runs in PowerShell on the Windows job.
+- **M** — the token file's pair is checked against an identity kept outside the copied folder (`RepositoryIdentity`, with the solution file's name).
+- **N** — this list, and `research/module_tests.md`.
 
 ## The contract this document encodes
 

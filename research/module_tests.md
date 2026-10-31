@@ -36,11 +36,11 @@ flowchart TD
     DISPOSE -->|gave up| KEPT["stays prefixed AND claimed, ONE warning;<br/>registry entry stays"]
     GONE --> END["last test done"]
     KEPT --> END
-    END --> AUDIT["LeftoversSweepFixture.DisposeAsync: the audit<br/>registry (never disposed / disposed but not removed)<br/>+ temp root (claims of THIS run's record)"]
-    AUDIT -->|something left| RED["removes it, throws ONE exception:<br/>'mcp tests: this run left n folder(s) it claimed — …'<br/>xUnit exits non-zero"]
+    END --> AUDIT["LeftoversSweepFixture.DisposeAsync: the audit<br/>registry (never disposed / disposed but not removed)<br/>+ temp root (claims of THIS PROCESS's own record — never a run's,<br/>so a sibling child's folders are not touched)"]
+    AUDIT -->|something left| RED["removes it by identity (the sweep's quarantine path),<br/>throws ONE LeftoversAuditException:<br/>'mcp tests: this run left n folder(s) it claimed — …', one folder per line, a remedy<br/>xUnit exits non-zero"]
     AUDIT -->|nothing| GREEN["green"]
     KILLED["a killed run"] -.->|collected by| SWEEP
-    GUARD["LeftoversGuard (a test): tests, src, scripts, workflows<br/>eight classes + token identity; red on a scan of nothing"] -.->|keeps the tests on the helper| TEST
+    GUARD["LeftoversGuard (a test): tests (its own tests too), src, scripts, workflows<br/>eight classes + token identity read from outside the copied folder;<br/>red on a scan of nothing"] -.->|keeps the tests on the helper| TEST
 ```
 
 ## Core entities
@@ -52,8 +52,8 @@ flowchart TD
 | `Owner`, `Liveness`, `Scope`, `Native` | the record `<owner>:<host>@<os>:<pid>[:<start>[:<ns>]]`, the three-valued liveness (`gone` only when no process has the pid), the kernel-owner read, and every OS call through one P/Invoke file |
 | `OwnedDir`, `OwnedScope`, `Removal` | the helper tests use: claim → register → create; exact teardown that never throws; the process-wide registry of folders not yet reclaimed |
 | `LeftoversSweep`, `LeftoversSweepFixture` | the start-of-run sweep as an assembly fixture, and (in `DisposeAsync`) the end-of-run audit |
-| `LeftoversAudit` | `Unreclaimed()`, `ClaimedBy()`, `Verdict()`, `Run()` |
-| `LeftoversGuard` | `Scan(root)`, `TokenFindings`, `RegisteredTokenFindings`, `ConstantFindings`; scripts judged by the mounted `sweeper-scan.mjs` through `node` |
+| `LeftoversAudit`, `LeftoversAuditException` | `Unreclaimed()`, `ClaimedBy()`, `Verdict()`, `Run()`; the failure is typed (`NeverDisposed`, `DisposedNotRemoved`, `ClaimedInTempRoot`) |
+| `LeftoversGuard` and `GuardFiles`, `GuardText`, `GuardDocker`, `GuardExemptions`, `GuardScripts`, `GuardTokens` | `Scan(root)`, `TokenFindings`, `RegisteredTokenFindings`, `ConstantFindings`; scripts judged by the mounted `sweeper-scan.mjs` through `node` (its module and the script paths travel as arguments); every method of complexity 4 or less (CA1502 fails the build) |
 | `LeftoversSelfTest` | leaks on purpose when `MCP_LEFTOVERS_SELFTEST` is set (`1`, `failed-dispose`); skips otherwise |
 
 A test class that needs a scratch folder is `IDisposable` over an `OwnedScope`:
@@ -83,8 +83,9 @@ public sealed class ExampleTests : IDisposable
 | The runner's facts (who owns a file a test makes) | covered | `RunnerFactsTests` |
 | The helper: names, claim-first, exclusive create, never-throw teardown, the registry | covered | `OwnedTests`, `OwnerTests`, `LivenessTests`, `LivenessStateTests`, `ScopeTests`, `NativeTests` |
 | The start-of-run sweep | covered | `LeftoversSweepTests` |
-| The end-of-run audit | covered | `LeftoversAuditTests`, and the CI step "The audit fails a run that leaves a claimed folder" over `LeftoversSelfTest` |
-| The guard, its eight classes, the token identity, a scan of nothing | covered | `LeftoversGuardTests`, `LeftoversRepositoryGuardTests` |
+| The end-of-run audit: it takes only this process's own claims (a live sibling's folders survive), removes by identity, and fails with a typed exception | covered | `LeftoversAuditTests`, and the CI step "The audit fails a run that leaves a claimed folder" over `LeftoversSelfTest` (Linux, and in PowerShell on the Windows job) |
+| The guard, its eight classes, the bare prefix word in any spelling (a literal, a glob, a class, a pattern, a bare word), `Owned.TempRoot` outside the helper, a scan of nothing, its own test file scanned clean | covered | `LeftoversGuardTests`, `LeftoversRepositoryGuardTests` |
+| The token identity (the token file's pair against the solution file's name, kept outside the copied folder) | covered | `RepositoryIdentityTests`, `LeftoversGuardTests` |
 | The janitor reading this helper's claim (Linux) | covered | `LeftoversJanitorTests`, Linux job |
 | The janitor reading this helper's claim (Windows) | **not covered** by CI — by hand: forced dry-run under Git for Windows' bash; a WSL bash reads every Windows claim as foreign | — |
 | An elevated Windows run (new files owned by `BUILTIN\Administrators`, so the kernel-owner key fails closed and keeps them) | **not covered** by CI beyond the ownership fixtures — by hand on the owner's machine | `WindowsOwnership`, `ScopeTests` |
@@ -99,7 +100,8 @@ public sealed class ExampleTests : IDisposable
 - The shipped tracer's own limits over scripts (the header of `tools/lib/prefix-bindings.mjs` in the mount): a glob built by
   concatenation, a name from another file, the environment or an argument. The guard reads text: a temp path built by
   reflection or in a generated file is invisible to it.
-- The audit runs only when the executable reaches the assembly fixture's `DisposeAsync`.
+- The audit runs only when the executable reaches the assembly fixture's `DisposeAsync`. It looks for this process's own record: a
+  run that hands `TESTSTODELETE_RUN` down has its children's folders swept by the next run's sweep, not by a sibling's audit.
 - The janitor on Windows (forced dry-run, by hand only).
 
 ## External dependencies
