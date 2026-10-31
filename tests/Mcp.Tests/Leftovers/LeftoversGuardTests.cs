@@ -376,7 +376,7 @@ public sealed class LeftoversGuardTests : IDisposable
     [Fact]
     public void The_real_token_is_a_row_of_the_mounted_rule_and_is_declared_once_in_the_token_file()
     {
-        LeftoversGuard.RegisteredTokenFindings(RepositoryRoot.Path, OwnedToken.RepoToken, OwnedToken.RepoRow).Should().BeEmpty();
+        LeftoversGuard.RegisteredTokenFindings(RepositoryRoot.Path, OwnedToken.RepoToken, RepositoryIdentity.Row).Should().BeEmpty();
         LeftoversGuard.ConstantFindings(RepositoryRoot.Path, OwnedToken.RepoToken).Should().BeEmpty();
     }
 
