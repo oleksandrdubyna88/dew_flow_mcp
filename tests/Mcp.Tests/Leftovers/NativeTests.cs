@@ -193,4 +193,29 @@ public sealed class NativeTests : IDisposable
             File.ReadAllText(Path.Combine(Path.Combine(scratch, "empty"), "keep.txt")).Should().Be("kept");
         }
     }
+
+    [Fact]
+    public void An_exclusive_rename_takes_a_free_name_and_never_replaces_an_empty_folder_or_a_full_one()
+    {
+        var scratch = _owned.Dir("scratch");
+        var from = Path.Combine(scratch, "a");
+        Directory.CreateDirectory(from);
+        File.WriteAllText(Path.Combine(from, "keep.txt"), "kept");
+
+        Native.RenameExclusively(from, Path.Combine(scratch, "b")).Should().BeTrue("the name was free");
+        File.ReadAllText(Path.Combine(scratch, "b", "keep.txt")).Should().Be("kept");
+        Directory.Exists(from).Should().BeFalse();
+
+        var empty = Path.Combine(scratch, "empty");
+        Directory.CreateDirectory(empty);
+        Native.RenameExclusively(Path.Combine(scratch, "b"), empty).Should().BeFalse("rename(2) would have replaced it; this must not");
+        Directory.GetFileSystemEntries(empty).Should().BeEmpty("the empty folder is untouched");
+        File.ReadAllText(Path.Combine(scratch, "b", "keep.txt")).Should().Be("kept", "the source stays where it was");
+
+        var full = Path.Combine(scratch, "full");
+        Directory.CreateDirectory(full);
+        File.WriteAllText(Path.Combine(full, "theirs.txt"), "theirs");
+        Native.RenameExclusively(Path.Combine(scratch, "b"), full).Should().BeFalse();
+        File.ReadAllText(Path.Combine(full, "theirs.txt")).Should().Be("theirs");
+    }
 }

@@ -45,6 +45,18 @@ public sealed class LeftoversAuditTests : IDisposable
     }
 
     [Fact]
+    public void A_claim_whose_folder_sits_in_a_sibling_quarantine_is_not_an_orphan()
+    {
+        var tmp = _owned.Dir("audit-quarantined-tmp");
+        var me = Owner.This;
+        var name = Owned.NameFor("quarantined");
+        File.WriteAllText(Path.Combine(tmp, name) + ".owner", me.Format() + "\n");
+        Directory.CreateDirectory(Path.Combine(tmp, "." + name + "." + "teststo" + "delete-quarantine-" + Environment.ProcessId + "-deadbeef"));
+
+        LeftoversAudit.ClaimedBy(tmp, me, Mine, NoEnv).Should().BeEmpty("deleting the claim would leave the quarantined folder with nobody's mark");
+    }
+
+    [Fact]
     public void A_symlinked_folder_is_not_followed()
     {
         var tmp = _owned.Dir("audit-link-tmp");

@@ -648,6 +648,135 @@ public sealed class LeftoversSweepTests(LeftoversSweepFixture fixture) : IDispos
         TestContext.Current.AddWarning($"sweep scenario 9: ForeignToCaller took the {ownership.LastForeignBranch}");
     }
 
+    // ---- lessons from the E4 review -----------------------------------------------------------------------------
+
+    [Fact]
+    public void The_rename_into_quarantine_never_replaces_an_existing_empty_folder_and_draws_another_name()
+    {
+        var tmp = NewTmp();
+        var dead = Dead();
+        var dir = PlantFolder(tmp, Name("collide"), Rec(dead));
+        var taken = Path.Combine(tmp, "." + Path.GetFileName(dir) + "." + QuarantineWord + Environment.ProcessId + "-aaaaaaaa");
+        var free = Path.Combine(tmp, "." + Path.GetFileName(dir) + "." + QuarantineWord + Environment.ProcessId + "-bbbbbbbb");
+        Directory.CreateDirectory(taken); // somebody else's empty folder at the first name drawn
+        var draws = new Queue<string>([taken, free]);
+
+        var result = LeftoversSweep.Run(Options(tmp, hooks: new SweepHooks(QuarantineName: _ => draws.Dequeue())));
+
+        Directory.Exists(taken).Should().BeTrue("rename(2) replaces an empty folder; the quarantine move must not");
+        result.Removed.Should().Equal(dir);
+        result.Errors.Should().BeEmpty();
+        draws.Should().BeEmpty("a second name was drawn after the first was found taken");
+        Directory.Exists(free).Should().BeFalse("the folder was quarantined under the free name and removed");
+        UnmatchablePid.AssertNoSuchProcess(dead);
+    }
+
+    [Fact]
+    public void A_folder_whose_every_quarantine_name_is_taken_stays_where_it_is()
+    {
+        var tmp = NewTmp();
+        var dead = Dead();
+        var dir = PlantFolder(tmp, Name("allTaken"), Rec(dead));
+        var taken = Enumerable.Range(0, Owned.MaxDraws)
+            .Select(n => Path.Combine(tmp, "." + Path.GetFileName(dir) + "." + QuarantineWord + Environment.ProcessId + "-0000000" + n)).ToArray();
+        foreach (var path in taken) Directory.CreateDirectory(path);
+        var draws = new Queue<string>(taken);
+
+        var result = LeftoversSweep.Run(Options(tmp, hooks: new SweepHooks(QuarantineName: _ => draws.Dequeue())));
+
+        result.Removed.Should().BeEmpty();
+        result.Errors.Should().ContainSingle().Which.Should().Contain("no free quarantine name");
+        File.Exists(Path.Combine(dir, "file.txt")).Should().BeTrue("the folder was never moved");
+        taken.Should().OnlyContain(path => Directory.Exists(path));
+        UnmatchablePid.AssertNoSuchProcess(dead);
+    }
+
+    private static string[] Unaskable() =>
+        OperatingSystem.IsWindows() ? ["0", "007", "9007199254740993", "4294967296", "1"] : ["0", "007", "9007199254740993", "2147483648", "99999999999999999999"];
+
+    [Fact]
+    public void A_quarantine_whose_renamer_is_no_process_id_is_never_restored_and_never_probed()
+    {
+        var tmp = NewTmp();
+        var probed = new List<long>();
+        foreach (var (digits, index) in Unaskable().Select((d, i) => (d, i)))
+        {
+            var name = Name("badpid" + index);
+            var quarantine = Path.Combine(tmp, "." + name + "." + QuarantineWord + digits + "-deadbeef");
+            Directory.CreateDirectory(quarantine);
+            File.WriteAllText(Path.Combine(quarantine, "file.txt"), "x");
+            File.WriteAllText(Path.Combine(tmp, name + ".owner"), Rec(Environment.ProcessId));
+        }
+
+        var options = new SweepOptions(tmp, DateTimeOffset.UtcNow + Old, LeftoversSweep.MinAge, pid =>
+        {
+            probed.Add(pid);
+            return EverythingIsDeadProbe(pid);
+        }, _ => true);
+        var result = LeftoversSweep.Run(options);
+
+        Quarantines(tmp).Should().HaveCount(Unaskable().Length, "every quarantine stays: its renamer's pid is not a pid");
+        Directory.GetDirectories(tmp).Where(d => !Path.GetFileName(d).StartsWith('.')).Should().BeEmpty("nothing was restored under its name");
+        probed.Should().BeEmpty("the owner-state checks come first: the probe is never asked about these");
+        result.Errors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void A_quarantine_whose_renamer_is_a_gone_process_is_restored_by_the_same_pass()
+    {
+        var tmp = NewTmp();
+        var dead = Dead();
+        var name = Name("goodpid");
+        var quarantine = Quarantine(tmp, name, dead, "deadbeef");
+        File.WriteAllText(Path.Combine(quarantine, "file.txt"), "x");
+        File.WriteAllText(Path.Combine(tmp, name + ".owner"), Rec(Environment.ProcessId));
+
+        var result = LeftoversSweep.Run(new SweepOptions(tmp, DateTimeOffset.UtcNow + Old, LeftoversSweep.MinAge, Liveness.ProbeProcess, _ => true));
+
+        File.Exists(Path.Combine(tmp, name, "file.txt")).Should().BeTrue("a canonical pid that no process has is the one answer that restores");
+        result.Listed.Should().ContainSingle().Which.Should().StartWith("notice: restored ");
+        result.Errors.Should().BeEmpty();
+        UnmatchablePid.AssertNoSuchProcess(dead);
+    }
+
+    /// <summary>A probe that calls every pid dead: the sweep's own checks must keep a pid that is no process id from ever reaching it.</summary>
+    private static Probe EverythingIsDeadProbe(long _) => new(ProbeState.Dead, null);
+
+    [Fact]
+    public void An_orphan_claim_whose_folder_sits_in_a_quarantine_is_kept_with_it()
+    {
+        var tmp = NewTmp();
+        var dead = Dead();
+        var name = Name("inquarantine");
+        // The renamer is alive (this process), so the quarantine pass leaves the folder where it is; its claim, still at the old
+        // path, names a gone owner and is old: judged alone it is an orphan. It is not one: its folder is in the sibling.
+        var quarantine = Quarantine(tmp, name, Environment.ProcessId, "deadbeef");
+        File.WriteAllText(Path.Combine(quarantine, "file.txt"), "x");
+        var claim = Orphan(tmp, name, Rec(dead));
+
+        var result = LeftoversSweep.Run(Options(tmp, now: DateTimeOffset.UtcNow + Old));
+
+        result.Removed.Should().BeEmpty();
+        File.Exists(claim).Should().BeTrue("the claim belongs to the folder in the quarantine; deleting it would orphan that folder");
+        File.Exists(Path.Combine(quarantine, "file.txt")).Should().BeTrue();
+        result.Errors.Should().BeEmpty();
+        UnmatchablePid.AssertNoSuchProcess(dead);
+    }
+
+    [Fact]
+    public void An_orphan_claim_with_no_folder_anywhere_is_still_removed_when_its_owner_is_gone()
+    {
+        var tmp = NewTmp();
+        var dead = Dead();
+        var claim = Orphan(tmp, Name("lonely"), Rec(dead));
+        Quarantine(tmp, Name("someoneelse"), Environment.ProcessId, "deadbeef"); // a quarantine of ANOTHER name is no reason to keep this one
+
+        var result = LeftoversSweep.Run(Options(tmp));
+
+        result.Removed.Should().Equal(claim);
+        UnmatchablePid.AssertNoSuchProcess(dead);
+    }
+
     // ---- helpers -------------------------------------------------------------------------------------------------
 
     private string NewTmp() => _owned.Dir("sweep");

@@ -15,7 +15,7 @@ public readonly record struct Identity(
     ulong Dev, UInt128 Ino, bool IsDirectory, bool IsLink, bool IsRegular, uint? Uid, DateTimeOffset ChangeTime, DateTimeOffset WriteTime);
 
 /// <summary>Every call to the OS that the leftovers contract needs and .NET does not have: an entry's identity
-/// without following a link, who owns it, a directory made EXCLUSIVELY, a rename that does not replace, the real
+/// without following a link, who owns it, a directory made EXCLUSIVELY, a rename that does not replace (<see cref="RenameExclusively"/>), the real
 /// uid, and the process probe. Nothing else in this folder calls the OS by hand.
 ///
 /// <para>.NET has no exclusive <c>mkdir</c> (<c>Directory.CreateDirectory</c> succeeds on an existing folder), no
@@ -30,6 +30,7 @@ internal static partial class Native
     internal const int Enoent = 2, Esrch = 3, Eexist = 17;
 
     private const int AtFdcwd = -100, AtSymlinkNofollow = 0x100;
+    private const uint RenameNoreplace = 1;
     private const uint StatxBasicStats = 0x7ff;
 
     // STATX_TYPE | STATX_MODE | STATX_UID | STATX_MTIME | STATX_CTIME | STATX_INO — a file system that answers without
@@ -108,6 +109,58 @@ internal static partial class Native
         }
 
         Directory.Move(from, to);
+    }
+
+    /// <summary>Rename <paramref name="from"/> to <paramref name="to"/> ONLY if nothing is at <paramref name="to"/>; false = something is
+    /// (it is untouched, <paramref name="from"/> stays where it was), any other failure throws. Linux: <c>renameat2(RENAME_NOREPLACE)</c>
+    /// — atomic, where <c>rename(2)</c> replaces an empty folder and .NET's <c>Directory.Move</c> only checks first and then renames; a file
+    /// system that does not take the flag (EINVAL, ENOSYS, or a libc without the call) falls back to reserving the name with an
+    /// exclusive <c>mkdir</c> and renaming over that placeholder. Windows: <c>Directory.Move</c>, which refuses an existing target
+    /// itself.</summary>
+    internal static bool RenameExclusively(string from, string to)
+    {
+        if (OperatingSystem.IsLinux()) return LinuxRenameExclusively(from, to);
+        try
+        {
+            Directory.Move(from, to);
+            return true;
+        }
+        catch (IOException) when (IdentityOf(to) is not null)
+        {
+            return false; // the target was there: untouched
+        }
+    }
+
+    [SupportedOSPlatform("linux")]
+    private static bool LinuxRenameExclusively(string from, string to)
+    {
+        const int Einval = 22, Enosys = 38;
+        int errno;
+        try
+        {
+            if (Libc.Renameat2(AtFdcwd, from, AtFdcwd, to, RenameNoreplace) == 0) return true;
+            errno = Marshal.GetLastPInvokeError();
+        }
+        catch (EntryPointNotFoundException)
+        {
+            errno = Enosys; // a libc older than 2.28
+        }
+
+        if (errno == Eexist) return false;
+        if (errno is not (Einval or Enosys)) throw Failure($"renameat2 {from} to {to}", errno);
+        if (!MakeDirectoryExclusively(to)) return false; // the reservation: the name is taken, or now is
+        if (Libc.Rename(from, to) == 0) return true;
+        var failure = Failure($"rename {from} to {to}", Marshal.GetLastPInvokeError());
+        try
+        {
+            if (IdentityOf(to) is { IsDirectory: true, IsLink: false }) Directory.Delete(to, recursive: false); // our own empty placeholder, nothing else
+        }
+        catch (Exception)
+        {
+            // Gone or not empty: not ours to chase.
+        }
+
+        throw failure;
     }
 
     /// <summary><c>kill(pid, 0)</c>: 0 when the process exists and may be signalled, else the errno.</summary>
@@ -325,5 +378,8 @@ internal static partial class Native
 
         [LibraryImport("libc", EntryPoint = "rename", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
         internal static partial int Rename(string from, string to);
+
+        [LibraryImport("libc", EntryPoint = "renameat2", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+        internal static partial int Renameat2(int fromDirFd, string from, int toDirFd, string to, uint flags);
     }
 }

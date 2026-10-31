@@ -58,6 +58,7 @@ internal static class LeftoversAudit
     private static Claimed? OfOrphan(string path, Owner owner, Func<string, bool>? mine)
     {
         if (!path.EndsWith(ClaimSuffix, StringComparison.Ordinal) || Directory.Exists(path[..^ClaimSuffix.Length])) return null;
+        if (LeftoversSweep.QuarantinedNames(Path.GetDirectoryName(path)!).Contains(Path.GetFileName(path[..^ClaimSuffix.Length]))) return null; // its folder is in a sibling quarantine
         if (Native.IdentityOf(path) is not { IsRegular: true, IsLink: false } written) return null;
         var read = Scope.ReadClaimText(path, mine);
         return ClaimIs(read, owner) ? new Claimed(path, null, written, read) : null;

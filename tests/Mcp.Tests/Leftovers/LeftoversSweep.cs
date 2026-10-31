@@ -43,7 +43,8 @@ public sealed record SweepHooks(
     Action<string>? AfterVerdict = null,
     Action<string, string>? AfterRename = null,
     Action<string, string>? AfterRemove = null,
-    Action<string, string>? AfterReserve = null);
+    Action<string, string>? AfterReserve = null,
+    Func<string, string>? QuarantineName = null);
 
 /// <summary>What one sweep needs: the folder to sweep, the clock, the age window, the liveness query, and the kernel-owner
 /// question (default <see cref="Scope.IsMine"/>; a seam, because a second uid cannot be had in a test).</summary>
@@ -65,6 +66,17 @@ public sealed record SweepResult(
 
 public static class LeftoversSweep
 {
+    // Spelled in two pieces: this file reads names, and the machine scan reads it for the bare prefix too.
+    private static readonly Regex QuarantineEntry = new(
+        @"^\.(.+)\." + "teststo" + @"delete-quarantine-([0-9]+)-([0-9a-f]+)\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    /// <summary>The names whose folder sits in a sibling quarantine of <paramref name="tmp"/>: a <c>.&lt;name&gt;.&lt;quarantine word&gt;-…</c> entry
+    /// (compared without case). A claim of such a name is not an orphan — the quarantine is restored (or removed by a person) under it, and a
+    /// claim deleted now would leave that folder behind with nobody's mark.</summary>
+    internal static HashSet<string> QuarantinedNames(string tmp) =>
+        new(Directory.EnumerateFileSystemEntries(tmp).Select(entry => QuarantineEntry.Match(Path.GetFileName(entry))).Where(m => m.Success).Select(m => m.Groups[1].Value),
+            StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Rule §4: ten minutes.</summary>
     public static readonly TimeSpan MinAge = TimeSpan.FromMinutes(10);
 
@@ -86,10 +98,6 @@ public static class LeftoversSweep
 
     private sealed class Pass(SweepOptions options)
     {
-        // Spelled in two pieces: this file reads names, and the machine scan reads it for the bare prefix too.
-        private static readonly Regex QuarantineEntry = new(
-            @"^\.(.+)\." + "teststo" + @"delete-quarantine-([0-9]+)-([0-9a-f]+)\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-
         private readonly List<string> _removed = [];
         private readonly List<(string Path, string Reason)> _preserved = [];
         private readonly List<string> _listed = [];
@@ -136,7 +144,8 @@ public static class LeftoversSweep
             var identity = Native.IdentityOf(entry);
             if (identity is not { IsDirectory: true, IsLink: false } real) return;
             if (!_mine(entry)) return; // another uid's
-            if (!long.TryParse(found.Groups[2].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var renamer)) return;
+            // The owner-state checks come BEFORE the probe: a renamer that is not a canonical pid the OS can have is unknown, never asked.
+            if (Liveness.AskablePid(found.Groups[2].Value) is not { } renamer) return;
             if (StateOf(renamer) != ProbeState.Dead) return; // its renamer may still be working
             // A renamer in another pid namespace has a pid this process cannot see: it reads dead here and may be mid-delete.
             if (!PastWindow(real)) return;
@@ -193,7 +202,13 @@ public static class LeftoversSweep
         /// <summary>A claim with no folder is what a helper that claims FIRST leaves when it dies between the claim and the
         /// create. It is a claim like any other: its owner decides — gone removes it; live, foreign, unknown and
         /// unreadable keep it. Age only selects.</summary>
-        private void SweepOrphanClaims() => ForEachEntry("claim", claim =>
+        private void SweepOrphanClaims()
+        {
+            var quarantined = QuarantinedNames(); // read once, after the quarantine pass has restored what it could
+            ForEachEntry("claim", claim => SweepOrphanClaim(claim, quarantined));
+        }
+
+        private void SweepOrphanClaim(string claim, HashSet<string> quarantined)
         {
             if (!claim.EndsWith(ClaimSuffix, StringComparison.Ordinal)) return;
             var identity = Native.IdentityOf(claim);
@@ -201,6 +216,7 @@ public static class LeftoversSweep
             var folder = claim[..^ClaimSuffix.Length];
             var (relation, nameOwner) = RelationOf(Path.GetFileName(folder));
             if (relation == Relation.Other || Native.IdentityOf(folder) is not null || Young(written)) return;
+            if (quarantined.Contains(Path.GetFileName(folder))) return; // its folder is in a sibling quarantine: the claim goes with that folder, not before
             if (relation == Relation.Foreign)
             {
                 _listed.Add($"foreign: claim {Path.GetFileName(claim)} — owner {nameOwner}");
@@ -222,7 +238,15 @@ public static class LeftoversSweep
             }
 
             RemoveOrphanClaim(claim, written, read);
-        });
+        }
+
+        /// <summary>The quarantines in the temp root now, and the <c>quarantine-conflict</c> entries this report already named (compared without case).</summary>
+        private HashSet<string> QuarantinedNames()
+        {
+            var names = LeftoversSweep.QuarantinedNames(options.Tmp);
+            foreach (var kept in _preserved.Where(p => p.Reason == "quarantine-conflict")) names.UnionWith(QuarantineEntry.Match(Path.GetFileName(kept.Path)) is { Success: true } m ? [m.Groups[1].Value] : []);
+            return names;
+        }
 
         /// <summary>Still the file that was judged, with the text that was judged: delete it. Anything else is kept, <c>replaced</c>.</summary>
         internal void RemoveOrphanClaim(string claim, Identity written, ClaimRead read)
@@ -289,8 +313,7 @@ public static class LeftoversSweep
                 return;
             }
 
-            var quarantine = QuarantinePath(dir);
-            Directory.Move(dir, quarantine);
+            var quarantine = MoveToQuarantine(dir);
             _hooks.AfterRename?.Invoke(dir, quarantine);
             if (!IntactAt(dir, quarantine, captured))
             {
@@ -305,6 +328,20 @@ public static class LeftoversSweep
             _removed.Add(dir);
             _hooks.AfterRemove?.Invoke(dir, quarantine);
             DeleteClaimIfStill(dir + ClaimSuffix, captured);
+        }
+
+        /// <summary>Rename <paramref name="dir"/> to a quarantine name nothing holds: the rename is EXCLUSIVE (a name already taken is
+        /// somebody else's — an empty folder there is never replaced), and a taken name draws another suffix, at most
+        /// <see cref="Owned.MaxDraws"/> times.</summary>
+        private string MoveToQuarantine(string dir)
+        {
+            for (var draw = 0; draw < Owned.MaxDraws; draw++)
+            {
+                var quarantine = _hooks.QuarantineName?.Invoke(dir) ?? QuarantinePath(dir);
+                if (Native.RenameExclusively(dir, quarantine)) return quarantine;
+            }
+
+            throw new IOException($"no free quarantine name for {Path.GetFileName(dir)} after {Owned.MaxDraws} draws");
         }
 
         /// <summary>The claim goes only under the identity AND the text captured before the rename: a claim another run

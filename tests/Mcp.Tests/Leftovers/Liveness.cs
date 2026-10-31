@@ -35,16 +35,28 @@ public static partial class Liveness
     /// addresses a process GROUP, a pid past what the OS call takes addresses nothing.</summary>
     public static Probe ProbeProcess(long pid)
     {
-        var unknown = new Probe(ProbeState.Unknown, null);
-        if (pid < 1 || pid > MaxSafeInteger) return unknown;
-        if (OperatingSystem.IsLinux()) return pid > int.MaxValue ? unknown : ProbeLinux((int)pid);
-        if (OperatingSystem.IsWindows())
-        {
-            // OpenProcess takes a DWORD, and Windows has no pid 1: a bash started by a native process reports it for itself.
-            return pid > uint.MaxValue || pid == 1 ? unknown : new Probe(Native.WindowsProcessState((uint)pid), null);
-        }
+        if (!Askable(pid)) return new Probe(ProbeState.Unknown, null);
+        if (OperatingSystem.IsLinux()) return ProbeLinux((int)pid);
+        return OperatingSystem.IsWindows() ? new Probe(Native.WindowsProcessState((uint)pid), null) : new Probe(ProbeState.Unknown, null); // macOS: not built
+    }
 
-        return unknown; // macOS: not built
+    /// <summary>May the probe be asked about this number at all? 1 to 2^53-1; on Linux no more than what <c>kill(2)</c> takes (a signed
+    /// 32-bit int); on Windows no more than a DWORD and never 1 (Windows has no pid 1: a bash started by a native process reports it
+    /// for itself); on any other system never — macOS is not built.</summary>
+    internal static bool Askable(long pid)
+    {
+        if (pid < 1 || pid > MaxSafeInteger) return false;
+        if (OperatingSystem.IsLinux()) return pid <= int.MaxValue;
+        return OperatingSystem.IsWindows() && pid <= uint.MaxValue && pid != 1;
+    }
+
+    /// <summary>The pid that a text spells — a quarantine's name carries one — when it is a pid the probe may be asked about, else null
+    /// (⇒ unknown, before any question is asked): ASCII digits only, written canonically (a leading zero is not how a reader writes a
+    /// number, and <c>007</c> could be a real process), and <see cref="Askable"/>.</summary>
+    internal static long? AskablePid(string digits)
+    {
+        if (digits.Length == 0 || digits.Any(c => c is < '0' or > '9') || (digits.Length > 1 && digits[0] == '0')) return null;
+        return long.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var pid) && Askable(pid) ? pid : null;
     }
 
     /// <summary>Rule §3's order, exactly: an unreadable or non-canonical record, an owner that is not the name's or the
