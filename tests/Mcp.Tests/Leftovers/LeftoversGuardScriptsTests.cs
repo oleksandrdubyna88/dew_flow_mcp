@@ -51,4 +51,49 @@ public sealed class LeftoversGuardScriptsTests : IDisposable
 
         GuardScripts.Judge([script], Verdict(script, 2), "node").Should().ContainSingle().Which.Should().BeEquivalentTo(Blind("a.sh", 2));
     }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(0)]
+    [InlineData(3)]
+    [InlineData(int.MaxValue)]
+    public void A_line_outside_the_script_makes_the_whole_answer_one_unjudged_finding(int line)
+    {
+        var good = Script("a.sh", $"rm -rf /tmp/{P}-*", "echo two");
+        var other = Script("b.sh", "echo b");
+        var answer = Verdict(good, 1) + "\n" + Verdict(good, line);
+
+        var findings = GuardScripts.Judge([good, other], answer, "node");
+
+        var finding = findings.Should().ContainSingle("a bad answer is one finding, never the good verdict beside it and never an index exception").Subject;
+        finding.Class.Should().Be("owner-blind");
+        finding.File.Should().Be("a.sh");
+        finding.Line.Should().Be(1);
+        finding.Text.Should().Contain("could not judge").And.Contain("not a verdict");
+    }
+
+    [Fact]
+    public void A_file_that_is_not_one_of_the_scripts_sent_makes_the_whole_answer_one_unjudged_finding()
+    {
+        var script = Script("a.sh", $"rm -rf /tmp/{P}-*");
+        var stranger = Path.Combine(_owned.Dir("stranger"), "x.sh");
+
+        var findings = GuardScripts.Judge([script], Verdict(script, 1) + "\n" + Verdict(stranger, 1), "node");
+
+        findings.Should().ContainSingle().Which.Text.Should().Contain("could not judge");
+    }
+
+    [Theory]
+    [InlineData("not json")]
+    [InlineData("[1,2]")]
+    [InlineData("{\"file\":null,\"line\":1}")]
+    [InlineData("{\"line\":1}")]
+    [InlineData("{\"file\":\"x\",\"line\":\"one\"}")]
+    [InlineData("{\"file\":\"x\",\"line\":1.5}")]
+    public void An_answer_line_that_is_not_a_verdict_is_one_unjudged_finding(string raw)
+    {
+        var script = Script("a.sh", "echo one");
+
+        GuardScripts.Judge([script], raw, "node").Should().ContainSingle().Which.Text.Should().Contain("could not judge");
+    }
 }

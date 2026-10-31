@@ -79,7 +79,8 @@ internal static class GuardScripts
     }
 
     /// <summary>One finding per <c>broad</c> line that is not a comment. A line of the answer that is not a verdict for one of the
-    /// scripts turns the whole answer into the one "could not judge" finding. Internal so a test can hand it an answer as TEXT and
+    /// scripts — a file not among those sent, or a line below 1 or past that script's line count — turns the whole answer into the one
+    /// "could not judge" finding (fail closed: never an index exception, never a finding at a line that does not exist). Internal so a test can hand it an answer as TEXT and
     /// read the findings, without starting any process.</summary>
     internal static List<Finding> Judge(IReadOnlyList<ScriptFile> scripts, string output, string node)
     {
@@ -95,7 +96,8 @@ internal static class GuardScripts
         {
             using var json = JsonDocument.Parse(raw);
             var file = json.RootElement.GetProperty("file").GetString();
-            return file is not null && byPath.ContainsKey(file) ? new Verdict(file, json.RootElement.GetProperty("line").GetInt32()) : null;
+            var line = json.RootElement.GetProperty("line").GetInt32();
+            return file is not null && byPath.TryGetValue(file, out var script) && IsLineOf(script, line) ? new Verdict(file, line) : null;
         }
         catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException or FormatException)
         {
@@ -103,8 +105,11 @@ internal static class GuardScripts
         }
     }
 
+    /// <summary>A verdict names a line the script has: 1 to its line count. Anything else is not an answer about that script.</summary>
+    private static bool IsLineOf(ScriptFile script, int line) => line >= 1 && line <= script.Lines.Length;
+
     private static Finding? FindingFor(ScriptFile script, int line) =>
-        line - 1 < script.Lines.Length && GuardText.IsComment(script.Lines[line - 1])
+        GuardText.IsComment(script.Lines[line - 1])
             ? null
             : new Finding(script.Source.Relative, line, "owner-blind", "matches the prefix with no owner segment after it (the shipped classifier)");
 
