@@ -11,6 +11,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The threshold CA1502 reads (severity: .editorconfig, scoped to the guard's files). -->
+    <AdditionalFiles Include="CodeMetricsConfig.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />

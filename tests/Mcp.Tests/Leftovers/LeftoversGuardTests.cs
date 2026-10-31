@@ -311,6 +311,41 @@ public sealed class LeftoversGuardTests : IDisposable
         report.Findings.Should().BeEmpty();
     }
 
+    [Fact]
+    public void A_path_with_quotes_and_shell_syntax_is_an_argument_never_code()
+    {
+        // The mount's folder and the script's own name carry a quote, a backtick, a substitution, a semicolon and a space: handed to
+        // node as program text they would run `touch`; handed as arguments they are only names.
+        var weird = "m'q`$(touch pwned);" + (OperatingSystem.IsWindows() ? "" : "\"x\ny");
+        var mount = Path.Combine(_owned.Dir("weird-mount"), weird);
+        var lib = Path.Combine(mount, ".claude", "rules", "shared", "tools", "lib");
+        Directory.CreateDirectory(lib);
+        foreach (var file in Directory.GetFiles(Path.Combine(RepositoryRoot.Path, ".claude", "rules", "shared", "tools", "lib"), "*.mjs")) File.Copy(file, Path.Combine(lib, Path.GetFileName(file)));
+        var root = Tree(("tools/" + weird + ".sh", $"rm -rf /tmp/{P}-*"));
+
+        var report = LeftoversGuard.Scan(root, mount);
+
+        var finding = report.Findings.Should().ContainSingle().Subject;
+        finding.Class.Should().Be("owner-blind");
+        finding.Text.Should().Contain("with no owner segment after it", "the classifier ran and judged the line");
+        File.Exists(Path.Combine(Directory.GetCurrentDirectory(), "pwned")).Should().BeFalse();
+        Directory.GetFiles(root, "pwned", SearchOption.AllDirectories).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void A_script_is_read_once_and_a_verdict_is_answered_from_that_copy()
+    {
+        if (!OperatingSystem.IsLinux()) Assert.Skip("the stand-in for node is a shell script");
+        var root = Tree(("a.sh", $"rm -rf /tmp/{P}-*"));
+        var fake = Path.Combine(_owned.Dir("fake-node"), "node");
+        File.WriteAllText(fake, "#!/bin/sh\nfor last; do :; done\nprintf '{\"file\":\"%s\",\"line\":1}\\n' \"$last\"\nrm -f \"$last\"\n");
+        if (OperatingSystem.IsLinux()) File.SetUnixFileMode(fake, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+
+        var report = LeftoversGuard.Scan(root, RepositoryRoot.Path, fake);
+
+        report.Findings.Should().ContainSingle().Which.Should().BeEquivalentTo(new Finding("a.sh", 1, "owner-blind", "matches the prefix with no owner segment after it (the shipped classifier)"));
+    }
+
     // ---- 4: a scan of nothing is red -----------------------------------------------------------------------------------
 
     [Fact]
