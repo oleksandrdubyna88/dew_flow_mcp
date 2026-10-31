@@ -34,31 +34,34 @@ internal static class LeftoversAudit
     /// its claim's (<see cref="Captured"/>), or an orphan claim's identity and text. The removal re-checks them.</summary>
     internal sealed record Claimed(string Path, LeftoversSweep.Captured? Folder, Identity? Claim, ClaimRead? Read);
 
-    internal static IReadOnlyList<Claimed> Discover(string tmp, Owner owner, Func<string, bool>? mine = null, Func<string, string?>? env = null)
+    /// <param name="quarantinedNames">The seam that lists the sibling quarantines of <paramref name="tmp"/> (default <see cref="LeftoversSweep.QuarantinedNames"/>); called once.</param>
+    internal static IReadOnlyList<Claimed> Discover(
+        string tmp, Owner owner, Func<string, bool>? mine = null, Func<string, string?>? env = null, Func<string, HashSet<string>>? quarantinedNames = null)
     {
         if (!Directory.Exists(tmp) || Owner.RunRecord(env, _ => { }) != Owner.This) return [];
         var pattern = Owned.Pattern();
+        var quarantined = (quarantinedNames ?? LeftoversSweep.QuarantinedNames)(tmp); // listed ONCE per audit, not once per orphan claim
         var found = new List<Claimed>();
         foreach (var entry in new DirectoryInfo(tmp).EnumerateFileSystemInfos())
         {
             if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint) || !pattern.IsMatch(entry.Name)) continue;
-            if (Examine(entry, owner, mine) is { } claimed) found.Add(claimed);
+            if (Examine(entry, owner, mine, quarantined) is { } claimed) found.Add(claimed);
         }
 
         return found;
     }
 
-    private static Claimed? Examine(FileSystemInfo entry, Owner owner, Func<string, bool>? mine) =>
-        entry is DirectoryInfo folder ? OfFolder(folder.FullName, owner, mine) : OfOrphan(entry.FullName, owner, mine);
+    private static Claimed? Examine(FileSystemInfo entry, Owner owner, Func<string, bool>? mine, HashSet<string> quarantined) =>
+        entry is DirectoryInfo folder ? OfFolder(folder.FullName, owner, mine) : OfOrphan(entry.FullName, owner, mine, quarantined);
 
     private static Claimed? OfFolder(string path, Owner owner, Func<string, bool>? mine) =>
         LeftoversSweep.Captured.Read(path, mine) is { } captured && ClaimIs(captured.Text, owner) ? new Claimed(path, captured, null, null) : null;
 
     /// <summary>A claim whose folder is missing: a regular file (never a link), with exactly the owner's record.</summary>
-    private static Claimed? OfOrphan(string path, Owner owner, Func<string, bool>? mine)
+    private static Claimed? OfOrphan(string path, Owner owner, Func<string, bool>? mine, HashSet<string> quarantined)
     {
         if (!path.EndsWith(ClaimSuffix, StringComparison.Ordinal) || Directory.Exists(path[..^ClaimSuffix.Length])) return null;
-        if (LeftoversSweep.QuarantinedNames(Path.GetDirectoryName(path)!).Contains(Path.GetFileName(path[..^ClaimSuffix.Length]))) return null; // its folder is in a sibling quarantine
+        if (quarantined.Contains(Path.GetFileName(path[..^ClaimSuffix.Length]))) return null; // its folder is in a sibling quarantine
         if (Native.IdentityOf(path) is not { IsRegular: true, IsLink: false } written) return null;
         var read = Scope.ReadClaimText(path, mine);
         return ClaimIs(read, owner) ? new Claimed(path, null, written, read) : null;

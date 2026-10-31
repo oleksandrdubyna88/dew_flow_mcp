@@ -57,6 +57,25 @@ public sealed class LeftoversAuditTests : IDisposable
     }
 
     [Fact]
+    public void The_sibling_quarantines_are_listed_once_per_audit_however_many_claims_are_orphans()
+    {
+        var tmp = _owned.Dir("audit-once-tmp");
+        var me = Owner.This;
+        const int orphans = 5;
+        for (var i = 0; i < orphans; i++) File.WriteAllText(Path.Combine(tmp, Owned.NameFor("orphan" + i) + ".owner"), me.Format() + "\n");
+        var listings = 0;
+
+        var claimed = LeftoversAudit.Discover(tmp, me, Mine, NoEnv, dir =>
+        {
+            listings++;
+            return LeftoversSweep.QuarantinedNames(dir);
+        });
+
+        claimed.Should().HaveCount(orphans);
+        listings.Should().Be(1, "one directory listing per audit, not one per claim");
+    }
+
+    [Fact]
     public void A_symlinked_folder_is_not_followed()
     {
         var tmp = _owned.Dir("audit-link-tmp");
