@@ -52,8 +52,7 @@ public sealed class LeftoversAuditTests : IDisposable
         var me = Owner.This;
         var name = Owned.NameFor("linked");
         File.WriteAllText(Path.Combine(tmp, name) + ".owner", me.Format() + "\n");
-        if (!OperatingSystem.IsWindows()) Directory.CreateSymbolicLink(Path.Combine(tmp, name), elsewhere);
-        else Assert.Skip("a directory link on Windows needs a junction or a privilege; the POSIX case is the proof");
+        DirectoryLinks.CreateOrSkip(Path.Combine(tmp, name), elsewhere); // a junction on Windows where symlinks need a privilege
 
         LeftoversAudit.ClaimedBy(tmp, me, Mine, NoEnv).Should().BeEmpty("a link is not a folder this run made");
     }
