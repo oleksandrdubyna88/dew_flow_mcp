@@ -97,6 +97,33 @@ jobs:
       - name: Test
         run: ./tests/Mcp.Tests/bin/Release/net10.0/Mcp.Tests.exe
 
+      # The same teeth as on Linux, in PowerShell: LeftoversSelfTest leaks a folder on purpose when MCP_LEFTOVERS_SELFTEST is set, and
+      # this step is green only on a NON-zero exit that carries the audit's first line, names the folder under the case's own words,
+      # and on a temp root that holds nothing of the case afterwards. Both values; a listing error is red, never ignored.
+      - name: The audit fails a run that leaves a claimed folder
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $exe = './tests/Mcp.Tests/bin/Release/net10.0/Mcp.Tests.exe'
+          $cases = @(
+            @{ Value = '1'; Words = 'never disposed'; What = 'selftest' },
+            @{ Value = 'failed-dispose'; Words = 'disposed but not removed'; What = 'selftest-failed' }
+          )
+          foreach ($case in $cases) {
+            $env:MCP_LEFTOVERS_SELFTEST = $case.Value
+            $log = (& $exe --filter-class '*LeftoversSelfTest' 2>&1 | Out-String)
+            $code = $LASTEXITCODE
+            Remove-Item Env:MCP_LEFTOVERS_SELFTEST
+            Write-Host $log
+            if ($code -eq 0) { throw "the end-of-run audit did not fail the run ($($case.Value))" }
+            if ($log -notmatch 'mcp tests: this run left') { throw "the run failed, but not with the audit's message ($($case.Value))" }
+            $what = [regex]::Escape($case.What)
+            $named = '(?m)^\s*' + [regex]::Escape($case.Words) + ': .*[\\/]testsToDelete-[uw][0-9]{1,10}-mcp-' + $what + '-[A-Za-z0-9]{6}\s*$'
+            if ($log -notmatch $named) { throw "the audit's message does not name the folder under '$($case.Words)' ($($case.Value))" }
+            $left = @(Get-ChildItem -Force -LiteralPath $env:TMP -ErrorAction Stop | Where-Object { $_.Name -match ('^testsToDelete-[uw][0-9]{1,10}-mcp-' + $what + '-') })
+            if ($left.Count -gt 0) { throw "the audit left the folder behind: $($left.FullName -join ', ')" }
+          }
+
   # The management surface over the wire, against a running host: routing, the group prefix, the
   # status codes, the serialized shape. What the unit tests cannot see is the composition — that the
   # routes are mounted where a client addresses them at all.
