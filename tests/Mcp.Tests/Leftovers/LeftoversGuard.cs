@@ -120,19 +120,31 @@ public static class LeftoversGuard
     /// exist scans nothing; it does not throw.</summary>
     public static GuardReport Scan(string repoRoot, string? mountRoot = null, string node = "node")
     {
-        var texts = GuardFiles.Discover(repoRoot).Select(source => (Source: source, Text: File.ReadAllText(source.Absolute, Encoding.UTF8))).ToList();
-        var findings = texts.SelectMany(t => ScanText(t.Source, t.Text)).ToList();
-        findings.AddRange(ClassifiedScripts(texts, mountRoot ?? repoRoot, node));
-        return new GuardReport(texts.Count, [.. findings.OrderBy(f => f.File, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Class, StringComparer.Ordinal)]);
+        var findings = new List<Finding>();
+        List<ScriptFile> scripts = [];
+        var scanned = 0;
+        foreach (var source in GuardFiles.Discover(repoRoot))
+        {
+            ScanFile(source, findings, scripts);
+            scanned++;
+        }
+
+        findings.AddRange(ClassifiedScripts(scripts, mountRoot ?? repoRoot, node));
+        return new GuardReport(scanned, [.. findings.OrderBy(f => f.File, StringComparer.Ordinal).ThenBy(f => f.Line).ThenBy(f => f.Class, StringComparer.Ordinal)]);
     }
 
-    /// <summary>The shipped classifier over the scripts and workflows of the scan (started once, only when there are any), each with
-    /// its lines split once.</summary>
-    private static List<Finding> ClassifiedScripts(List<(SourceFile Source, string Text)> texts, string mountRoot, string node)
+    /// <summary>One file read, scanned and let go: its text is not kept past this call. Only a script or a workflow keeps anything —
+    /// its lines, split once, for the classifier's line numbers — so the memory of a scan is the scripts' lines, not the whole tree's text.</summary>
+    private static void ScanFile(SourceFile source, List<Finding> findings, List<ScriptFile> scripts)
     {
-        List<ScriptFile> scripts = [.. texts.Where(t => t.Source.IsJudgedByClassifier).Select(t => new ScriptFile(t.Source, GuardText.SplitLines(t.Text)))];
-        return scripts.Count == 0 ? [] : GuardScripts.Classify(scripts, mountRoot, node);
+        var text = File.ReadAllText(source.Absolute, Encoding.UTF8);
+        findings.AddRange(ScanText(source, text));
+        if (source.IsJudgedByClassifier) scripts.Add(new ScriptFile(source, GuardText.SplitLines(text)));
     }
+
+    /// <summary>The shipped classifier over the scripts and workflows of the scan (started once, only when there are any).</summary>
+    private static List<Finding> ClassifiedScripts(List<ScriptFile> scripts, string mountRoot, string node) =>
+        scripts.Count == 0 ? [] : GuardScripts.Classify(scripts, mountRoot, node);
 
     /// <summary>The token checks (class <c>token</c>): see <see cref="GuardTokens"/>.</summary>
     public static IReadOnlyList<Finding> TokenFindings(string ruleText, string token, string identity) => GuardTokens.TokenFindings(ruleText, token, identity);
