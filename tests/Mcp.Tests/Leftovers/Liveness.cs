@@ -15,8 +15,17 @@ public sealed record Probe(ProbeState State, long? Start);
 /// clock-tick rate and the pid namespace. Nothing here spawns a process — a `/proc` read, a native process API —
 /// and nothing here uses <c>Process.GetProcessById</c>, whose Linux answer under <c>hidepid</c> and whose Windows
 /// access rules are .NET's own and not the contract's.</summary>
+/// <summary>Rule §3's three answers for a record: <c>Gone</c> is the ONLY one that lets a resource be removed.</summary>
+public enum OwnerState { Live, Gone, Unknown }
+
+/// <summary>What a verdict needs beyond the record: the caller's token (default: this process's), the owner segment of
+/// the resource's NAME, whether the kernel owner of the resource is the caller, and whether the process list may hide
+/// other users' processes.</summary>
+public sealed record Facts(string? CallerOwner = null, string? NameOwner = null, bool? KernelMine = null, bool? Hidepid = null);
+
 public static partial class Liveness
 {
+
     private const long MaxSafeInteger = (1L << 53) - 1;
     private const int AtClktck = 17;
 
@@ -36,6 +45,41 @@ public static partial class Liveness
         }
 
         return unknown; // macOS: not built
+    }
+
+    /// <summary>Rule §3's order, exactly: an unreadable or non-canonical record, an owner that is not the name's or the
+    /// caller's, a kernel owner that is not the caller, another host, another namespace on a Linux reader, a pid no
+    /// process can have — all <c>Unknown</c>, before any question is asked. Then ONE question: no process is <c>Gone</c>,
+    /// the only one (unless the process list may hide others). A refused or failed query is <c>Unknown</c>; a live process
+    /// is <c>Live</c>, or <c>Unknown</c> when both starts are known and differ by more than two seconds — a reused pid
+    /// or a stepped clock. A mismatch delays reclamation and never deletes something live.</summary>
+    public static OwnerState State(Owner? owner, Func<long, Probe> probe, Facts? facts = null)
+    {
+        facts ??= new Facts();
+        if (owner is null || owner.NonCanonical) return OwnerState.Unknown;
+        if (owner.Token != (facts.CallerOwner ?? OwnerToken.This)) return OwnerState.Unknown;
+        if (facts.NameOwner is not null && facts.NameOwner != owner.Token) return OwnerState.Unknown;
+        if (facts.KernelMine == false) return OwnerState.Unknown;
+        var me = Owner.This;
+        if (!string.Equals(owner.Host, me.Host, StringComparison.OrdinalIgnoreCase)) return OwnerState.Unknown;
+        // Two namespaces can share a host name, never a pid space: the reader's own namespace missing makes every record unknown.
+        if (me.Host.EndsWith("@linux", StringComparison.OrdinalIgnoreCase) && (owner.Ns is null || owner.Ns != me.Ns)) return OwnerState.Unknown;
+        if (owner.Pid < 1 || owner.Pid > MaxSafeInteger) return OwnerState.Unknown;
+        if (owner.Pid == 1 && owner.Host.EndsWith("@windows", StringComparison.OrdinalIgnoreCase)) return OwnerState.Unknown;
+        Probe seen;
+        try
+        {
+            seen = probe(owner.Pid);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return OwnerState.Unknown; // a probe that cannot answer is no answer
+        }
+
+        if (seen.State == ProbeState.Dead) return (facts.Hidepid ?? HidepidActive()) ? OwnerState.Unknown : OwnerState.Gone;
+        if (seen.State != ProbeState.Live) return OwnerState.Unknown;
+        if (owner.Start is null || seen.Start is null) return OwnerState.Live; // pid reuse then PRESERVES
+        return Math.Abs(owner.Start.Value - seen.Start.Value) <= Owned.StartToleranceSeconds ? OwnerState.Live : OwnerState.Unknown;
     }
 
     /// <summary>On Linux, is process 1 invisible? Then a missing process proves nothing (`hidepid`).</summary>

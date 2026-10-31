@@ -10,13 +10,17 @@ namespace Mcp.Tests.Leftovers;
 /// authorises. POSIX: the entry's own uid is the caller's real uid. Windows (owner decision 2): the entry is
 /// inside the caller's profile AND its owner SID is the caller's user SID — both read from one handle that opens
 /// the entry itself. Any failure is "not mine".</summary>
-public sealed class ScopeTests
+public sealed class ScopeTests : IDisposable
 {
+    private readonly OwnedScope _owned = new();
+
+    public void Dispose() => _owned.Dispose();
+
     [Fact]
     public void A_file_this_test_made_is_mine_exactly_where_the_runner_makes_files_the_callers()
     {
-        using var scratch = new ScratchDir();
-        var file = scratch.File("mine.txt");
+        var scratch = _owned.Dir("scratch");
+        var file = Path.Combine(scratch, "mine.txt");
         File.WriteAllText(file, "x");
 
         // POSIX: always. Windows: the answer scenario 0 printed — true where the new file's owner SID is the
@@ -28,9 +32,9 @@ public sealed class ScopeTests
     [Fact]
     public void A_missing_path_is_not_mine()
     {
-        using var scratch = new ScratchDir();
+        var scratch = _owned.Dir("scratch");
 
-        Scope.IsMine(scratch.File("nope")).Should().BeFalse("an entry that cannot be read is no evidence");
+        Scope.IsMine(Path.Combine(scratch, "nope")).Should().BeFalse("an entry that cannot be read is no evidence");
     }
 
     [Fact]
@@ -38,14 +42,14 @@ public sealed class ScopeTests
     {
         if (!OperatingSystem.IsWindows()) Assert.Skip("the owner SID and profile keys — Windows only");
 
-        if (OperatingSystem.IsWindows()) WindowsBothOutcomes();
+        if (OperatingSystem.IsWindows()) WindowsBothOutcomes(_owned.Dir("scratch"));
     }
 
     [Fact]
     public void A_link_is_judged_on_its_own_owner_never_on_its_targets()
     {
-        using var scratch = new ScratchDir();
-        var link = scratch.File("link");
+        var scratch = _owned.Dir("scratch");
+        var link = Path.Combine(scratch, "link");
         IDisposable? cleanup = null;
         string target;
         if (OperatingSystem.IsWindows())
@@ -60,7 +64,7 @@ public sealed class ScopeTests
 
         using var _ = cleanup;
         CreateFileLinkOrSkip(link, target);
-        var plain = scratch.File("plain.txt");
+        var plain = Path.Combine(scratch, "plain.txt");
         File.WriteAllText(plain, "x");
 
         Native.IdentityOf(link)!.Value.IsLink.Should().BeTrue();
@@ -71,27 +75,27 @@ public sealed class ScopeTests
     [Fact]
     public void A_claim_that_is_not_there_is_missing_and_one_there_reads_as_text()
     {
-        using var scratch = new ScratchDir();
-        File.WriteAllText(scratch.File("claim"), "u1:h@linux:1\n");
+        var scratch = _owned.Dir("scratch");
+        File.WriteAllText(Path.Combine(scratch, "claim"), "u1:h@linux:1\n");
 
-        Scope.ReadClaimText(scratch.File("nope")).Should().BeOfType<ClaimRead.Missing>();
-        Scope.ReadClaimText(scratch.File("claim"), _ => true).Should().BeOfType<ClaimRead.Text>().Which.Value.Should().Be("u1:h@linux:1\n");
+        Scope.ReadClaimText(Path.Combine(scratch, "nope")).Should().BeOfType<ClaimRead.Missing>();
+        Scope.ReadClaimText(Path.Combine(scratch, "claim"), _ => true).Should().BeOfType<ClaimRead.Text>().Which.Value.Should().Be("u1:h@linux:1\n");
     }
 
     [Fact]
     public void A_claim_the_scope_key_refuses_is_unreadable_as_a_foreign_uid()
     {
-        using var scratch = new ScratchDir();
-        File.WriteAllText(scratch.File("claim"), "u1:h@linux:1\n");
+        var scratch = _owned.Dir("scratch");
+        File.WriteAllText(Path.Combine(scratch, "claim"), "u1:h@linux:1\n");
 
-        Scope.ReadClaimText(scratch.File("claim"), _ => false).Should().BeOfType<ClaimRead.Unreadable>().Which.Reason.Should().Be("foreign-uid");
+        Scope.ReadClaimText(Path.Combine(scratch, "claim"), _ => false).Should().BeOfType<ClaimRead.Unreadable>().Which.Reason.Should().Be("foreign-uid");
     }
 
     [Fact]
     public void The_default_scope_key_is_the_kernel_owner()
     {
-        using var scratch = new ScratchDir();
-        var file = scratch.File("claim");
+        var scratch = _owned.Dir("scratch");
+        var file = Path.Combine(scratch, "claim");
         File.WriteAllText(file, "u1:h@linux:1\n");
 
         var read = Scope.ReadClaimText(file);
@@ -103,30 +107,30 @@ public sealed class ScopeTests
     [Fact]
     public void A_folder_named_like_a_claim_is_unreadable_because_only_a_regular_file_is_read()
     {
-        using var scratch = new ScratchDir();
-        Directory.CreateDirectory(scratch.File("claim"));
+        var scratch = _owned.Dir("scratch");
+        Directory.CreateDirectory(Path.Combine(scratch, "claim"));
 
-        Scope.ReadClaimText(scratch.File("claim"), _ => true).Should().BeOfType<ClaimRead.Unreadable>().Which.Reason.Should().BeNull();
+        Scope.ReadClaimText(Path.Combine(scratch, "claim"), _ => true).Should().BeOfType<ClaimRead.Unreadable>().Which.Reason.Should().BeNull();
     }
 
     [Fact]
     public void A_link_named_like_a_claim_is_unreadable_because_a_link_is_never_followed()
     {
-        using var scratch = new ScratchDir();
-        var target = scratch.File("real");
+        var scratch = _owned.Dir("scratch");
+        var target = Path.Combine(scratch, "real");
         File.WriteAllText(target, "u1:h@linux:1\n");
-        CreateFileLinkOrSkip(scratch.File("claim"), target);
+        CreateFileLinkOrSkip(Path.Combine(scratch, "claim"), target);
 
-        Scope.ReadClaimText(scratch.File("claim"), _ => true).Should().BeOfType<ClaimRead.Unreadable>();
+        Scope.ReadClaimText(Path.Combine(scratch, "claim"), _ => true).Should().BeOfType<ClaimRead.Unreadable>();
     }
 
     [Fact]
     public void At_most_one_byte_past_the_limit_is_read_so_a_513_byte_claim_is_seen_as_too_long()
     {
-        using var scratch = new ScratchDir();
-        File.WriteAllText(scratch.File("long"), new string('x', 2000));
+        var scratch = _owned.Dir("scratch");
+        File.WriteAllText(Path.Combine(scratch, "long"), new string('x', 2000));
 
-        var text = Scope.ReadClaimText(scratch.File("long"), _ => true).Should().BeOfType<ClaimRead.Text>().Subject.Value;
+        var text = Scope.ReadClaimText(Path.Combine(scratch, "long"), _ => true).Should().BeOfType<ClaimRead.Text>().Subject.Value;
 
         text.Should().HaveLength(513, "512 bytes are the most a claim may hold; the 513th makes it unreadable");
     }
@@ -143,22 +147,21 @@ public sealed class ScopeTests
     }
 
     [SupportedOSPlatform("windows")]
-    private static (string Target, IDisposable Cleanup) WindowsForeignTarget(ScratchDir scratch)
+    private static (string Target, IDisposable Cleanup) WindowsForeignTarget(string scratch)
     {
         var ownership = new WindowsOwnership();
-        var made = scratch.File("target.txt");
+        var made = Path.Combine(scratch, "target.txt");
         File.WriteAllText(made, "x");
         return (ownership.ForeignToCaller(made), ownership);
     }
 
     [SupportedOSPlatform("windows")]
-    private static void WindowsBothOutcomes()
+    private static void WindowsBothOutcomes(string scratch)
     {
-        using var scratch = new ScratchDir();
         using var ownership = new WindowsOwnership();
-        var mine = scratch.File("mine.txt");
+        var mine = Path.Combine(scratch, "mine.txt");
         File.WriteAllText(mine, "x");
-        var foreign = scratch.File("foreign.txt");
+        var foreign = Path.Combine(scratch, "foreign.txt");
         File.WriteAllText(foreign, "x");
 
         ownership.OwnedByCaller(mine);

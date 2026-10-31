@@ -7,17 +7,21 @@ namespace Mcp.Tests.Leftovers;
 /// <summary>The OS calls the contract needs and .NET does not have: an entry's identity (device, file id,
 /// kind, change and write times) without following a link, a directory made EXCLUSIVELY, and a rename that
 /// refuses to replace what it should not. Everything here reads the entry itself and fails closed.</summary>
-public sealed class NativeTests
+public sealed class NativeTests : IDisposable
 {
+    private readonly OwnedScope _owned = new();
+
+    public void Dispose() => _owned.Dispose();
+
     [Fact]
     public void A_folder_and_a_file_report_their_own_kind_and_a_plausible_time()
     {
-        using var scratch = new ScratchDir();
-        File.WriteAllText(scratch.File("f.txt"), "x");
+        var scratch = _owned.Dir("scratch");
+        File.WriteAllText(Path.Combine(scratch, "f.txt"), "x");
         var before = DateTimeOffset.UtcNow.AddMinutes(-2);
 
-        var folder = Native.IdentityOf(scratch.Path)!.Value;
-        var file = Native.IdentityOf(scratch.File("f.txt"))!.Value;
+        var folder = Native.IdentityOf(scratch)!.Value;
+        var file = Native.IdentityOf(Path.Combine(scratch, "f.txt"))!.Value;
 
         (folder.IsDirectory, folder.IsLink, folder.IsRegular).Should().Be((true, false, false));
         (file.IsDirectory, file.IsLink, file.IsRegular).Should().Be((false, false, true));
@@ -28,9 +32,9 @@ public sealed class NativeTests
     [Fact]
     public void The_uid_of_an_entry_is_the_callers_on_linux_and_absent_on_windows()
     {
-        using var scratch = new ScratchDir();
+        var scratch = _owned.Dir("scratch");
 
-        var uid = Native.IdentityOf(scratch.Path)!.Value.Uid;
+        var uid = Native.IdentityOf(scratch)!.Value.Uid;
 
         if (OperatingSystem.IsWindows()) uid.Should().BeNull();
         else uid.Should().Be(Native.GetUid());
@@ -39,17 +43,17 @@ public sealed class NativeTests
     [Fact]
     public void A_missing_path_has_no_identity()
     {
-        using var scratch = new ScratchDir();
+        var scratch = _owned.Dir("scratch");
 
-        Native.IdentityOf(scratch.File("nope")).Should().BeNull();
+        Native.IdentityOf(Path.Combine(scratch, "nope")).Should().BeNull();
     }
 
     [Fact]
     public void A_folder_is_the_same_entry_after_a_move_and_a_different_one_from_a_new_folder_of_the_old_name()
     {
-        using var scratch = new ScratchDir();
-        var first = scratch.File("a");
-        var moved = scratch.File("b");
+        var scratch = _owned.Dir("scratch");
+        var first = Path.Combine(scratch, "a");
+        var moved = Path.Combine(scratch, "b");
         Directory.CreateDirectory(first);
         var before = Native.IdentityOf(first)!.Value;
 
@@ -66,19 +70,19 @@ public sealed class NativeTests
     [Fact]
     public void A_link_is_reported_as_a_link_and_never_followed()
     {
-        using var scratch = new ScratchDir();
-        Directory.CreateDirectory(scratch.File("real"));
+        var scratch = _owned.Dir("scratch");
+        Directory.CreateDirectory(Path.Combine(scratch, "real"));
         try
         {
-            Directory.CreateSymbolicLink(scratch.File("link"), scratch.File("real"));
+            Directory.CreateSymbolicLink(Path.Combine(scratch, "link"), Path.Combine(scratch, "real"));
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
         {
             Assert.Skip($"cannot create directory links here ({ex.Message})");
         }
 
-        var link = Native.IdentityOf(scratch.File("link"))!.Value;
-        var real = Native.IdentityOf(scratch.File("real"))!.Value;
+        var link = Native.IdentityOf(Path.Combine(scratch, "link"))!.Value;
+        var real = Native.IdentityOf(Path.Combine(scratch, "real"))!.Value;
 
         link.IsLink.Should().BeTrue();
         (link.Dev, link.Ino).Should().NotBe((real.Dev, real.Ino), "the link's own entry, not its target");
@@ -129,21 +133,21 @@ public sealed class NativeTests
     [Fact]
     public void A_directory_is_made_once_and_a_second_attempt_says_it_exists()
     {
-        using var scratch = new ScratchDir();
+        var scratch = _owned.Dir("scratch");
 
-        Native.MakeDirectoryExclusively(scratch.File("d")).Should().BeTrue();
-        Native.MakeDirectoryExclusively(scratch.File("d")).Should().BeFalse("an existing folder is somebody else's: never adopted");
-        Directory.Exists(scratch.File("d")).Should().BeTrue();
+        Native.MakeDirectoryExclusively(Path.Combine(scratch, "d")).Should().BeTrue();
+        Native.MakeDirectoryExclusively(Path.Combine(scratch, "d")).Should().BeFalse("an existing folder is somebody else's: never adopted");
+        Directory.Exists(Path.Combine(scratch, "d")).Should().BeTrue();
     }
 
     [Fact]
     public void A_file_under_the_name_also_says_it_exists_and_a_missing_parent_throws()
     {
-        using var scratch = new ScratchDir();
-        File.WriteAllText(scratch.File("f"), "x");
+        var scratch = _owned.Dir("scratch");
+        File.WriteAllText(Path.Combine(scratch, "f"), "x");
 
-        Native.MakeDirectoryExclusively(scratch.File("f")).Should().BeFalse();
-        var act = () => Native.MakeDirectoryExclusively(Path.Combine(scratch.Path, "no", "d"));
+        Native.MakeDirectoryExclusively(Path.Combine(scratch, "f")).Should().BeFalse();
+        var act = () => Native.MakeDirectoryExclusively(Path.Combine(scratch, "no", "d"));
         act.Should().Throw<IOException>("any failure but 'already exists' is an error, never a quiet false");
     }
 
@@ -156,29 +160,29 @@ public sealed class NativeTests
             return;
         }
 
-        using var scratch = new ScratchDir();
+        var scratch = _owned.Dir("scratch");
 
-        Native.MakeDirectoryExclusively(scratch.File("d"));
+        Native.MakeDirectoryExclusively(Path.Combine(scratch, "d"));
 
         var others = UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute
             | UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute;
-        (File.GetUnixFileMode(scratch.File("d")) & others).Should().Be((UnixFileMode)0, "mode 0700: only the caller's processes read a scratch folder");
+        (File.GetUnixFileMode(Path.Combine(scratch, "d")) & others).Should().Be((UnixFileMode)0, "mode 0700: only the caller's processes read a scratch folder");
     }
 
     [Fact]
     public void A_folder_is_renamed_onto_a_free_name_and_onto_an_empty_folder_on_linux_only()
     {
-        using var scratch = new ScratchDir();
-        Directory.CreateDirectory(scratch.File("a"));
-        File.WriteAllText(Path.Combine(scratch.File("a"), "keep.txt"), "kept");
+        var scratch = _owned.Dir("scratch");
+        Directory.CreateDirectory(Path.Combine(scratch, "a"));
+        File.WriteAllText(Path.Combine(Path.Combine(scratch, "a"), "keep.txt"), "kept");
 
-        Native.RenameOnto(scratch.File("a"), scratch.File("b"));
+        Native.RenameOnto(Path.Combine(scratch, "a"), Path.Combine(scratch, "b"));
 
-        Directory.Exists(scratch.File("a")).Should().BeFalse();
-        File.ReadAllText(Path.Combine(scratch.File("b"), "keep.txt")).Should().Be("kept");
+        Directory.Exists(Path.Combine(scratch, "a")).Should().BeFalse();
+        File.ReadAllText(Path.Combine(Path.Combine(scratch, "b"), "keep.txt")).Should().Be("kept");
 
-        Directory.CreateDirectory(scratch.File("empty"));
-        var onto = () => Native.RenameOnto(scratch.File("b"), scratch.File("empty"));
+        Directory.CreateDirectory(Path.Combine(scratch, "empty"));
+        var onto = () => Native.RenameOnto(Path.Combine(scratch, "b"), Path.Combine(scratch, "empty"));
         if (OperatingSystem.IsWindows())
         {
             onto.Should().Throw<IOException>("Directory.Move refuses an existing target, so the restore is exclusive by itself");
@@ -186,7 +190,7 @@ public sealed class NativeTests
         else
         {
             onto.Should().NotThrow("rename(2) onto an EMPTY directory is atomic: the placeholder the restore reserved");
-            File.ReadAllText(Path.Combine(scratch.File("empty"), "keep.txt")).Should().Be("kept");
+            File.ReadAllText(Path.Combine(Path.Combine(scratch, "empty"), "keep.txt")).Should().Be("kept");
         }
     }
 }

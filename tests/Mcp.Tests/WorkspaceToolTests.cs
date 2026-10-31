@@ -284,7 +284,7 @@ public sealed class WorkspaceToolTests
         var (provider, root) = Build();
         var outside = Directory.CreateTempSubdirectory("mcp-outside").FullName;
         await File.WriteAllTextAsync(Path.Combine(outside, "secret.txt"), "secret", TestContext.Current.CancellationToken);
-        CreateDirectoryLinkOrSkip(Path.Combine(root, "vendor"), outside);
+        DirectoryLinks.CreateOrSkip(Path.Combine(root, "vendor"), outside);
 
         // The path SPELLS fine — no "..", no absolute — and a lexical check waves it through while the
         // read follows the link transparently. The real target is what must lie under the root.
@@ -314,7 +314,7 @@ public sealed class WorkspaceToolTests
     {
         var (provider, root) = Build();
         await File.WriteAllTextAsync(Path.Combine(root, "sub", "real.txt"), "real", TestContext.Current.CancellationToken);
-        CreateDirectoryLinkOrSkip(Path.Combine(root, "alias"), Path.Combine(root, "sub"));
+        DirectoryLinks.CreateOrSkip(Path.Combine(root, "alias"), Path.Combine(root, "sub"));
 
         // The guard is about where the TARGET lives, not about links as such — a checkout may
         // legitimately link within itself, and refusing that would punish the repository for its layout.
@@ -336,39 +336,6 @@ public sealed class WorkspaceToolTests
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
         {
             Assert.Skip($"cannot create symbolic links here ({ex.Message}); enable Developer Mode to run this test");
-        }
-    }
-
-    /// <summary>A DIRECTORY link falls back to an NTFS junction where symlinks need a privilege this
-    /// run does not hold: a junction needs none, the reader follows it exactly as transparently, and a
-    /// cloned repository can carry one — so the escape the guard exists for stays testable on a stock
-    /// Windows box instead of skipping there forever.</summary>
-    private static void CreateDirectoryLinkOrSkip(string link, string target)
-    {
-        try
-        {
-            Directory.CreateSymbolicLink(link, target);
-            return;
-        }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
-        {
-            if (!OperatingSystem.IsWindows())
-            {
-                Assert.Skip($"cannot create directory links here ({ex.Message})");
-            }
-        }
-
-        using var mklink = System.Diagnostics.Process.Start(
-            new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c mklink /J \"{link}\" \"{target}\"")
-            {
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-            });
-        mklink!.WaitForExit();
-        if (mklink.ExitCode != 0 || !Directory.Exists(link))
-        {
-            Assert.Skip("cannot create a directory symlink or a junction here");
         }
     }
 
