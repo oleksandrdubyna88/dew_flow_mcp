@@ -37,7 +37,7 @@ asserts the same rule from its side.
 | `Workspace.Application` | class library | `ISandboxedFileReader` port; `WorkspaceToolProvider` — the one real tool |
 | `Workspace.Infrastructure` | class library | `SandboxedFileReader` adapter (streaming, capped); `SandboxedFileReaderOptions`; DI registration |
 | `ServiceDefaults` | class library | Serilog wiring, the ANSI console sink, the UTC enricher |
-| `tests/Mcp.Tests` | xUnit v3 exe | 123 tests, including the layering guard |
+| `tests/Mcp.Tests` | xUnit v3 exe | The unit and scenario tests, the layering guard, and the leftovers helper that keeps every test folder owned and removed (`Leftovers/`) — see [module_tests.md](module_tests.md) |
 
 ## Containers and dependencies
 
@@ -250,6 +250,19 @@ Local runs follow the shared rule `common.local-cpu-budget` (2026-10-11): at mos
 - an observed peak: nine probe classes meet in one gauge and fail if nine ever ran at once. Uncapped, all nine
   failed (measured before the config existed).
 
+**Test leftovers.** Every scratch folder a test makes comes from one helper, `tests/Mcp.Tests/Leftovers`, and is named
+`testsToDelete-<owner>-mcp-<what>-<id>` with a sibling `.owner` claim written first (shared rule `common/test-leftovers.md`).
+Each test class owns an `OwnedScope` that xUnit disposes after the test. A start-of-run sweep (an assembly fixture) collects a
+killed run's folders under two keys only — scope and a `gone` owner — older than 10 minutes, by identity; an end-of-run
+audit in the same fixture's `DisposeAsync` makes a run that leaves a folder it claimed a red run (the CI step "The audit fails
+a run that leaves a claimed folder" runs `LeftoversSelfTest` under `MCP_LEFTOVERS_SELFTEST` and asserts exactly that); a guard
+test over `tests/`, `src/`, the scripts and the workflows is red on each of the rule's eight classes, on a token that is not
+this repository's registered row, and on a scan of nothing. Every CI job fetches the `.claude/rules/shared` submodule
+(the tests read the mounted rule), and `build-test-windows` runs the same executable on Windows. The host-wide janitor,
+`bash .claude/rules/shared/tools/janitor.sh --token mcp --dry-run`, is run by hand on a machine that stopped running these
+tests (Git for Windows' bash on Windows, never WSL's; forced dry-run there; `would run:` on stdout; exit 0 clean, 3 something
+skipped, 1 a failed listing, 2 usage). Detail: [module_tests.md](module_tests.md).
+
 ### Public presentation
 
 This repository is public, and since 2026-08-17 that is a stated position rather than a visibility flag.
@@ -283,6 +296,7 @@ callers, so the SDK's silent `1.0.0` was a promise nobody had made.
 | [module_workspace_tools.md](module_workspace_tools.md) | The one real tool and its sandbox |
 | [module_telemetry.md](module_telemetry.md) | Per-call recording and the spool |
 | [module_hosting.md](module_hosting.md) | The host, the management API, logging |
+| [module_tests.md](module_tests.md) | The test harness, the leftovers helper, sweep, audit and guard, and every flow covered or not |
 
 ## What does not exist yet
 
