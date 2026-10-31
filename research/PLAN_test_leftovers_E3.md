@@ -178,6 +178,7 @@ asserted through the two `WindowsOwnership` fixtures, never from the runner's ow
 
 **Review round 3 (applied after `5dac43c`).**
 - **Claim read, POSIX (was open).** `Scope.ReadClaimText` read through `FileStream` after the identity check by path, so a FIFO swapped in between blocked the open for ever (the "not closed here" of the E4-lessons item above). It now goes through `Native.ReadVerifiedRegular` on Linux too: `open(2)` with `O_RDONLY|O_NONBLOCK|O_NOFOLLOW|O_CLOEXEC` (`O_NOFOLLOW` is 0x8000 on ARM), `statx(fd, "", AT_EMPTY_PATH)`, a regular file with the judged (device, inode), then at most 513 bytes from that descriptor. RED before: a FIFO swapped in through the scope-key seam hung past 5 s, and another regular file read as text (`ScopeTests`, two Linux tests).
+- **Rename fallback clean-up (was open).** `Native.LinuxRenameExclusively` ended its placeholder clean-up in `catch (Exception) { }`; it now catches only `IOException`, `UnauthorizedAccessException` and `InvalidOperationException` (an unreadable identity) and lets anything else propagate. The fallback is `Native.RenameByReservation(from, to, afterFailedRename)`, the seam being the hook that runs after the failed rename. RED before: a hook throwing `InvalidCastException` came back as the rename's `IOException` (`NativeTests`).
 
 ## The contract this document encodes
 

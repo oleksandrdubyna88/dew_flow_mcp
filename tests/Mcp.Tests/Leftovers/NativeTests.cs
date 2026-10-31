@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Runtime.Versioning;
 using FluentAssertions;
 using Xunit;
 
@@ -217,5 +218,43 @@ public sealed class NativeTests : IDisposable
         File.WriteAllText(Path.Combine(full, "theirs.txt"), "theirs");
         Native.RenameExclusively(Path.Combine(scratch, "b"), full).Should().BeFalse();
         File.ReadAllText(Path.Combine(full, "theirs.txt")).Should().Be("theirs");
+    }
+
+    [Fact]
+    [SupportedOSPlatform("linux")]
+    public void The_reservation_fallback_removes_its_placeholder_when_the_rename_fails()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Skip("the reservation fallback is the Linux form");
+            return;
+        }
+
+        var scratch = _owned.Dir("scratch");
+        var target = Path.Combine(scratch, "target");
+
+        var failure = Record.Exception(() => Native.RenameByReservation(Path.Combine(scratch, "missing"), target));
+
+        failure.Should().BeOfType<IOException>("the rename failed because the source is not there");
+        Directory.Exists(target).Should().BeFalse("the placeholder was ours and empty");
+    }
+
+    [Fact]
+    [SupportedOSPlatform("linux")]
+    public void The_reservation_fallback_swallows_only_the_expected_failures_of_its_clean_up()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Skip("the reservation fallback is the Linux form");
+            return;
+        }
+
+        var scratch = _owned.Dir("scratch");
+
+        var expected = Record.Exception(() => Native.RenameByReservation(Path.Combine(scratch, "missing"), Path.Combine(scratch, "t1"), () => throw new IOException("gone")));
+        expected.Should().BeOfType<IOException>().Which.Message.Should().Contain("rename", "an expected clean-up failure leaves the rename's own failure");
+
+        var unexpected = Record.Exception(() => Native.RenameByReservation(Path.Combine(scratch, "missing"), Path.Combine(scratch, "t2"), () => throw new InvalidCastException("a bug")));
+        unexpected.Should().BeOfType<InvalidCastException>("anything but the expected failures propagates");
     }
 }

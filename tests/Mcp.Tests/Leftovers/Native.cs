@@ -149,16 +149,27 @@ internal static partial class Native
 
         if (errno == Eexist) return false;
         if (errno is not (Einval or Enosys)) throw Failure($"renameat2 {from} to {to}", errno);
+        return RenameByReservation(from, to);
+    }
+
+    /// <summary>The fallback of <see cref="RenameExclusively"/>: reserve the name with an exclusive <c>mkdir</c>, then rename over our own
+    /// placeholder. False = the name is taken. When the rename fails the placeholder is cleaned up and the rename's failure is thrown.
+    /// <paramref name="afterFailedRename"/> is the test seam: it runs once the rename failed, before the placeholder is looked at.</summary>
+    [SupportedOSPlatform("linux")]
+    internal static bool RenameByReservation(string from, string to, Action? afterFailedRename = null)
+    {
         if (!MakeDirectoryExclusively(to)) return false; // the reservation: the name is taken, or now is
         if (Libc.Rename(from, to) == 0) return true;
         var failure = Failure($"rename {from} to {to}", Marshal.GetLastPInvokeError());
         try
         {
+            afterFailedRename?.Invoke();
             if (IdentityOf(to) is { IsDirectory: true, IsLink: false }) Directory.Delete(to, recursive: false); // our own empty placeholder, nothing else
         }
-        catch (Exception)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
-            // Gone or not empty: not ours to chase.
+            // Gone, not empty, not readable (the native failure is an IOException, an unreadable identity an InvalidOperationException): not ours to chase.
+            // Anything else is a bug and propagates.
         }
 
         throw failure;
