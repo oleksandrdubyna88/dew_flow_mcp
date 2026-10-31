@@ -35,22 +35,16 @@ public sealed class RunnerFactsTests
         var user = WindowsIdentity.GetCurrent();
         var elevated = new WindowsPrincipal(user).IsInRole(WindowsBuiltInRole.Administrator);
 
-        // testsToDelete-exempt: raw-temp — the measuring test must see the raw temp root once
-        var temp = Path.GetTempPath();
-        var file = Path.Combine(temp, $"mcp-runner-facts-{Guid.NewGuid():N}.txt");
-        try
-        {
-            File.WriteAllText(file, "runner facts");
-            var owner = Native.OwnerSidOf(file);
-            Record($"runner facts: new file owner SID = {owner?.Value ?? "(unreadable)"}");
-            Record($"runner facts: Scope.IsMine of the new file = {Scope.IsMine(file)}");
-            Record($"runner facts: token user SID = {user.User?.Value}; token owner SID = {user.Owner?.Value}");
-            Record($"runner facts: file owner equals token user SID = {user.User is not null && owner is not null && owner.Equals(user.User)}");
-        }
-        finally
-        {
-            File.Delete(file);
-        }
+        // The probe file lives INSIDE an OwnedDir (claimed first, removed by this test); the temp root is that folder's parent.
+        using var scratch = OwnedDir.Create("runner-facts");
+        var temp = Path.GetDirectoryName(scratch.Path)!;
+        var file = Path.Combine(scratch.Path, "probe.txt");
+        File.WriteAllText(file, "runner facts");
+        var owner = Native.OwnerSidOf(file);
+        Record($"runner facts: new file owner SID = {owner?.Value ?? "(unreadable)"}");
+        Record($"runner facts: Scope.IsMine of the new file = {Scope.IsMine(file)}");
+        Record($"runner facts: token user SID = {user.User?.Value}; token owner SID = {user.Owner?.Value}");
+        Record($"runner facts: file owner equals token user SID = {user.User is not null && owner is not null && owner.Equals(user.User)}");
 
         Record($"runner facts: token is elevated (Administrators) = {elevated}");
         var profile = FinalPath(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
