@@ -12,9 +12,13 @@ namespace Mcp.Tests.Leftovers;
 ///
 /// <para>Linux only. On Windows the <c>bash</c> on the path may be WSL's, which sees neither the Windows temp root nor Windows pids
 /// and reads every Windows claim as foreign; the Windows half is run by hand with Git for Windows' bash (S4 scenario 9).</para></summary>
-public sealed class LeftoversJanitorTests
+public sealed class LeftoversJanitorTests : IDisposable
 {
     private const string Janitor = ".claude/rules/shared/tools/janitor.sh";
+
+    private readonly OwnedScope _owned = new();
+
+    public void Dispose() => _owned.Dispose();
 
     [Fact]
     public void The_janitor_lists_a_dead_owners_folder_for_removal_and_another_owners_as_foreign()
@@ -26,7 +30,10 @@ public sealed class LeftoversJanitorTests
 
         var root = RepositoryRoot.Path;
         File.Exists(Path.Combine(root, Janitor)).Should().BeTrue($"{Janitor} is mounted (git submodule update --init .claude/rules/shared)");
-        var tmp = Owned.TempRoot();
+        // The janitor reads TMPDIR exactly as Path.GetTempPath does, so the plants live in a PRIVATE temp root and its listing
+        // cannot race the other tests of this run creating and removing folders in the real one (measured: a `find` on a folder
+        // that vanished mid-listing makes the janitor exit 1, "a listing failed").
+        var tmp = _owned.Dir("janitor-root");
         var me = Owner.This;
         me.Ns.Should().NotBeNull("the janitor judges a claim only with this reader's pid namespace");
         var dead = UnmatchablePid.Next();
@@ -40,7 +47,7 @@ public sealed class LeftoversJanitorTests
 
             // Narrowed to this owner and token: the dead owner's folder is a `would run:` line, and another owner's name is outside
             // the inventory altogether (the janitor's --token narrows the listing, janitor.sh:157), so it is named nowhere.
-            var (exit, stdout, stderr) = RunJanitor(root, narrow: true);
+            var (exit, stdout, stderr) = RunJanitor(root, tmp, narrow: true);
 
             exit.Should().Be(0, $"stderr: {stderr}");
             Lines(stdout).Should().Contain(l => l.StartsWith("would run:", StringComparison.Ordinal) && l.Contains(ours, StringComparison.Ordinal), $"stdout: {stdout}");
@@ -50,7 +57,7 @@ public sealed class LeftoversJanitorTests
 
             // Not narrowed (the host-wide inventory of every owner): another owner's folder is a `foreign:` line, never a `would run:`
             // or a `skipped:`. The exit code is the whole temp root's business here and is not asserted.
-            var (_, wideOut, wideErr) = RunJanitor(root, narrow: false);
+            var (_, wideOut, wideErr) = RunJanitor(root, tmp, narrow: false);
 
             Lines(wideErr).Should().Contain(l => l.StartsWith("foreign:", StringComparison.Ordinal) && l.Contains(Path.GetFileName(theirs), StringComparison.Ordinal), $"stderr: {wideErr}");
             TestContext.Current.AddWarning("janitor cross-check, host-wide: " + string.Join(" | ", Lines(wideErr).Where(l => l.Contains(Path.GetFileName(theirs), StringComparison.Ordinal))));
@@ -78,11 +85,12 @@ public sealed class LeftoversJanitorTests
 
     private static IEnumerable<string> Lines(string text) => text.Split('\n').Select(l => l.TrimEnd('\r'));
 
-    private static (int Exit, string Stdout, string Stderr) RunJanitor(string root, bool narrow)
+    private static (int Exit, string Stdout, string Stderr) RunJanitor(string root, string tmp, bool narrow)
     {
         var start = new ProcessStartInfo("bash") { WorkingDirectory = root, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
         foreach (var argument in narrow ? new[] { Janitor, "--token", OwnedToken.RepoToken, "--dry-run" } : [Janitor, "--dry-run"]) start.ArgumentList.Add(argument);
         start.Environment["JANITOR_MIN_AGE_MINUTES"] = "10";
+        start.Environment["TMPDIR"] = tmp;
         using var process = Process.Start(start) ?? throw new InvalidOperationException("bash did not start");
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
