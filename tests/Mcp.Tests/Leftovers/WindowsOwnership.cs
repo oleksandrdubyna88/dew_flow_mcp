@@ -17,7 +17,7 @@ namespace Mcp.Tests.Leftovers;
 [SupportedOSPlatform("windows")]
 internal sealed class WindowsOwnership : IDisposable
 {
-    private readonly List<string> _outside = [];
+    private readonly List<OwnedDir> _outside = [];
 
     /// <summary>Which branch <see cref="ForeignToCaller"/> took last: the owner SID, or the out-of-profile path.</summary>
     public string? LastForeignBranch { get; private set; }
@@ -37,15 +37,20 @@ internal sealed class WindowsOwnership : IDisposable
         }
         catch (Exception ex) when (ex is PrivilegeNotHeldException or UnauthorizedAccessException or InvalidOperationException)
         {
-            // A token that may not own that group: the entry goes where the caller's profile is not.
-            var outside = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments),
-                "mcp-s2-foreign-" + Guid.NewGuid().ToString("N"));
-            if (Directory.Exists(path)) Directory.CreateDirectory(outside);
-            else File.Copy(path, outside);
+            // A token that may not own that group: the entry goes where the caller's profile is not — as an OwnedDir, so it is
+            // claimed first, prefixed and removed like every other folder of the run, never an unprefixed one.
+            var outside = OwnedDir.Create("foreign-owner", Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments));
             _outside.Add(outside);
-            return Took("path outside the profile (the token may not own Administrators)", outside);
+            var copy = Directory.Exists(path) ? outside.Path : CopyInto(outside.Path, path);
+            return Took("path outside the profile (the token may not own Administrators)", copy);
         }
+    }
+
+    private static string CopyInto(string folder, string file)
+    {
+        var copy = Path.Combine(folder, Path.GetFileName(file));
+        File.Copy(file, copy);
+        return copy;
     }
 
     private string Took(string branch, string path)
@@ -57,11 +62,7 @@ internal sealed class WindowsOwnership : IDisposable
 
     public void Dispose()
     {
-        foreach (var path in _outside)
-        {
-            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
-            else File.Delete(path);
-        }
+        foreach (var folder in _outside) folder.Dispose();
     }
 
     private static void SetOwner(string path, SecurityIdentifier owner)

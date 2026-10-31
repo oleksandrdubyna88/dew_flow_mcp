@@ -73,6 +73,18 @@ public sealed class ScopeTests : IDisposable
     }
 
     [Fact]
+    public void On_windows_a_link_to_the_callers_own_file_is_judged_on_the_links_own_owner_not_the_targets()
+    {
+        // The test above cannot tell a link-following reader from a correct one on an ELEVATED runner: the link, the plain file and
+        // the foreign target are all Administrators', so every answer is false. Here the TARGET is made the caller's own first
+        // (a link's own owner cannot be set through the managed API, which follows the link): a reader that followed the link would
+        // say true where the link's own owner, Administrators, says false.
+        if (!OperatingSystem.IsWindows()) Assert.Skip("the owner SID key — Windows only");
+
+        if (OperatingSystem.IsWindows()) WindowsLinkToOwnTarget(_owned.Dir("scratch"));
+    }
+
+    [Fact]
     public void A_claim_that_is_not_there_is_missing_and_one_there_reads_as_text()
     {
         var scratch = _owned.Dir("scratch");
@@ -153,6 +165,23 @@ public sealed class ScopeTests : IDisposable
         var made = Path.Combine(scratch, "target.txt");
         File.WriteAllText(made, "x");
         return (ownership.ForeignToCaller(made), ownership);
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void WindowsLinkToOwnTarget(string scratch)
+    {
+        using var ownership = new WindowsOwnership();
+        var made = Path.Combine(scratch, "target.txt");
+        File.WriteAllText(made, "x");
+        var target = ownership.OwnedByCaller(made);
+        var link = Path.Combine(scratch, "link");
+        CreateFileLinkOrSkip(link, target);
+        var plain = Path.Combine(scratch, "plain.txt");
+        File.WriteAllText(plain, "x");
+
+        Scope.IsMine(target).Should().BeTrue("premise: the target is the caller's, in the caller's profile");
+        Native.IdentityOf(link)!.Value.IsLink.Should().BeTrue();
+        Scope.IsMine(link).Should().Be(Scope.IsMine(plain), "the link's own owner decides, exactly as a file made beside it, whatever its target's owner is");
     }
 
     [SupportedOSPlatform("windows")]
