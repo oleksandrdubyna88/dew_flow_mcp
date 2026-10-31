@@ -4,6 +4,9 @@
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <!-- The leftovers helper calls the OS through [LibraryImport] (tests/Mcp.Tests/Leftovers/Native.cs); the
+         generated marshalling is unsafe code. This project only. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
   </PropertyGroup>
 

@@ -1,5 +1,4 @@
 using System.Runtime.Versioning;
-using System.Security.AccessControl;
 using System.Security.Principal;
 using Xunit;
 
@@ -12,8 +11,8 @@ namespace Mcp.Tests.Leftovers;
 /// elevated, and an elevated process's new files are likely owned by <c>BUILTIN\Administrators</c>, not by the
 /// user's own SID. The kernel-owner key of the sweep (rule §3, "scope evidence") compares that owner with the
 /// caller, so every Windows assertion later in this folder is written against the answer printed here, never
-/// against a guess. Windows reads go through the managed ACL API: the owner of a plain file is the same
-/// security-descriptor field the native reads later take.</para>
+/// against a guess. The reads are the helper's own (<see cref="Native.OwnerSidOf"/>, <see cref="Scope.IsMine"/>,
+/// <see cref="Liveness.ClockTicksPerSecond"/>), so what is printed is what the helper will see.</para>
 ///
 /// <para>The lines go out as test warnings (<see cref="TestContext.AddWarning"/>), which the runner prints
 /// under the test even when it passes.</para></summary>
@@ -42,10 +41,11 @@ public sealed class RunnerFactsTests
         try
         {
             File.WriteAllText(file, "runner facts");
-            var owner = new FileInfo(file).GetAccessControl().GetOwner(typeof(SecurityIdentifier));
+            var owner = Native.OwnerSidOf(file);
             Record($"runner facts: new file owner SID = {owner?.Value ?? "(unreadable)"}");
+            Record($"runner facts: Scope.IsMine of the new file = {Scope.IsMine(file)}");
             Record($"runner facts: token user SID = {user.User?.Value}; token owner SID = {user.Owner?.Value}");
-            Record($"runner facts: file owner equals token user SID = {owner is not null && owner.Equals(user.User)}");
+            Record($"runner facts: file owner equals token user SID = {user.User is not null && owner is not null && owner.Equals(user.User)}");
         }
         finally
         {
@@ -71,27 +71,8 @@ public sealed class RunnerFactsTests
 
     private static void LinuxFacts()
     {
-        var uid = File.ReadLines("/proc/self/status").First(l => l.StartsWith("Uid:", StringComparison.Ordinal));
-        Record($"runner facts: {uid.Replace('\t', ' ')} (real, effective, saved, fs)");
+        Record($"runner facts: real uid = {Native.GetUid()}");
         Record($"runner facts: /proc/1 visible = {Directory.Exists("/proc/1")} (false would mean hidepid)");
-        Record($"runner facts: AT_CLKTCK from /proc/self/auxv = {ClockTicks()?.ToString() ?? "(unreadable)"}");
+        Record($"runner facts: AT_CLKTCK from /proc/self/auxv = {Liveness.ClockTicksPerSecond()?.ToString() ?? "(unreadable)"}");
     }
-
-    /// <summary>AT_CLKTCK (17) from the auxiliary vector: pairs of machine words, ended by AT_NULL.</summary>
-    private static long? ClockTicks()
-    {
-        var auxv = File.ReadAllBytes("/proc/self/auxv");
-        var word = IntPtr.Size;
-        for (var at = 0; at + 2 * word <= auxv.Length; at += 2 * word)
-        {
-            var type = Read(auxv, at, word);
-            if (type == 0) return null;
-            if (type == 17) return Read(auxv, at + word, word);
-        }
-
-        return null;
-    }
-
-    private static long Read(byte[] bytes, int at, int word) =>
-        word == 8 ? BitConverter.ToInt64(bytes, at) : BitConverter.ToUInt32(bytes, at);
 }
