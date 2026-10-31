@@ -5,6 +5,8 @@
        cannot start logging differently. -->
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
     <PackageReference Include="Serilog.AspNetCore" />
   </ItemGroup>
 
