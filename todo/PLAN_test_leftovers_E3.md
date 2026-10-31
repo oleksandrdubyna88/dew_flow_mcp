@@ -631,7 +631,7 @@ file FAILS the test that needs it, never skips** (an uninitialised submodule is 
   `MinAge` = 10 minutes (`S:39`). A port of `S:437-453`'s order without the worktree pass — this repository makes no
   worktree: **quarantines, folders, orphan claims**, each step in its own `try` (`S:421-429`); it never throws; probe
   answers are cached per pid; `Mine` defaults to `Scope.IsMine` (a seam: a second uid cannot be had in a test);
-  `Hooks` (`AfterCapture`, `AfterVerdict`, `AfterRename`, `AfterReserve`) are seams for a change between the capture,
+  `Hooks` (`AfterCapture`, `AfterVerdict`, `AfterRename`, `AfterRemove`, `AfterReserve`) are seams for a change between the capture,
   the verdict and the removal. The caller's owner is `OwnerToken.This`; the state is
   `Liveness.State(record, cached, new Facts(CallerOwner: owner, NameOwner: nameOwner, KernelMine: true))` (`S:444-445`).
   1. **Relation of a name** (`S:61-69`): `Owned.Classify` — owner form with token `mcp`: `own` when its owner is the
@@ -653,7 +653,8 @@ file FAILS the test that needs it, never skips** (an uninitialised submodule is 
      (same parent: atomic, never across a file system; a leading `.`: no prefix match reaches it); `Hooks.AfterRename`;
      identity at the quarantine and the claim at the ORIGINAL path unchanged, else restore (below) and `replaced`
      (`quarantine-conflict` when the restore failed); `UnlinkTopLevelLinks(quarantine)`; `Removal.Quietly(quarantine)`
-     — `false` ⇒ an `Errors` entry; then delete the claim. **Restore** (`S:169-197`): Windows `Directory.Move` back (a
+     — `false` ⇒ an `Errors` entry; `Hooks.AfterRemove`; then delete the claim ONLY while its identity and text are still the ones captured
+     before the rename — a claim replaced in that window is kept and reported `replaced` (round 3; sc. 5e). **Restore** (`S:169-197`): Windows `Directory.Move` back (a
      rename onto an existing directory fails there, so it is exclusive); Linux `Native.MakeDirectoryExclusively(original)`
      as a mode-700 placeholder, `Hooks.AfterReserve`, `Native.RenameOnto(quarantine, original)` (`rename(2)` onto an
      empty directory is atomic; `Directory.Move` refuses an existing target), on failure remove the placeholder only
@@ -730,7 +731,9 @@ unless stated (on Linux the namespace must be this reader's or the verdict is `u
    the same with the original name TAKEN ⇒ `quarantine-conflict` in `Preserved` and a `quarantine-conflict:` line
    naming the command, both untouched, and a SECOND `Run` with the name freed ⇒ restored (the retry); a quarantine
    whose renamer is THIS process ⇒ untouched, unlisted. (d) After every removal no `.*.teststodelete-quarantine-*`
-   entry remains in `Tmp`.
+   entry remains in `Tmp`. (e) Through `Hooks.AfterRemove` the test deletes the claim and writes
+   another text under the same name ⇒ that claim is kept, `replaced` is reported, nothing else is touched; RED first
+   with an unconditional claim delete (round 3).
 6. **The sweep never fails the run.** `Run` on a `Tmp` that does not exist ⇒ one `Errors` entry, no throw; a folder the
    `Mine` seam throws on ⇒ one `Errors` entry and the next folder still judged; the internal fixture constructor with a
    sweep that throws ⇒ completes, the `report` seam got the error line, `LastRun` is empty.
@@ -901,12 +904,19 @@ gains, AFTER the normal `Test` step:
       - name: The audit fails a run that leaves a claimed folder
         env: { MCP_LEFTOVERS_SELFTEST: "1" }
         run: |
-          if ./tests/Mcp.Tests/bin/Release/net10.0/Mcp.Tests --filter-class "*LeftoversSelfTest"; then
+          set -o pipefail
+          if ./tests/Mcp.Tests/bin/Release/net10.0/Mcp.Tests --filter-class "*LeftoversSelfTest" 2>&1 | tee selftest.log; then
             echo "the end-of-run audit did not fail the run"; exit 1; fi
-          ls "${TMPDIR:-/tmp}" | grep -i "^teststodelete" && { echo "the audit left the folder behind"; exit 1; } || true
+          grep -E "testsToDelete-[uw][0-9]{1,10}-mcp-selftest-[A-Za-z0-9]{6}" selftest.log | grep -q "mcp tests: this run left" \
+            || { echo "the run failed, but not with the audit's message"; exit 1; }
+          left=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -iname 'teststodelete-*-mcp-selftest-*') \
+            || { echo "the temp root could not be listed"; exit 1; }
+          [ -z "$left" ] || { echo "the audit left the folder behind: $left"; exit 1; }
 ```
 
-— a NON-zero exit is the green; the folder the self-test made is gone afterwards (the audit removes what it names).
+— green only on a NON-zero exit that carries the audit's own message (the audit's `mcp tests: this run left <n> folder(s) it
+claimed — <paths>` text, S4), and an empty listing of the temp root `Owned.TempRoot` resolves to on the runner (`Path.GetTempPath()`
+= `$TMPDIR` or `/tmp`); a listing error is red, never ignored (round 3).
 If xUnit v3 does not fail the run on an assembly-fixture cleanup exception, this step is red on its first run: stop and
 report — do not turn the audit into a warning silently.
 
@@ -1140,6 +1150,8 @@ standing answer: macOS stays "not built; the helper refuses with a clear message
   5a moves aside before it deletes. B17 `Owned.Prefix` / `Owned.LegacyPattern` outside `Leftovers/` is a finding. B18
   sc. 3 RED against a stub `Scan`. The fail-closed edges are one bullet of S2.
 
+
+Round 3 (2026-10-31; GPT alone — Gemini did not receive the 1167-line plan whole): `proceed` with three findings. Accepted: the self-test step is green only on the audit's own message and an empty, listable temp root (S4); the claim is deleted after the quarantine only under the identity and text captured before the rename (S3 step 3, sc. 5e). Rejected: "the audit can delete another live test's folder" — the audit runs in the assembly fixture's dispose, after every test of the assembly has finished, and takes only claims whose record is this process's own pid and start.
 ## Judge's notes on the parent's E3 entry
 
 Opus, 2026-10-16, against `origin/main` b352881 of this repository and the E1 branch of the shared rules; the
