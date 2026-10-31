@@ -2,14 +2,15 @@
 
 > Status: **plan only, nothing implemented yet, 2026-10-31 — re-split against release 115bbf8; plan only.** Stories of
 > epic E3 of the parent plan `dew_flow_conventions · todo/PLAN_test_leftovers_rollout.md` (§ *Epics*, E3). Scope: a new
-> `tests/Mcp.Tests/Leftovers/` folder (helper, owner token and record, liveness, the kernel-owner and identity reads,
-> start-of-run sweep, end-of-run audit, guard), the 11 test files that create temp folders today, one CI step, a new
-> `research/module_tests.md`, and `research/architecture.md` § CI. The pin bump (the old S1) is PR #57, which merges
-> alone (owner decision 1), and is not a story here.
+> `tests/Mcp.Tests/Leftovers/` folder (the token file, helper, owner record, liveness, the kernel-owner and identity
+> reads, start-of-run sweep, end-of-run audit, guard, a janitor cross-check and an audit self-test), the 11 test files
+> that create temp folders today, `.github/workflows/ci.yml` (the submodule step, a Windows leg, the self-test step), a
+> new `research/module_tests.md`, and `research/architecture.md` § CI. The pin bump (the old S1) is PR #57, which
+> merges alone (owner decision 1), and is not a story here.
 >
 > Split by Opus, 2026-10-16, against the E1 branch; re-split 2026-10-31 against the released contract
-> (`dew_flow_conventions` `115bbf8`) and the owner's three decisions of 2026-10-31. Models per story below. No
-> cornerstone: E3 is not one (parent, E3 entry).
+> (`dew_flow_conventions` `115bbf8`) and the owner's three decisions of 2026-10-31; plan-gate round 2 applied the same
+> day (§ *Plan-gate round 2*). Models per story below. No cornerstone: E3 is not one (parent, E3 entry).
 
 **Committed together with this document** (one commit, the shared `common/planning-docs.md` § *A plan split into epics
 and stories*): its row in [todo/README.md](README.md) under *Currently open*:
@@ -140,12 +141,14 @@ helper by shape, not by file**: same names where C# allows, same order, same thr
 - **`Directory.CreateTempSubdirectory` cannot be the helper's primitive.** Measured 2026-10-16 on .NET 10.0.12,
   Windows: `CreateTempSubdirectory("e3probe-")` made `e3probe-clxdyztb.njt` — prefix + `Path.GetRandomFileName()`, an
   id of 8 + `.` + 3 that breaks rule §1's `[A-Za-z0-9]{6,12}`. **.NET has no exclusive `mkdir`** (`Directory.CreateDirectory`
-  succeeds on an existing folder), **no inode or file-id API, no uid read and no `kill(pid, 0)`**: S2 takes the five
-  OS calls the contract needs through one P/Invoke file, `Native.cs`, and nothing else in the folder calls the OS by hand.
+  succeeds on an existing folder), **no inode or file-id API, no uid read and no `kill(pid, 0)`**: S2 takes every
+  OS call the contract needs through one P/Invoke file, `Native.cs`, and nothing else in the folder calls the OS by hand.
 - **No Docker, no worktrees, no databases** anywhere in `tests/`, `src/` or `.github/` (`is-docker` appears only in
   `http/package-lock.json` as a transitive dependency of the contract suite). The scripts are
-  `.github/scripts/branch-protection.mjs`, `http/httpyac.config.js` and the two workflows; none makes a temp path. The
-  guard still implements every class (rule DoD: *red on every class of §7*).
+  `.github/scripts/branch-protection.mjs`, `http/httpyac.config.js` and the two workflows; none makes a temp path; no
+  `.py`, `.sh` or `.ps1` file exists. `src/` holds no temp API and no prefix literal (`git grep` at `b352881`), so
+  scanning it (S4 *Discovery*) changes no count. The guard still implements every class (rule DoD: *red on every
+  class of §7*).
 - **Stage A of this repository is empty, measured.** The barrier scan `tools/sweeper-scan.mjs` at `115bbf8` over
   `b352881` found no owner-blind sweeper (103 files read; remainder plan R6, 2026-10-31). Nothing here sweeps, so the
   sweep-only stage is a record, not a change.
@@ -166,8 +169,12 @@ helper by shape, not by file**: same names where C# allows, same order, same thr
   (`:110-111`) against the tip of the ref `.gitmodules` tracks — `branch = release` — which is why PR #57 goes first.
   `Formatted` (`:33-34`) runs `dotnet format --verify-no-changes`; on a Windows checkout it reports ENDOFLINE noise
   from `core.autocrlf` (`:29-32`), so run it in Linux or WSL, or rely on CI. Node is on the runner (the `plans` job).
+  **No job runs on Windows today**; the Windows half of this epic was proven only by hand. GitHub's `windows-latest`
+  runner executes jobs as an administrator, and on Windows Server an administrator's new files are likely owned by
+  `BUILTIN\Administrators` (UNVERIFIED — `dew_flow_conventions · research/security/test-leftovers-merged-core.md:239-243`
+  names the same hole for the janitor), which under decision 2 makes `IsMine` false there. S2 measures it first.
 - **Reusable neighbours.** `LocalCpuBudgetTests.cs:20-27` finds the repository root (the folder holding `*.slnx`
-  above `AppContext.BaseDirectory`) — S4 extracts it rather than copying it. `RecordingLogger.cs` is the in-repo
+  above `AppContext.BaseDirectory`) — S2 extracts it rather than copying it. `RecordingLogger.cs` is the in-repo
   pattern for a captured sink. `WorkspaceToolTests.cs:346-373` already makes a directory link or a junction, or skips.
 
 ## Order
@@ -184,10 +191,11 @@ unit; none merges alone — the guard's test over this repository is red until t
 emits the owner form without its sweep is half the promise. **The merge condition** (rule *The barrier*; remainder plan
 R6): the producer pull request merges only after (a) PR #57 is merged, (b) `dew_flow_conventions ·
 todo/PLAN_test_leftovers_merged_core_release.md` R6 records every consumer's sweep-only stage — this family's seven and
-the private sibling's — as landed or empty (this repository's: empty, measured above), and (c) the per-machine
+the private sibling's — as landed or empty (this repository's: empty, measured above), (c) the per-machine
 *Barrier checklist* of `research/PLAN_test_leftovers_merged_core.md` is recorded for every machine that runs these tests
-(the Ubuntu dev VM is recorded open; the owner's Windows machine is not tested at the time of writing). The stories may
-be written, gated, built and reviewed before that; the merge waits. If the released text differs from what is cited
+(the Ubuntu dev VM is recorded open; the owner's Windows machine is not tested at the time of writing), and (d) the
+one-time hand clean-up of S4 (the old `mcp-…` folders and `outside.txt`) is recorded per machine in the PR — each path
+removed, or kept with a reason. The stories may be written, gated, built and reviewed before that; the merge waits. If the released text differs from what is cited
 here, stop and report — do not resolve the difference in code.
 
 ## S1 — The pin on release `115bbf8` — done by PR #57
@@ -206,28 +214,37 @@ green after the bump; the commands of the old S1 stay the producer branch's pre-
   caller's owner token (rule §1), the claim written FIRST beside it (§2, §3), the folder made exclusively, the cleanup
   registered by construction, exact teardown that never throws (§2), and the three-valued liveness answer, the
   kernel-owner question and the identity read S3's sweep trusts (§3, §4).
-- **Files.** New, all in namespace `Mcp.Tests.Leftovers`, under `tests/Mcp.Tests/Leftovers/`: `Owned.cs`,
+- **Files.** New, all in namespace `Mcp.Tests.Leftovers`, under `tests/Mcp.Tests/Leftovers/`: `OwnedToken.cs` (the
+  token and its row, this repository's own — the one file a copy rewrites, as `O:42`'s `owned-token.mjs`), `Owned.cs`,
   `OwnerToken.cs`, `Owner.cs`, `Liveness.cs`, `Scope.cs`, `Native.cs`, `OwnedDir.cs`, `UnmatchablePid.cs`; tests
-  `OwnedTests.cs`, `OwnerTests.cs`, `LivenessTests.cs`, `ScopeTests.cs`; one property in `tests/Mcp.Tests/Mcp.Tests.csproj`
-  (*Analyzers*). Nothing else outside the folder changes.
+  `RunnerFactsTests.cs` (the measuring test, written and run FIRST), `OwnedTests.cs`, `OwnerTests.cs`,
+  `LivenessTests.cs`, `ScopeTests.cs`. Outside the folder: new `tests/Mcp.Tests/RepositoryRoot.cs`
+  (`LocalCpuBudgetTests.cs:20-27`'s `FindRoot` moved into `internal static class RepositoryRoot`; `LocalCpuBudgetTests`
+  reads it from there — the vectors test needs the mount's path); one property in `tests/Mcp.Tests/Mcp.Tests.csproj`
+  (*Analyzers*); `.github/workflows/ci.yml` — `build-test` gains the submodule step the other two jobs have (the
+  vectors file lives in the mount), and a new `build-test-windows` job (below, *CI*). Nothing else.
 
 **The change.** A block comment at the top of `Owned.cs`, in the voice of `O:1-34`: what the helper owns, the order
 claim → register → create and why, why teardown never throws, why the owner lives beside the folder and never inside
 it, and the two keys with three answers.
 
 ```csharp
+public static class OwnedToken                            // THIS repository's file (O:42); every other file of the folder copies to E2/E6/E7 unchanged but for its namespace line
+{
+    public const string RepoToken = "mcp";                 // rule §1 — the ONLY place the token is written (the guard counts it)
+    public const string RepoRow = "the MCP server";        // the `repository` column of the `mcp` row (R:310): the guard's identity check
+}
+
 public static class Owned
 {
     public const string Prefix = "testsToDelete-";                 // rule §1 — the ONE bare-prefix literal in .cs outside the guard's fixtures (decision 3)
-    public const string RepoToken = "mcp";                         // rule §1 — the ONLY place the token is written (the guard counts it)
-    public const string RepoRow = "the MCP server";                // the `repository` column of the `mcp` row (R:310): the guard's identity check
     public const int MaxName = 63, IdLength = 6, StartToleranceSeconds = 2, MaxClaimBytes = 512, MaxDraws = 3;   // rule §1, §3; O:48-53
-    public static readonly Regex OwnerGrammar = new("^[uw][0-9]{1,10}$");
-    public static string NameBase => Prefix + OwnerToken.This + "-" + RepoToken + "-";   // "testsToDelete-u1000-mcp-"
+    public static readonly Regex OwnerGrammar = new(@"^[uw][0-9]{1,10}\z");   // EVERY anchored regex here ends in \z (never $, which matches before a final \n) and spells [0-9] (never \d, which takes Unicode digits)
+    public static string NameBase => Prefix + OwnerToken.This + "-" + OwnedToken.RepoToken + "-";   // "testsToDelete-u1000-mcp-"
     public static int Room => MaxName - NameBase.Length - 1 - IdLength;                  // the room for `what` under THIS owner (O:132)
     public static Regex Pattern(string? owner = null);   // ^teststodelete[-_]<owner>[-_]mcp[-_], IgnoreCase | CultureInvariant (O:147-150)
     public static readonly Regex LegacyPattern;          // ^teststodelete[-_]mcp[-_] — listed, never collected (O:152)
-    public static Regex FullName(string? owner = null);  // Pattern + ".+[-_][A-Za-z0-9]{6,12}$"
+    public static Regex FullName(string? owner = null);  // Pattern + @".+[-_][A-Za-z0-9]{6,12}\z"
     public static NameForm Classify(string name);        // Owner(owner, token?) | Legacy(token) | None — the ONE second segment (O:170-182)
     public static string TempRoot();                     // Path.GetTempPath() — the one place a test learns the temp root
     public static string NameFor(string what);           // NameBase + what + "-" + IdLength chars of [A-Za-z0-9]
@@ -276,12 +293,20 @@ public static class Scope                                         // rule §3 "s
 }
 
 public readonly record struct Identity(ulong Dev, UInt128 Ino, bool IsDirectory, bool IsLink, bool IsRegular, uint? Uid, DateTimeOffset ChangeTime, DateTimeOffset WriteTime);
-internal static class Native                                      // every call to the OS the contract needs and .NET lacks — nothing else P/Invokes
+internal static partial class Native                              // every call to the OS the contract needs and .NET lacks — nothing else P/Invokes
 {
-    // Linux (libc): getuid; kill(pid, 0); mkdir(path, 0700); statx(AT_FDCWD, path, AT_SYMLINK_NOFOLLOW, STATX_BASIC_STATS, out buffer); rename(from, to)
-    // Windows (kernel32): CreateDirectoryW; CreateFileW (FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, access 0, share all);
-    //   GetFileInformationByHandleEx (FileIdInfo = 18, FileBasicInfo = 0); GetFinalPathNameByHandleW; OpenProcess (PROCESS_QUERY_LIMITED_INFORMATION); GetExitCodeProcess
+    // [LibraryImport("libc", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)], Linux:
+    //   getuid(); kill(pid, 0); mkdir(path, 0x1C0 /* 0o700 — C# has no octal literal; a 0700 would be decimal */);
+    //   statx(AT_FDCWD = -100, path, AT_SYMLINK_NOFOLLOW = 0x100, STATX_BASIC_STATS = 0x7ff, buffer); rename(from, to)
+    // [LibraryImport("kernel32", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)], Windows:
+    //   CreateDirectoryW(path, 0);
+    //   CreateFileW(path, FILE_READ_ATTRIBUTES 0x80 | READ_CONTROL 0x20000, share FILE_SHARE_READ|WRITE|DELETE = 7, 0, OPEN_EXISTING = 3,
+    //               FILE_FLAG_BACKUP_SEMANTICS 0x02000000 | FILE_FLAG_OPEN_REPARSE_POINT 0x00200000, 0);
+    //   GetFileInformationByHandleEx(h, FileBasicInfo = 0 | FileIdInfo = 18, …); GetFinalPathNameByHandleW(h, …, VOLUME_NAME_DOS = 0);
+    //   OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION 0x1000 | SYNCHRONIZE 0x00100000, false, pid); GetExitCodeProcess; WaitForSingleObject(h, 0); CloseHandle; LocalFree
+    // [LibraryImport("advapi32")]: GetSecurityInfo(h, SE_FILE_OBJECT = 1, OWNER_SECURITY_INFORMATION = 0x1, out ownerSid, 0, 0, 0, out descriptor)
     internal static Identity? IdentityOf(string path);            // the entry ITSELF, a link never followed; null when it is not there
+    internal static SecurityIdentifier? OwnerSidOf(string path);  // Windows: GetSecurityInfo on the SAME OPEN_REPARSE_POINT handle as IdentityOf — a link's own owner, never its target's; null on ANY failure
     internal static bool MakeDirectoryExclusively(string path);   // false = already exists (EEXIST / ERROR_ALREADY_EXISTS); any other failure throws
     internal static void RenameOnto(string from, string to);      // Linux rename(2); Windows Directory.Move (exclusive by itself)
 }
@@ -290,7 +315,7 @@ public sealed class OwnedDir : IDisposable                        // one folder;
 {
     public string Path { get; }
     public static OwnedDir Create(string what, string? parent = null, Action<string>? warn = null);
-    internal static OwnedDir Create(string what, string? parent, Action<string>? warn, Func<string> nextName, Action<string>? afterClaim = null);   // test seams: the names to try; a step between the claim and the create
+    internal static OwnedDir Create(string what, string? parent, Action<string>? warn, Func<string> nextName, Action<string>? beforeClaimWrite = null, Action<string>? afterClaim = null);   // test seams: the names to try; a step between the claim's exclusive create and its write; a step between the claim and the folder
     public void Dispose();                                        // Removal.Quietly(Path, warn); idempotent; never throws
     internal static IReadOnlyList<OwnedDir> Undisposed();         // the process-wide registry: created, not yet disposed (S4 audit)
 }
@@ -313,7 +338,8 @@ internal static class Removal
 
 - **The owner token** (`OwnerToken.Compute`, `O:102-110`): `TESTSTODELETE_OWNER` set and non-empty → it must match
   `OwnerGrammar` or `This` throws `InvalidOperationException("owned: TESTSTODELETE_OWNER … is not an owner token")` —
-  the helper then refuses to create anything (no claim, no folder); empty is unset. Windows → `Windows(Environment.UserName)`
+  the helper then refuses to create anything (no claim, no folder); empty is unset; a value with a line end (`u1\n`)
+  is INVALID — nothing is trimmed, and `\z` sees the `\n`. Windows → `Windows(Environment.UserName)`
   (`%USERNAME%`, no domain, `R:21`). Else `"u" + Native.getuid()` — the REAL uid, never the effective one.
 - **`what`** (rule §1): non-empty; no `/`, `\`, NUL, other control character (`< 0x20`, `0x7f`); not starting with
   `-`; MAY hold `-`, spaces and non-ASCII; `what.Length <= Owned.Room`. Invalid ⇒ `ArgumentException` naming the value
@@ -338,8 +364,10 @@ internal static class Removal
   `/proc/self/auxv` (`AT_CLKTCK` = 17; word width `IntPtr.Size`; `BitConverter.IsLittleEndian`), a `/proc` read and no
   child process (`R:116-119`), exactly `O:258-299`. Scenario 10 measures the agreement with `Process.StartTime` and
   records the delta.
-- **`Owner.Parse`** (`O:397-406`): longer than 512 bytes ⇒ null; strip ONE trailing `\r?\n`; match
-  `^([uw][0-9]{1,10}):([^@:\s]+@(linux|macos|windows)):(\d+)(?::(\d+)(?::(\d+))?)?$` (`O:57`); anything else — empty,
+- **`Owner.Parse`** (`O:397-406`): longer than 512 bytes ⇒ null; strip ONE trailing line end by explicit
+  `EndsWith("\r\n")` / `EndsWith("\n")`, never by the regex; match
+  `^([uw][0-9]{1,10}):([^@:\s]+@(linux|macos|windows)):([0-9]+)(?::([0-9]+)(?::([0-9]+))?)?\z` (`O:57`, with `\z` and
+  `[0-9]` for .NET); anything else — empty,
   `hands off`, the old grammar `devbox@linux:4711:1792053744`, `u1000:devbox@beos:1`, `u1000:devbox@linux:1:2:3:4`,
   `U1000:h@linux:1`, a second line, a lone CR — ⇒ null. A digit field with a leading zero (`007`) parses with
   `NonCanonical = true`; a field past 2^53 is stored as `long.MaxValue`, which `State` refuses.
@@ -351,11 +379,17 @@ internal static class Removal
   1. `parent ??= Owned.TempRoot()`; check `what`; at most `MaxDraws` (3) draws of `name = Owned.NameFor(what)`;
      `dir = Path.Combine(parent, name)`; `claim = dir + ".owner"`.
   2. Write the claim: `new FileStream(claim, FileMode.CreateNew, FileAccess.Write, FileShare.None)`, content
-     `written = Owner.RunRecord().Format() + "\n"` (UTF-8, no BOM). An `IOException` while `File.Exists(claim)` ⇒ the
-     name is somebody else's: next draw. Any other failure ⇒ `InvalidOperationException("owned: could not claim <dir>: <cause>")`
-     — nothing was created. **No `Directory.Exists` pre-check**: it is a race, and the exclusive create answers it.
-  3. `Native.MakeDirectoryExclusively(dir)` — Linux `mkdir(dir, 0700)` (only the caller's processes read a scratch
-     folder; no test here runs a child as another user), Windows `CreateDirectoryW`. `false` (the folder already
+     `written = Owner.RunRecord().Format() + "\n"` (UTF-8, no BOM). The create refused because the name is taken —
+     `IOException` with `HResult == unchecked((int)0x80070050)` (`ERROR_FILE_EXISTS`) on Windows, or on Linux
+     `Native.IdentityOf(claim) is not null` after the throw — ⇒ the name is somebody else's: next draw (never
+     `File.Exists`, which follows a link). Any other failure of the create ⇒
+     `InvalidOperationException("owned: could not claim <dir>: <cause>")` — nothing was created. **A write or flush
+     that fails AFTER the exclusive create** (disk full, the handle revoked): capture `Native.IdentityOf(claim)` right
+     after the stream opened, and remove the claim only while its identity is still that one OR its content still
+     equals `written` — a claim another run put under that name since is not ours; then throw the same
+     `could not claim`. **No `Directory.Exists` pre-check**: it is a race, and the exclusive create answers it.
+  3. `Native.MakeDirectoryExclusively(dir)` — Linux `mkdir(dir, 0x1C0)` (0o700: only the caller's processes read a
+     scratch folder; no test here runs a child as another user), Windows `CreateDirectoryW`. `false` (the folder already
      exists under the claimed name) ⇒ ONE warning `owned: <dir> already exists under the name this run claimed — it is
      not this run's and is left alone; drawing another name`, then `Removal.ClaimIfStill(dir, written)`, then the next
      draw. Any other failure ⇒ remove the own claim (inside its own `try`), throw
@@ -381,19 +415,26 @@ internal static class Removal
 - **`OwnedScope`**: a `List<OwnedDir>` behind a lock; `Dispose` disposes in reverse order, each in its own `try`;
   idempotent.
 - **`Scope.IsMine(path)`** — the kernel owner, read from the entry ITSELF, never through a link. POSIX:
-  `Native.IdentityOf(path)?.Uid == Native.getuid()` (`O:223-227`). **Windows, decision 2, both keys:** (1) the entry's
-  final path (`GetFinalPathNameByHandleW` on a `CreateFileW` handle opened with `FILE_FLAG_OPEN_REPARSE_POINT`, so a
-  junction resolves to itself and its PARENTS resolve) is strictly inside the final path of
-  `Environment.GetFolderPath(SpecialFolder.UserProfile)`, compared ordinal-ignore-case by path segments (`O:204-207`);
-  AND (2) `new FileInfo(path).GetAccessControl(AccessControlSections.Owner).GetOwner(typeof(SecurityIdentifier))`
-  equals `WindowsIdentity.GetCurrent().User`. Either read throwing, or either key false ⇒ `false`. A `DirectoryInfo`
-  for a directory. Nothing else in the repository asks who owns a file.
-- **Elevated runs (Windows).** A process elevated by UAC creates files owned by `BUILTIN\Administrators`, not by the
-  user's SID, so key (2) fails for the run's OWN files: `IsMine` is false, the sweep lists this run's old folders as
-  `foreign-uid` and never removes them, and the audit's claim scan sees nothing (its registry check still does).
-  Teardown by exact name is unaffected. Kept, by decision 2: a person removes an elevated run's leftovers after
-  looking. Whether Git for Windows' `stat %u` (`J:133-135`) reads such entries as the caller's is NOT verified — the
-  janitor is forced to `--dry-run` on Windows anyway (`J:22-24`). Scenario 14 records what an elevated run does.
+  `Native.IdentityOf(path)?.Uid == Native.getuid()` (`O:223-227`). **Windows, decision 2, both keys, on ONE handle:**
+  `CreateFileW` with the values in `Native` (`FILE_FLAG_OPEN_REPARSE_POINT`, so a junction or symlink is the entry
+  itself and its PARENTS still resolve); (1) `GetFinalPathNameByHandleW` of that handle is strictly inside the final
+  path of `Environment.GetFolderPath(SpecialFolder.UserProfile)` (its own handle), compared ordinal-ignore-case by
+  path segments (`O:204-207`); AND (2) `GetSecurityInfo(handle, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION)` — the
+  owner of the OPEN entry, never of a link's target — read into `new SecurityIdentifier(ptr)` and `LocalFree`d, equals
+  `WindowsIdentity.GetCurrent().User`. A null owner, either read throwing, or either key false ⇒ `false`. Namespaces:
+  `System.Security.Principal` (`SecurityIdentifier`, `WindowsIdentity`), `System.Security.AccessControl`; the
+  path-based `System.IO.FileSystemAclExtensions.GetAccessControl` (in-box in net10.0, no package) is NOT used — it
+  opens by path and follows a link. Nothing else in the repository asks who owns a file. `Dispose` never asks: teardown
+  removes by the run's own exact path, whoever the kernel says owns it.
+- **Elevated runs (Windows) — measured first, then asserted.** A process elevated by UAC creates files owned by
+  `BUILTIN\Administrators`, not by the user's SID, so key (2) fails for the run's OWN files: `IsMine` is false, the
+  sweep lists this run's old folders as `foreign-uid` and never removes them, and the audit's claim scan sees nothing
+  (its registry check still does). Teardown by exact name is unaffected. Kept, by decision 2: a person removes an
+  elevated run's leftovers after looking. Whether Git for Windows' `stat %u` (`J:133-135`) reads such entries as the
+  caller's is NOT verified — the janitor is forced to `--dry-run` on Windows anyway (`J:22-24`). GitHub's
+  `windows-latest` runner is elevated (facts, *CI*), so **scenario 0 runs before any S2 code** and prints what the
+  runner's files are owned by; every Windows scenario then asserts the MEASURED answer — `IsMine` true where the owner
+  SID is the user's, false (and `foreign-uid` in S3) where it is `Administrators` — never a guessed one.
 - **`Scope.ReadClaimText(file, mine)`** — the ONE safe read (`O:470-491`): `Native.IdentityOf(file)` null ⇒ `Missing`;
   not a regular file (a FIFO would block, a link is not followed) ⇒ `Unreadable`; `!mine(file)` ⇒
   `Unreadable("foreign-uid")`; else `FileStream(FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete)`
@@ -402,22 +443,31 @@ internal static class Removal
   into a 256-byte buffer with the kernel's fixed layout (`stx_mask` u32 @0, `stx_nlink` u32 @16, `stx_uid` u32 @20,
   `stx_mode` u16 @28, `stx_ino` u64 @32, `stx_ctime` @96 and `stx_mtime` @112 as `{ i64 sec, u32 nsec }`,
   `stx_dev_major` u32 @136, `stx_dev_minor` u32 @140); `Dev` = major << 32 | minor; type from `stx_mode & 0xF000`
-  (`0x8000` regular, `0x4000` directory, `0xA000` link); errno `ENOENT` ⇒ null, any other ⇒ throw. `statx` is
-  exported by glibc ≥ 2.28 and musl ≥ 1.1.24 — the Ubuntu runner, WSL and every supported .NET 10 Linux. Windows:
+  (`0x8000` regular, `0x4000` directory, `0xA000` link); **`stx_mask` must contain every bit this reads —
+  `STATX_TYPE 0x1 | STATX_MODE 0x2 | STATX_UID 0x8 | STATX_MTIME 0x40 | STATX_CTIME 0x80 | STATX_INO 0x100` — else
+  throw (fail closed: a file system that answers without a field is no identity)**; errno `ENOENT` ⇒ null, any other
+  ⇒ throw. `statx` is exported by glibc ≥ 2.28 — the Ubuntu runner, WSL and every supported .NET 10 Linux; musl: not
+  measured (the round-2 judge names 1.2.5). Windows:
   `CreateFileW` + `GetFileInformationByHandleEx(FileIdInfo)` (`VolumeSerialNumber` u64, `FileId` 128-bit — ReFS needs
   the wide one) and `(FileBasicInfo)` for `ChangeTime` / `LastWriteTime` and the attributes; `ERROR_FILE_NOT_FOUND` /
   `ERROR_PATH_NOT_FOUND` ⇒ null. `Uid` is null on Windows. **macOS: not built** — no CI leg, no developer machine, and
   Darwin's `lstat` layout differs by symbol (`lstat$INODE64` on x86-64); `Owner.This` throws
   `PlatformNotSupportedException` there until someone measures it, and the facts of this document say so.
 - **`Liveness.ProbeProcess(pid)`** — the reference's probe (`O:332-342`), never `Process.GetProcessById` (its Linux
-  answer under `hidepid` and its Windows access rules are .NET's, not the contract's): `pid < 1` or `> 2^53` ⇒
-  `Unknown`; Windows and `pid == 1` ⇒ `Unknown`. Linux: `Native.kill(pid, 0)` — `0` ⇒ `Live`; errno `ESRCH` (3) ⇒
-  `Dead`; `EPERM` or anything else ⇒ `Unknown`. Windows: `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION = 0x1000, false, pid)`
-  — null with `ERROR_INVALID_PARAMETER` (87) ⇒ `Dead`; null with anything else (access denied) ⇒ `Unknown`; a handle
-  whose `GetExitCodeProcess` is not `STILL_ACTIVE` (259) ⇒ `Dead`, else `Live`; the handle closed — the same shape as
-  libuv's `uv_kill(pid, 0)` behind the reference's `process.kill`. Then, Linux and `Live` only: `Start` =
-  `StartFromProcStat(/proc/<pid>/stat, btime, ClockTicksPerSecond())` (null when unreadable). No `HasExited`, no
-  `Process.Start`, nothing that spawns.
+  answer under `hidepid` and its Windows access rules are .NET's, not the contract's). **Bounds, never an unchecked
+  cast:** `pid < 1` or `> 2^53` ⇒ `Unknown`; Linux `pid > int.MaxValue` ⇒ `Unknown` (`kill` takes an `int`); Windows
+  `pid > uint.MaxValue` ⇒ `Unknown` (`OpenProcess` takes a `DWORD`) and `pid == 1` ⇒ `Unknown`. Linux:
+  `Native.kill((int)pid, 0)` — `0` ⇒ `Live`; errno `ESRCH` (3) ⇒ `Dead`; `EPERM` or ANY other errno ⇒ `Unknown`.
+  Windows: `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, false, (uint)pid)` — null with
+  `ERROR_INVALID_PARAMETER` (87) ⇒ `Dead`; null with `ERROR_ACCESS_DENIED` (5) or anything else ⇒ `Unknown`; with a
+  handle (closed in `finally`): `GetExitCodeProcess` fails ⇒ `Unknown`; code ≠ `STILL_ACTIVE` (259) ⇒ `Dead`; 259 ⇒
+  `WaitForSingleObject(h, 0)`: `WAIT_OBJECT_0` (0) ⇒ `Dead` (a process that exited with code 259 is signalled),
+  `WAIT_TIMEOUT` (0x102) ⇒ `Live`, anything else ⇒ `Unknown`. That is the shape of libuv's `uv__kill` with signal 0
+  (`OpenProcess` with both rights, `GetExitCodeProcess`, then the wait for the 259 case), which the reference's
+  `process.kill(pid, 0)` calls — with the one difference that libuv's "any other error" becomes an errno and the
+  reference reads every non-`ESRCH` errno as `unknown` (`O:338`), exactly as here. Then, Linux and `Live` only:
+  `Start` = `StartFromProcStat(/proc/<pid>/stat, btime, ClockTicksPerSecond())` (null when unreadable). No
+  `HasExited`, no `Process.Start`, nothing that spawns.
 - **`Liveness.State(owner, probe, facts)`** — rule §3's order exactly (`O:531-552`): `owner is null` ⇒ `Unknown`;
   `NonCanonical` ⇒ `Unknown`; `owner.Token != (facts.CallerOwner ?? OwnerToken.This)` ⇒ `Unknown`; `facts.NameOwner`
   given and `!= owner.Token` ⇒ `Unknown`; `facts.KernelMine == false` ⇒ `Unknown`; `owner.Host` ≠ `Owner.This.Host`
@@ -427,22 +477,47 @@ internal static class Removal
   `Unknown`; either start null ⇒ `Live`; `|Δ| <= StartToleranceSeconds` ⇒ `Live`; otherwise `Unknown`.
 - **`UnmatchablePid`** — a port of `dew_flow_conventions · tools/lib/unmatchable-pid.mjs:32-49`: `Next(i = 0)` =
   Windows `777770 + 4·i` (≡ 2 mod 4), Linux `pid_max + 1 + i` (`/proc/sys/kernel/pid_max`, else 4194304);
-  `AssertNoSuchProcess(pid)` asserts the premise through `ProbeProcess` (`Dead`). **A test never takes a dead owner
-  from a process it started and killed** — the OS hands that pid to the next process (measured by E1 on Windows, one
-  run in fifteen).
-- **Analyzers.** `File.SetUnixFileMode` is `[UnsupportedOSPlatform("windows")]`; the ACL and `WindowsIdentity` APIs
-  are `[SupportedOSPlatform("windows")]`: every such call sits under `OperatingSystem.IsWindows()` / `IsLinux()` or
-  `CA1416` breaks the build. `Native.cs` uses `[LibraryImport]` with `SetLastError = true` and
-  `Marshal.GetLastPInvokeError()`; its generated marshalling is unsafe code, so `Mcp.Tests.csproj` gains
-  `<AllowUnsafeBlocks>true</AllowUnsafeBlocks>` — the test project only, the one change outside the folder. Every
-  async call in a test takes `TestContext.Current.CancellationToken`.
+  `AssertNoSuchProcess(pid)` asserts the premise through `ProbeProcess` (`Dead`), before AND after the test that
+  uses it. **Windows pids are handle-table indices and the kernel clears the two low tag bits**, so
+  `OpenProcess(4n + 2)` opens process `4n` — which is why the premise is asked the way the probe asks (`Dead` for
+  `777770` means `777768` is not alive either) and why scenario 13 first MEASURES the aliasing on the machine:
+  `ProbeProcess(Environment.ProcessId + 2)` must answer `Live`. **A test never takes a dead owner from a process it
+  started and killed** — the OS hands that pid to the next process (measured by E1 on Windows, one run in fifteen).
+- **Fail-closed edges, stated once:** an identity that cannot be read never compares equal to anything (`S:135`:
+  `null` on either side is "changed"); any probe error other than "no such process" (`ESRCH`, `ERROR_INVALID_PARAMETER`)
+  is `Unknown`; the READER's own namespace missing on Linux makes every record `Unknown` (`owner.Ns != null` is not
+  enough); any exception on a P/Invoke path — `IdentityOf`, `OwnerSidOf`, the final path, `kill`, `OpenProcess` —
+  gives that path's fail-closed answer (`IsMine` false, `ReadClaimText` unreadable, the probe `Unknown`), never a
+  throw out of the sweep and never a `Gone`.
+- **Analyzers.** `File.SetUnixFileMode` is `[UnsupportedOSPlatform("windows")]`; `SecurityIdentifier` compare and
+  `WindowsIdentity` are `[SupportedOSPlatform("windows")]`: every such call sits under `OperatingSystem.IsWindows()` /
+  `IsLinux()` or `CA1416` breaks the build. `Native.cs` is `static partial` with `[LibraryImport]` (`SetLastError = true`,
+  `StringMarshalling.Utf8` for libc, `Utf16` for kernel32/advapi32) and `Marshal.GetLastPInvokeError()`; its generated
+  marshalling is unsafe code, so `Mcp.Tests.csproj` gains `<AllowUnsafeBlocks>true</AllowUnsafeBlocks>` — the test
+  project only. Every async call in a test takes `TestContext.Current.CancellationToken`.
+- **CI (this story).** `build-test` gains, before `Build`, the step the other two jobs already have —
+  `git submodule update --init --depth 1 .claude/rules/shared` — because the vectors test and S4's token check read
+  the mount and fail without it. A new job `build-test-windows` on `windows-latest`: checkout, the same submodule
+  step, `setup-dotnet` 10.0.x, `dotnet build dew_flow_mcp.slnx -c Release`, then
+  `.\tests\Mcp.Tests\bin\Release\net10.0\Mcp.Tests.exe --filter-namespace Mcp.Tests.Leftovers` — the Windows half of
+  this epic is proven by a machine, not by hand.
 
 **Scenarios** (RED first — write the tests against the signatures above before the types exist and record the build
 failure, then stub the types and record each scenario failing on its assertion before the body is written). Every
 scenario that counts what a call left behind passes a PRIVATE `parent` (an `OwnedDir` of its own). Names in tests are
 built at run time from `Owned.NameBase`, `Owned.Prefix` or the word in two pieces (`"teststo" + "delete"`, `O:170`),
-never as bare-prefix literals (decision 3, S4 sc. 3). `Other` = the caller's token with its last digit changed.
+never as bare-prefix literals (decision 3, S4 sc. 3). `Other` = the caller's token with its last digit changed. The
+mounted `tools/fixtures/owner-vectors.json` is read through `RepositoryRoot.Path`; **a missing or unreadable vectors
+file FAILS the test that needs it, never skips** (an uninitialised submodule is a broken setup, not a clean one).
 
+0. **The runner's facts, measured before any S2 code** (`RunnerFactsTests.cs`; it asserts nothing about the helper,
+   it RECORDS): on Windows, create one file under `Path.GetTempPath()` (`// testsToDelete-exempt: raw-temp — the
+   measuring test must see the raw temp root once`) and print, through `TestContext.Current.AddWarning`, the file's
+   owner SID (`Native.OwnerSidOf`'s call, inlined here until S2 exists), `WindowsIdentity.GetCurrent().User`,
+   `.Owner`, whether the two SIDs are equal, whether the token is elevated (`new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator)`),
+   and `%TEMP%`'s final path against the profile; on Linux print `getuid()`, `/proc/1` visibility and the auxv tick
+   rate. Run on the new `build-test-windows` job and on the Linux job; the output goes in the PR, and every Windows
+   assertion below is written against it.
 1. **A name carries the prefix, the owner, the token, what, and six random characters.** `Owned.NameFor("pg")`
    matches `^testsToDelete-[uw][0-9]{1,10}-mcp-pg-[A-Za-z0-9]{6}$` and starts with `Owned.NameBase`; two calls differ;
    `NameFor("a-b ")` is accepted; `NameFor(new string('x', Owned.Room))` is 63 characters. `FullName()` matches every
@@ -454,8 +529,8 @@ never as bare-prefix literals (decision 3, S4 sc. 3). `Other` = the caller's tok
 3. **The owner token.** `Compute(windows: false, uid: 1000, …)` = `u1000`; `Compute(true, null, "Alice", …)` =
    `w735577801`; every vector of the mounted `owner-vectors.json` `windows token` table (w01–w13) through `Windows`;
    `AsciiLower("SØREN")` = `sØREN`; env `TESTSTODELETE_OWNER=u42` ⇒ `u42`; `=` (empty) ⇒ the real token; `=root`,
-   `=u`, `=u12345678901`, `=U1` ⇒ throws naming the grammar; `OwnerToken.This` matches `OwnerGrammar` and, off
-   Windows, equals `"u" + Native.getuid()`.
+   `=u`, `=u12345678901`, `=U1`, `="u1\n"`, `=" u1"` ⇒ throws naming the grammar (RED against a `$`-anchored regex:
+   `u1\n` passes); `OwnerToken.This` matches `OwnerGrammar` and, off Windows, equals `"u" + Native.getuid()`.
 4. **A folder and its claim, side by side, never inside.** `OwnedDir.Create("path Unicode пробел", parent)` makes a
    folder whose name starts with `NameBase + "path Unicode пробел-"`, empty, and a sibling `<folder>.owner` whose
    text `Parse`s to `Owner.RunRecord()` and ends in one `\n`.
@@ -477,11 +552,17 @@ never as bare-prefix literals (decision 3, S4 sc. 3). `Other` = the caller's tok
    it, and the call returned the second name. (c) A squatted folder whose claim was REPLACED between our write and the
    collision (the `afterClaim` seam rewrites it) ⇒ that claim stays (`ClaimIfStill` refuses). (d) A `parent` that does not exist ⇒
    `InvalidOperationException` starting `owned: could not claim`, and nothing named `NameBase` appears anywhere.
-   RED against `Directory.CreateDirectory`: (b) adopts the squatter.
+   (e) **A write that fails after the exclusive create:** the `beforeClaimWrite` seam throws `IOException` ⇒ the call
+   throws `could not claim`, and NO file named `NameBase` remains in the parent (the empty claim was removed); the seam
+   instead deletes the empty claim and writes another text under the same name ⇒ the call throws, and THAT file still
+   exists with its text (another identity, another content: not ours). RED against `Directory.CreateDirectory`: (b)
+   adopts the squatter; RED for (e): an empty claim is left behind.
 10. **The record round-trips, carries what the OS gives, and refuses everything else.** `Parse(RunRecord().Format() + "\r\n")`
-    equals `RunRecord()`; `Owner.This.Host` matches `^[^@:\s]+@(linux|macos|windows)$`, starts with
+    equals `RunRecord()`; `Owner.This.Host` matches `^[^@:\s]+@(linux|macos|windows)\z`, starts with
     `HostName(Dns.GetHostName())`, and under WSL (`WSL_DISTRO_NAME` set) holds `~` + the distribution; the `hostnames`
-    vectors (h01–…) through `HostName`; the `record` vectors (r-…) through `Parse` (valid ⇔ not null); on Linux `Start`
+    vectors (h01–…) through `HostName`; the `record` vectors (r-…) through `Parse` (valid ⇔ not null); every
+    `grammar` vector (g01–g14, i01–i29 — the LEGACY grammar, `<host>@<os>:<pid>[:<start>]`) through `Parse` ⇒ null,
+    valid or not: the merged reader never reads the old form; on Linux `Start`
     and `Ns` are not null, `Ns` equals the inode `readlink /proc/self/ns/pid` prints (read by the test through
     `LinkTarget`), `ClockTicksPerSecond()` equals the value `getconf CLK_TCK` prints (spawned ONCE by the test — a test
     may, the helper may not), and **`Start` is within 2 s of `Process.GetCurrentProcess().StartTime.ToUniversalTime()`
@@ -497,28 +578,42 @@ never as bare-prefix literals (decision 3, S4 sc. 3). `Other` = the caller's tok
     Unknown; this host name with the other OS tag ⇒ Unknown; this host upper-cased ⇒ evaluated; on Linux `Ns` null
     ⇒ Unknown and `Ns + 1` ⇒ Unknown; pid 0, `long.MaxValue` ⇒ Unknown with the probe never called; `windows:1` ⇒
     Unknown; `Dead` ⇒ Gone, and `Dead` with `Hidepid = true` ⇒ Unknown; `Unknown`, a throwing probe ⇒ Unknown; alive
-    with either start null ⇒ Live; 2 s apart either way ⇒ Live; 3 s and 10⁶ s apart ⇒ Unknown — never Gone.
+    with either start null ⇒ Live; 2 s apart either way ⇒ Live; 3 s and 10⁶ s apart ⇒ Unknown — never Gone. **Then
+    the mounted vectors:** `scope` (s01–s15) — `nameOwner`, `recordOwner`, `callerOwner`, `kernelMine`, `hidepid` into
+    `Facts` and the record; `ns` `same` = `Owner.This.Ns`, `other` = `Ns + 1`, `absent` = none, `leading-zero` = the
+    text `0<ns>` (NonCanonical); `pid` `absent` / `present` / `refused` = an injected probe answering `Dead` / `Live` /
+    `Unknown` — each `expected` matches (`s09`, `s10`, `s15` are Linux-reader cases: on Windows the record carries no
+    namespace and they are asserted `Unknown` only where `Owner.This.Host` ends `@linux`); `verdicts` (v01–v26) —
+    `host` `same` / `same-case` (`Owner.This.Host` case-swapped) / `foreign-name` / `foreign-os`; `pid` as above;
+    `startDelta` added to the probe's start when `liveStart`; `pidText` and `ownerText` (`{HOST}`, `{NAME}` replaced)
+    as the record text, behind `OwnerToken.This + ":"` — each `expected` matches, the `sides: ["node"]` ones included
+    (this reader compares starts, like Node).
 13. **The real probe and the real kernel owner.** `State(Owner.This, ProbeProcess)` ⇒ Live (through the start
-    comparison on Linux); `UnmatchablePid.Next()` with the premise asserted ⇒ `ProbeProcess` = `Dead` and `State` =
-    Gone; on Linux as a non-root user `ProbeProcess(1)` ⇒ `Unknown` (EPERM), `Assert.Skip` as root; `Scope.IsMine` of a
-    file this test made ⇒ true (Windows: `Assert.Skip` with the message `elevated: the owner is Administrators` when
-    `GetOwner` of that file is not the user SID — scenario 14); a `mine` seam answering false makes `ReadClaimText` of
-    the same file `Unreadable("foreign-uid")`; a DIRECTORY named like a claim ⇒ `Unreadable` (the regular-file check;
-    a FIFO needs `mkfifo`, which .NET cannot make without a child — not provoked, the directory covers the branch); a
-    513-byte claim ⇒ `Parse` null; `Native.IdentityOf`: a folder equals itself
-    after `Directory.Move` (same `Dev`, `Ino`), differs from a re-created folder of the same name, a symlink reports
-    `IsLink` and its own identity, a missing path ⇒ null, on Linux `Uid == getuid()`.
-14. **Elevated run (Windows, by hand, recorded in the PR; not a merge condition).** Run the executable from an
-    elevated prompt once: scenario 13 skips with its message, the sweep's report of a planted old own folder says
-    `foreign-uid`, the folder still exists; from a normal prompt the same plant is collected. Both observations go in
-    the PR, with whether `stat %u` of Git for Windows' bash reads the elevated entry as the caller's.
+    comparison on Linux); on Windows FIRST `ProbeProcess(Environment.ProcessId + 2)` ⇒ `Live` (the tag-bit aliasing,
+    measured; a machine where it is `Dead` makes the unmatchable premise unsound — stop and report); then
+    `UnmatchablePid.Next()` with the premise asserted before and after ⇒ `ProbeProcess` = `Dead` and `State` = Gone;
+    `ProbeProcess(0)`, `(-1)`, `(2^53 + 1)`, on Linux `(int.MaxValue + 1L)`, on Windows `(uint.MaxValue + 1L)` ⇒
+    `Unknown` with no native call; on Linux as a non-root user `ProbeProcess(1)` ⇒ `Unknown` (EPERM), `Assert.Skip` as
+    root; `Scope.IsMine` of a file this test made ⇒ the MEASURED answer of scenario 0 (true where the owner SID is the
+    user's, false where it is `Administrators` — asserted, not skipped); `IsMine` of a symlink to that file ⇒ judged on
+    the LINK's own owner and identity, and `Native.IdentityOf` of it reports `IsLink`; a `mine` seam answering false
+    makes `ReadClaimText` of the same file `Unreadable("foreign-uid")`; a DIRECTORY named like a claim ⇒ `Unreadable`
+    (the regular-file check; a FIFO needs `mkfifo`, which .NET cannot make without a child — not provoked, the
+    directory covers the branch); a 513-byte claim ⇒ `Parse` null; `Native.IdentityOf`: a folder equals itself after
+    `Directory.Move` (same `Dev`, `Ino`), differs from a re-created folder of the same name, a missing path ⇒ null, on
+    Linux `Uid == getuid()` and a `stx_mask` without `STATX_INO` (an injected buffer through the pure parser) ⇒ throws.
+14. **Elevated run (Windows, by hand, recorded in the PR; not a merge condition).** On the owner's machine, run the
+    executable from an elevated prompt once and from a normal prompt once: the two answers of scenario 13's `IsMine`
+    line, the sweep's report of a planted old own folder (`foreign-uid` and kept under one, collected under the other,
+    where the measured owners differ), and whether `stat %u` of Git for Windows' bash reads the elevated entry as the
+    caller's. The CI runner's answer is scenario 0's.
 
 - **Commands.** `node .claude/rules/shared/tools/low-priority.mjs dotnet build dew_flow_mcp.slnx -c Debug -m:4`;
   `node .claude/rules/shared/tools/low-priority.mjs ./tests/Mcp.Tests/bin/Debug/net10.0/Mcp.Tests.exe --filter-namespace "Mcp.Tests.Leftovers"`;
   on Linux (WSL or CI) `./tests/Mcp.Tests/bin/Debug/net10.0/Mcp.Tests --filter-namespace "Mcp.Tests.Leftovers"`; the whole executable.
-- **DoD.** Build at 0 warnings; every scenario observed RED, then GREEN, on Windows and on the Linux CI runner
-  (scenario 6, 10 and 13 run a different branch on each); the constants table of S1 in the commit message; the module
-  has no caller yet — S3 and S4 adopt it.
+- **DoD.** Scenario 0's output recorded in the PR before the first helper commit; build at 0 warnings; every scenario
+  observed RED, then GREEN, on the Windows job and on the Linux job (scenario 6, 10 and 13 run a different branch on
+  each); the constants table of S1 in the commit message; the module has no caller yet — S3 and S4 adopt it.
 
 ## S3 — The start-of-run sweep, as an assembly fixture
 
@@ -541,12 +636,14 @@ never as bare-prefix literals (decision 3, S4 sc. 3). `Other` = the caller's tok
   `Liveness.State(record, cached, new Facts(CallerOwner: owner, NameOwner: nameOwner, KernelMine: true))` (`S:444-445`).
   1. **Relation of a name** (`S:61-69`): `Owned.Classify` — owner form with token `mcp`: `own` when its owner is the
      caller's, else `foreign`; legacy form with token `mcp`: `legacy`; anything else: not this sweep's business, silent.
-  2. **Folders** (`S:340-374`). Depth-1 entries of `Tmp` that are REAL directories (`ReparsePoint` not set — a link is
-     never judged). `foreign` ⇒ `Listed` `foreign: folder <name> — owner <o>`, nothing else. `legacy` ⇒ `Preserved`
+  2. **Folders** (`S:340-374`). Depth-1 entries of `Tmp` whose `Native.IdentityOf` says `IsDirectory && !IsLink` —
+     a symlink or junction is never a candidate, whatever its name (`S:345`; `janitor.sh:538`), and is never removed
+     even when its name's claim is `gone`. `foreign` ⇒ `Listed` `foreign: folder <name> — owner <o>`, nothing else. `legacy` ⇒ `Preserved`
      `legacy` and `Listed` `legacy: folder <name> — remove with: <command>` (`S:240-250`'s command for this platform)
      — **listed only, never collected** (rule §4 allows preserving more, `R:174-175`; this repository never produced
      a legacy name). A `.git` FILE ⇒ `other clone`. Otherwise **capture first** (`S:149-152`): `Native.IdentityOf(dir)`
-     and the claim text through `Scope.ReadClaimText`; then the decision table (`S:72-81`): age =
+     and the claim text through `Scope.ReadClaimText(claim, o.Mine)` — the sweep's `Mine` seam reaches the claim read
+     too, never only the folder; then the decision table (`S:72-81`): age =
      `Now − LastWriteTimeUtc` `< MinAge` ⇒ `young`; `!Mine(dir)` ⇒ `foreign-uid` + `Listed` `foreign:`; no claim ⇒
      `unmarked` + `Listed` `unmarked: folder <name>` — **never collected, however old** (`R:75-76`); unreadable ⇒
      `unreadable` (or `foreign-uid`); `State` ⇒ `Gone` remove, `Live` ⇒ `live`, `Unknown` ⇒ `foreign host` when the
@@ -561,15 +658,20 @@ never as bare-prefix literals (decision 3, S4 sc. 3). `Other` = the caller's tok
      as a mode-700 placeholder, `Hooks.AfterReserve`, `Native.RenameOnto(quarantine, original)` (`rename(2)` onto an
      empty directory is atomic; `Directory.Move` refuses an existing target), on failure remove the placeholder only
      while it is still a real, empty directory of the caller's.
-  4. **Orphan claims** (`S:376-404`): files `*.owner` of `Tmp` whose folder is absent and whose age ≥ `MinAge`;
-     relation as above (`foreign` ⇒ `Listed foreign: claim …`; `legacy` ⇒ `Listed legacy: claim …`); `own` ⇒ the same
+  4. **Orphan claims** (`S:376-404`): entries `*.owner` of `Tmp` that are REGULAR files (`IsRegular && !IsLink` —
+     `EnumerateFiles` returns symlinks too, `S:379`), whose folder is absent and whose age ≥ `MinAge`; relation as above (`foreign` ⇒ `Listed foreign: claim …`; `legacy` ⇒ `Listed legacy: claim …`); `own` ⇒ the same
      decision with `Mine(claim)` and the parsed record — `Gone` ⇒ the claim is deleted; `live`, `unknown`, `foreign host`,
      `unreadable` keep it. Age only selects: a young orphan is a creation in progress (S2 claims first).
   5. **Quarantines first** (`S:406-419`): entries matching `^\.(.+)\.teststodelete-quarantine-(\d+)-([0-9a-f]+)$`
      (case-insensitive) that are real directories, whose inner name's relation is not "other", that are `Mine`, whose
      renamer `Probe` says `Dead`, and whose `ChangeTime` AND `WriteTime` (from `Native.IdentityOf`) are both past the
      window ⇒ restored under the inner name when free, `Listed` `notice: restored <name> from a quarantine a killed
-     sweep left`; taken ⇒ `Preserved` `quarantine-conflict`.
+     sweep left`; taken ⇒ `Preserved` `quarantine-conflict` AND `Listed`
+     `quarantine-conflict: folder <quarantine> — its name <name> is taken; remove by hand with: <command>` (the
+     platform's command for the quarantine folder alone). **Every later run retries the restore; while the name is
+     taken the quarantine stays, listed, and the sweep never removes it** (`R:185-187`: restore or list — a quarantine
+     is a folder this sweep judged `gone` once, but the re-check that authorises its removal cannot run under a name
+     it no longer holds).
   It never touches a name `Classify` does not put in this repository's scope: not another token, not the bare prefix,
   not the old `mcp-…` names (below).
 - `LeftoversSweepFixture` — `public sealed class`, public parameterless constructor (xUnit v3 creates it **before any
@@ -599,10 +701,15 @@ unless stated (on Linux the namespace must be this reader's or the verdict is `u
    `Listed` line `foreign: folder …`; claimed by `other@<tag>:…` ⇒ `foreign host`; this host with the other OS tag ⇒
    `foreign host`; on Linux, claimed by a dead pid with NO namespace ⇒ `unknown` and with `Ns + 1` ⇒ `unknown`; claim
    text `hands off` ⇒ `unreadable`; a 513-byte claim ⇒ `unreadable`; the OLD grammar `<host>@<os>:<dead pid>` ⇒ `unreadable`;
-   `Mine` seam false for one folder ⇒ `foreign-uid` and a `foreign:` line; a dead pid with a start 3 s off ⇒ `unknown`;
-   YOUNG and dead-claimed ⇒ `young`; `.git` file and no claim ⇒ `other clone`; **unmarked and old ⇒ `unmarked`, an
-   `unmarked:` line, and the folder still exists** (RED against E1's rule, which removed it); dead-claimed ⇒ removed. Each
-   preserved entry carries exactly its reason; every preserved folder still exists afterwards.
+   `Mine` seam false for one folder ⇒ `foreign-uid` and a `foreign:` line, and `Mine` false for the CLAIM only (the
+   seam answers by path) ⇒ `foreign-uid` too; claimed by THIS process's pid with a start 3 s off ⇒ `unknown`; a dead
+   pid with ANY start, 3 s off included ⇒ removed (`O:548`: dead is answered before the starts are compared); YOUNG
+   and dead-claimed ⇒ `young`; `.git` file and no claim ⇒ `other clone`; **unmarked and old ⇒ `unmarked`, an
+   `unmarked:` line, and the folder still exists** (RED against E1's rule, which removed it); **a SYMLINK (Windows: a
+   junction; `Assert.Skip` when none can be made) under an own name, old, with a sibling claim of a dead pid ⇒ not in
+   `Removed`, not in `Preserved`, the link still there, its target folder and the target's `keep.txt` intact, and the
+   claim untouched**; dead-claimed ⇒ removed. Each preserved entry carries exactly its reason; every preserved folder
+   still exists afterwards.
 3. **Anchored and scoped.** Old, dead-claimed or unmarked: `"x-" + NameBase + "a-abc123"`, `"teststo" + "deletemcp-a-abc123"`,
    `Owned.Prefix + OwnerToken.This + "-conventions-a-abc123"`, `Owned.Prefix + OwnerToken.This + "-mcpx-a-abc123"`,
    `"mcp-workspace-abc123"` all survive untouched and appear in no list; `Owned.Prefix + "mcp-a-abc123"` (legacy) survives
@@ -613,12 +720,16 @@ unless stated (on Linux the namespace must be this reader's or the verdict is `u
    THIS process ⇒ `live`; by an unmatchable pid ⇒ removed; by `other@<tag>` ⇒ `foreign host`; holding `hands off` ⇒
    `unreadable`. Only the `gone` one disappears. A young dead-claimed orphan ⇒ kept, unlisted; an old `Other`-named one
    ⇒ a `foreign: claim …` line, kept. RED against an age-only rule: three of the four vanish.
-5. **Removal is by identity.** (a) Through `Hooks.AfterVerdict` the test deletes the judged folder and creates a new one
-   under the same name ⇒ `replaced`, the new folder untouched. (b) Through `Hooks.AfterRename` the test rewrites the
-   claim ⇒ the folder is restored under its name, `replaced`, nothing removed. (c) A quarantine left by a "killed sweep"
-   (built by hand: `.<own name>.teststodelete-quarantine-<unmatchable pid>-deadbeef`, both stamps past the window) ⇒
-   restored, `notice: restored …`; the same with the original name TAKEN ⇒ `quarantine-conflict`, both untouched; a
-   quarantine whose renamer is THIS process ⇒ untouched, unlisted. (d) After every removal no `.*.teststodelete-quarantine-*`
+5. **Removal is by identity.** (a) Through `Hooks.AfterVerdict` the test MOVES the judged folder aside, creates a
+   new folder under the old name, and only then deletes the moved one (an inode freed first is reused by the next
+   `mkdir` on ext4, which would make the two identities equal) ⇒ `replaced`, the new folder untouched. (b) Through
+   `Hooks.AfterRename` the test rewrites the claim ⇒ the folder is restored under its name, `replaced`, nothing
+   removed. (c) A quarantine left by a "killed sweep" (built by hand in its OWN `Tmp`:
+   `.<own name>.teststodelete-quarantine-<unmatchable pid>-deadbeef`; its `ChangeTime` cannot be set from .NET, so the
+   window is passed by `Now = DateTimeOffset.UtcNow + 11 min` in `SweepOptions`) ⇒ restored, `notice: restored …`;
+   the same with the original name TAKEN ⇒ `quarantine-conflict` in `Preserved` and a `quarantine-conflict:` line
+   naming the command, both untouched, and a SECOND `Run` with the name freed ⇒ restored (the retry); a quarantine
+   whose renamer is THIS process ⇒ untouched, unlisted. (d) After every removal no `.*.teststodelete-quarantine-*`
    entry remains in `Tmp`.
 6. **The sweep never fails the run.** `Run` on a `Tmp` that does not exist ⇒ one `Errors` entry, no throw; a folder the
    `Mine` seam throws on ⇒ one `Errors` entry and the next folder still judged; the internal fixture constructor with a
@@ -638,22 +749,26 @@ unless stated (on Linux the namespace must be this reader's or the verdict is `u
   exemption), a guard keeps it so — red on every class of rule §7, on a token that is unregistered, of the owner
   grammar or another repository's, and on a scan of nothing — and a run that leaves a folder it claimed is a red run.
 - **Files.** New `tests/Mcp.Tests/Leftovers/LeftoversGuard.cs`, `LeftoversGuardTests.cs`, `LeftoversAudit.cs`,
-  `LeftoversAuditTests.cs`; new `tests/Mcp.Tests/RepositoryRoot.cs`; `LocalCpuBudgetTests.cs` (uses it);
-  `LeftoversSweepFixture.cs` (gains `DisposeAsync`); the 11 files of the migration table; `Owned.cs` (one exemption
-  comment — harness setup, added BEFORE scenario 1's RED run); `.github/workflows/ci.yml`; new
-  `research/module_tests.md`; `research/architecture.md`.
+  `LeftoversAuditTests.cs`, `LeftoversJanitorTests.cs` (the live cross-check), `LeftoversSelfTest.cs` (the audit's
+  teeth); `LeftoversSweepFixture.cs` (gains `DisposeAsync`); the 11 files of the migration table; `Owned.cs` (one
+  exemption comment — harness setup, added BEFORE scenario 1's RED run); `.github/workflows/ci.yml` (the self-test
+  step); new `research/module_tests.md`; `research/architecture.md`.
 
 **The guard.** `LeftoversGuard.Scan(string repoRoot) → GuardReport(int FilesScanned, IReadOnlyList<Finding> Findings)`,
 `Finding(string File, int Line, string Class, string Text)`; pure apart from reading files. A port of the shape of
 `G:` mapped to this repository's languages.
 
-- **Root.** `RepositoryRoot.Path` — `LocalCpuBudgetTests.cs:20-27`'s `FindRoot` moved into
-  `internal static class RepositoryRoot`; `LocalCpuBudgetTests` reads it from there. One implementation, not two.
+- **Root.** `RepositoryRoot.Path` (S2). One implementation, not two.
 - **Discovery** (a directory named `bin`, `obj`, `node_modules`, `.git`, `.claude`, `.http-artifacts` or `logs` is
-  never entered — `.claude/rules/shared` is another repository): `tests/**/*.cs`; `.github/workflows/*.yml` and
-  `*.yaml`; `.github/scripts/**/*.{mjs,js,cjs,sh,ps1}`; `http/**/*.{mjs,js,cjs}`; every `*.sh` and `*.ps1`. **Excluded
-  by name**, a list a test pins to exactly one entry: `tests/Mcp.Tests/Leftovers/LeftoversGuardTests.cs` (it carries
-  the violations as fixture strings; `G:72-74`). Zero files ⇒ `FilesScanned == 0`, reported as `scanned nothing under
+  never entered — `.claude/rules/shared` is another repository): `tests/**/*.cs` (every class); `src/**/*.cs` (the
+  classes `legacy-name` and `owner-blind` and the token constant ONLY — product code makes no test leftover, and a
+  product temp path is not this rule's; today `src/` holds neither word, facts); `.github/workflows/*.yml` and
+  `*.yaml`; `.github/scripts/**/*.{mjs,js,cjs,sh,ps1,py}`; `http/**/*.{mjs,js,cjs}`; every `*.sh`, `*.ps1` and
+  `*.py`. **Excluded by name**, a list a test pins to exactly one entry: `tests/Mcp.Tests/Leftovers/LeftoversGuardTests.cs`
+  (it carries the violations as fixture strings; `G:72-74`). `LeftoversGuard.cs` itself is SCANNED: every detector
+  word in it — `CreateTemp` + `Subdirectory`, `GetTemp` + `Path`, `GetTemp` + `FileName`, `mkd` + `temp`, the marker
+  `testsToDe` + `lete-exempt:`, the prefix word — is spelled in two pieces, as `G:103` does, and a test pins that the
+  guard over its own file reports nothing. Zero files ⇒ `FilesScanned == 0`, reported as `scanned nothing under
   <root> — discovery broke; the repository is not clean`.
 - **Comments.** A line whose trimmed text starts with `//` or `#` is skipped for matching but read for exemptions.
   **Block comments** `/* … */` are stripped from `.cs`, `.mjs`, `.js` and `.cjs` text BEFORE matching: each character
@@ -683,16 +798,19 @@ unless stated (on Linux the namespace must be this reader's or the verdict is `u
     `teststodelete[-_]` (case-insensitive) NOT followed by `[uw][0-9]{1,10}[-_]`, with the same three carve-outs as
     `legacy-name`, in every `.cs` file except `tests/Mcp.Tests/Leftovers/Owned.cs` (the helper's own file: `Prefix`,
     `Pattern`, `LegacyPattern` live there) — so `Owned.cs` is the ONE place the bare prefix is written and a constant
-    elsewhere cannot carry it to a sweep. In scripts and workflows (`.sh`, `.ps1`, `.mjs`, `.js`, `.cjs`, `.yml`): a
-    pattern, glob or filter that matches the prefix with no owner segment right after it — the prefix word, a
-    separator (`-`, `_`, `[-_]`, `[-_]{1}`, `(-|_)`), then neither an owner start (`[uw]` followed by a digit, `\d`,
-    `[0-9]`, `$`, `{`, `[uw]|`, `[uw]`) nor a literal first segment — written literally, or through a variable the SAME
-    file assigns a value holding the prefix: shell `NAME=`, `export NAME=`, PowerShell `$NAME =`, JS `const|let|var NAME =`
-    with a literal value holding the prefix word, every use `$NAME`, `${NAME}`, `${NAME<op>…}`, `$env:NAME`, bare `NAME`
-    substituted and the line judged again. **Deviation, recorded:** one level of binding — no alias chains, defaults,
-    path joins or overflow of the shipped tracer (`tools/lib/prefix-bindings.mjs`); the per-machine barrier scan is
-    the shipped tracer over the same files and found nothing here at `b352881`; a script that needs more re-opens this
-    guard.
+    elsewhere cannot carry it to a sweep; and, the same intent one step further, **a reference to `Owned.Prefix` or
+    `Owned.LegacyPattern` in any `.cs` file outside `tests/Mcp.Tests/Leftovers/`** (the regex `\bOwned\.(Prefix|LegacyPattern)\b`
+    on a non-comment line) is a finding of the same class — a test builds names from `Owned.NameBase`, never from the
+    bare prefix. In scripts and workflows (`.sh`, `.ps1`, `.mjs`, `.js`, `.cjs`, `.py`, `.yml`): **the SHIPPED
+    classifier, started through the mount, not a port** — `LeftoversGuard` runs
+    `node --input-type=module -e "<ten lines>" -- <file>…` where the inline module imports `classifyLines` from
+    `<root>/.claude/rules/shared/tools/lib/sweeper-scan.mjs` (the one implementation the guard, the machine scan and
+    the rule checks share; it needs no `yaml`), reads each file named on the command line, and prints one JSON line
+    `{ file, line }` per verdict `broad`; each such line is an `owner-blind` finding. `node` missing, a non-zero exit
+    or unparsable output ⇒ one finding of class `owner-blind` naming the cause — the script half is never silently
+    skipped; `node` ≥ 20 is on every runner and every developer machine (`low-priority.mjs`). So scripts keep exactly
+    the shipped tracer's semantics (literal + same-file binding, its limits included), measured on this branch by
+    scenario 3's script cases, which are the shipped tool's own answers.
   - `shared-store`: the four shapes of `G:260-265`, verbatim and case-sensitive (`DROP DATABASE|SCHEMA|TABLE`,
     `TRUNCATE [TABLE]` against a name not in the owner form, `FLUSHALL|FLUSHDB`, `deleteMany({})`) — the prose word
     `truncated` never matches.
@@ -705,15 +823,16 @@ unless stated (on Linux the namespace must be this reader's or the verdict is `u
   (case-insensitive; `tools/ownership-check.mjs:83-91`) — and, for `shared-store`, contains `lock:`. Anything else after
   the marker is a finding of class `exemption` (no class, unknown class, `ryuk-off`, `owner-blind`, no reason, a placeholder).
 - **The token is registered and is THIS repository's** (`R:30-36`; `G:695-723`): `LeftoversGuard.TokenFindings(string ruleText, string token, string identity)`
-  — `token` must match `^[a-z0-9]{2,12}$` and NOT the owner grammar; the rule must carry a `## Tokens` heading followed
+  — `token` must match `^[a-z0-9]{2,12}\z` and NOT the owner grammar; the rule must carry a `## Tokens` heading followed
   by a GFM table whose header is exactly `| token | family | repository |`; the token must be the first cell (backticks
   stripped) of exactly one row; no token twice; the row's `repository` cell must equal `identity` (trimmed,
   case-insensitive), and an empty `identity` is a finding (fail closed). The real check reads
-  `<root>/.claude/rules/shared/common/test-leftovers.md` with `Owned.RepoToken` and `Owned.RepoRow`; **a missing file
-  is a finding** (an uninitialised submodule registers nothing — run `git submodule update --init .claude/rules/shared`).
-  **One constant** (`R:63-65`; `G:731-732`): over every tracked `.cs`, `.mjs`, `.js`, `.cjs`, `.sh`, `.ps1` file (the
-  discovery set plus `tests/Mcp.Tests/Leftovers/`), a non-comment line matching `\bRepoToken\b\s*(?::\s*\w+\s*)?=\s*["']([^"'\n]*)["']`
-  must occur exactly once and its value must be `token`; a second declaration, or another value, is a `token` finding.
+  `<root>/.claude/rules/shared/common/test-leftovers.md` with `OwnedToken.RepoToken` and `OwnedToken.RepoRow`; **a
+  missing file is a finding** (an uninitialised submodule registers nothing — run `git submodule update --init .claude/rules/shared`).
+  **One constant** (`R:63-65`; `G:731-732`): over every tracked `.cs` (`src/` and `tests/`), `.mjs`, `.js`, `.cjs`,
+  `.sh`, `.ps1`, `.py` file, a non-comment line matching `\bRepoToken\b\s*(?::\s*\w+\s*)?=\s*["']([^"'\n]*)["']` must
+  occur exactly once — in `tests/Mcp.Tests/Leftovers/OwnedToken.cs` — and its value must be `token`; a second
+  declaration, or another value, is a `token` finding.
 
 **The migration.** Each of the 11 classes becomes `public sealed class X : IDisposable` with
 `private readonly OwnedScope _owned = new();` and `public void Dispose() => _owned.Dispose();` — xUnit v3 creates one
@@ -758,14 +877,41 @@ A green run's teardown leaves nothing it claimed; this is the whole-suite form o
 catches the one leak the guard cannot see. In an elevated Windows run the claim scan is blind (S2, *Elevated runs*);
 the registry check is not.
 
-**CI.** `build-test` gains, before `Build`, the step the other two jobs already have:
+**The janitor cross-check, automated** (`LeftoversJanitorTests.cs`; the contract has TWO implementations, so the
+family's testing rule wants a LIVE check, not a by-hand one). On Linux only (on Windows `bash` on the path may be
+WSL's, which reads every Windows claim as foreign, `J:18-21` — `Assert.Skip` there with that sentence; the Windows
+half stays by hand, sc. 9): in the REAL temp root (`Owned.TempRoot()` — the janitor sweeps nothing else), plant one
+folder `Owned.NameBase + "janitor-" + <id>` with a sibling claim
+`new Owner(OwnerToken.This, Owner.This.Host, UnmatchablePid.Next(), Owner.This.Start, Owner.This.Ns).Format() + "\n"`
+(premise asserted; this reader's namespace, else the janitor says `unknown`, `janitor.sh:649`) and a second one named
+under `Other` with the same claim text but `Other`'s token; age all four entries to 11 minutes
+(`SetLastWriteTimeUtc`); run `bash .claude/rules/shared/tools/janitor.sh --token mcp --dry-run` with
+`JANITOR_MIN_AGE_MINUTES=10`, cwd `RepositoryRoot.Path`, stdout and stderr captured, inside `try/finally` that removes
+both plants. Assert: exit 0; stdout holds a `would run:` line naming the first folder; no `would run:` line names the
+second; stderr holds a `foreign:` line naming the second; no `skipped:` line names either. A missing `bash` or
+`janitor.sh` FAILS the test. If the first is not listed, the two implementations' records disagree: stop and report to
+the conventions owner, never adjust the C# format to pass.
+
+**The audit's teeth, automated** (`LeftoversSelfTest.cs` + one CI step). `LeftoversSelfTest.Leaves_one_owned_dir_undisposed`
+runs ONLY when `MCP_LEFTOVERS_SELFTEST` is `1` (`Assert.Skip` otherwise, with the sentence that says so): it calls
+`OwnedDir.Create("selftest")` and returns without disposing. The normal run never sets the variable. CI's `build-test`
+gains, AFTER the normal `Test` step:
 
 ```yaml
-      - name: Fetch the shared rules
-        run: git submodule update --init --depth 1 .claude/rules/shared
+      - name: The audit fails a run that leaves a claimed folder
+        env: { MCP_LEFTOVERS_SELFTEST: "1" }
+        run: |
+          if ./tests/Mcp.Tests/bin/Release/net10.0/Mcp.Tests --filter-class "*LeftoversSelfTest"; then
+            echo "the end-of-run audit did not fail the run"; exit 1; fi
+          ls "${TMPDIR:-/tmp}" | grep -i "^teststodelete" && { echo "the audit left the folder behind"; exit 1; } || true
 ```
 
-— the guard's token check reads the mounted rule and fails closed without it.
+— a NON-zero exit is the green; the folder the self-test made is gone afterwards (the audit removes what it names).
+If xUnit v3 does not fail the run on an assembly-fixture cleanup exception, this step is red on its first run: stop and
+report — do not turn the audit into a warning silently.
+
+**CI.** The `build-test` submodule step and the `build-test-windows` job are S2's; this story adds the self-test step
+above. All jobs green is the DoD.
 
 **Docs.** `research/architecture.md` § CI (`:238-251`): one paragraph — the helper (`tests/Mcp.Tests/Leftovers`, names
 `testsToDelete-<owner>-mcp-<what>-<id>`, a sibling `.owner` claimed first), the start-of-run sweep (assembly fixture,
@@ -782,20 +928,23 @@ name in every repository, and none exists here yet. The facts it carries, each t
 - **How it is run** — the exact commands, identical to CI's `build-test` job: `dotnet build dew_flow_mcp.slnx -c
   Release` and the test executable (`./tests/Mcp.Tests/bin/Release/net10.0/Mcp.Tests`), never `dotnet test`; locally
   through `node .claude/rules/shared/tools/low-priority.mjs`; `--filter-namespace "Mcp.Tests.Leftovers"`; the janitor.
-- **The leftovers flows, each `covered` or `not covered`** with the test that covers it: the helper (S2 sc. 1–9),
-  the token and record (S2 sc. 3, 10, 11), liveness and scope (S2 sc. 12–13), the start-of-run sweep (S3 sc. 1–8),
-  the end-of-run audit (S4 sc. 7, 7a, 8), the guard (S4 sc. 1, 3–6), the janitor reading this helper's claim (S4 sc.
-  9, by hand — `not covered` in CI, with why), an elevated run (S2 sc. 14, by hand).
+- **The leftovers flows, each `covered` or `not covered`** with the test that covers it: the runner's facts (S2 sc.
+  0), the helper (S2 sc. 1–9), the token and record (S2 sc. 3, 10, 11), liveness and scope (S2 sc. 12–13), the
+  start-of-run sweep (S3 sc. 1–8), the end-of-run audit (S4 sc. 7, 7a, and the CI self-test step), the guard (S4 sc.
+  1, 3–6), the janitor reading this helper's claim (S4 *cross-check*, Linux CI; Windows by hand, sc. 9), an elevated
+  run on the owner's machine (S2 sc. 14, by hand).
 - **What it does not prove** — a SIGKILL of the real executable (the kill is built by hand, S3 sc. 1); macOS (no CI
-  leg; the helper refuses there); the §5 container carve-out (not recognised, the recorded deviation); a script whose
-  prefix reaches a sweep through more than one binding (the recorded deviation; the barrier scan sees it); the guard
-  reads text, so a temp path built by reflection or in a generated file is invisible; the audit runs only when the
-  executable reaches `DisposeAsync`.
-- **When it runs** — every pull request (`build-test`), and the janitor by hand on a machine that stopped running these tests.
+  leg; the helper refuses there); the §5 container carve-out (not recognised, the recorded deviation); the shipped
+  tracer's own limits over scripts (the header of `tools/lib/prefix-bindings.mjs`); the guard reads text, so a temp
+  path built by reflection or in a generated file is invisible; the audit runs only when the executable reaches
+  `DisposeAsync`; the janitor on Windows (forced dry-run, by hand only).
+- **When it runs** — every pull request (`build-test`, `build-test-windows`), and the janitor by hand on a machine that
+  stopped running these tests.
 
 **Hand clean-up**, once per machine, recorded in the PR and not code: list the temp root's folders named exactly
 `mcp-<one of the 17 old prefixes>` + 8 characters + `.` + 3 (Windows) or + 6 characters (Linux), and `outside.txt`
-containing `secret`; look at the list; delete only those.
+containing `secret`; look at the list; delete only those. **The record — per machine, each path removed or kept with
+a reason — is merge condition (d) of *Order*.**
 
 **Scenarios** (RED first: scenario 1 is written and run BEFORE any migration — and AFTER the harness setup: the
 `Owned.cs` exemption comment is in place first, so `Owned.TempRoot()`'s own `Path.GetTempPath()` is not counted).
@@ -831,21 +980,27 @@ containing `secret`; look at the list; delete only those.
    `".x.<prefix lower>-quarantine-1-ab"`, `"TESTSTODELETE_OWNER"` ⇒ 0. **`owner-blind`:** in a `.cs` outside the
    helper file `"<prefix>-"` ⇒ 1, `"<prefix lower>_"` ⇒ 1, `"<prefix>-u1000-"` ⇒ 0, `"<prefix>-" + x` ⇒ 1, a
    `const string P = "<prefix>-"` ⇒ 1 (the shape of a constant carrying the prefix), the same literal in a file named
-   `tests/Mcp.Tests/Leftovers/Owned.cs` of the tree ⇒ 0; under `// testsToDelete-exempt: owner-blind — any reason at
-   all here` ⇒ still 1 plus 1 `exemption`; in `a.sh` `rm -rf "$TMPDIR"/<prefix>-*` ⇒ 1, `find … -name '<prefix lower>[-_]*'`
+   `tests/Mcp.Tests/Leftovers/Owned.cs` of the tree ⇒ 0; `var p = Owned.Prefix + what;` in `tests/X/A.cs` ⇒ 1 and in
+   `tests/Mcp.Tests/Leftovers/X.cs` ⇒ 0; `Owned.LegacyPattern.IsMatch(n)` in `src/Y.cs` ⇒ 1; under
+   `// testsToDelete-exempt: owner-blind — any reason at all here` ⇒ still 1 plus 1 `exemption`; **scripts, judged by
+   the shipped classifier through `node`:** in `a.sh` `rm -rf "$TMPDIR"/<prefix>-*` ⇒ 1, `find … -name '<prefix lower>[-_]*'`
    ⇒ 1, `<prefix>-u*` ⇒ 1, `<prefix>-"$OWNER"-*` ⇒ 0, `<prefix>-${OWNER}-*` ⇒ 0, `<prefix>-conventions-*` ⇒ 0
    (a literal first segment), `P='<prefix>-'` on line 1 and `rm -rf "$P"*` on line 3 ⇒ 1 reported at line 3,
    `const P = "<prefix>-"` and `glob(P + "*")` in `a.mjs` ⇒ 1 at the use, `$P = "<prefix>-"` and `Remove-Item "$P*"`
-   in `b.ps1` ⇒ 1, a workflow `run: rm -rf /tmp/<prefix>-*` ⇒ 1; `echo "<prefix>-u1000-mcp-x-abc123"` ⇒ 0 (a name,
-   not a pattern). **Block comments:** `/* Path.GetTempPath() */` ⇒ 0; opened on line 1, closed on line 3 with
-   `Path.GetTempPath()` on line 2 ⇒ 0; `*/ var t = Path.GetTempPath();` ⇒ 1 at ITS line; `var glob = "src/**/*.cs"; var t = Path.GetTempPath();`
-   ⇒ 1; `/* testsToDelete-exempt: raw-temp — the one place a test learns the temp root */` above ⇒ 0. RED first:
-   written before the stripper and the two new classes exist, the multi-line and the `const P` cases observed giving the
-   wrong count.
+   in `b.ps1` ⇒ 1, `P = "<prefix>-"` and `glob.glob(P + "*")` in `c.py` ⇒ 1, a workflow `run: rm -rf /tmp/<prefix>-*`
+   ⇒ 1; `echo "<prefix>-u1000-mcp-x-abc123"` ⇒ 0 (a name, not a pattern) — each expected count is what
+   `node .claude/rules/shared/tools/sweeper-scan.mjs --root <that tree>` prints for the same file, recorded once; and
+   with `PATH` emptied of `node` (a seam naming the executable) ⇒ 1 `owner-blind` finding naming `node`, never 0.
+   **Block comments:** `/* Path.GetTempPath() */` ⇒ 0; opened on line 1, closed on line 3 with `Path.GetTempPath()`
+   on line 2 ⇒ 0; `*/ var t = Path.GetTempPath();` ⇒ 1 at ITS line; `var glob = "src/**/*.cs"; var t = Path.GetTempPath();`
+   ⇒ 1; `/* testsToDelete-exempt: raw-temp — the one place a test learns the temp root */` above ⇒ 0. **The guard
+   over itself:** `Scan` of a tree holding only a copy of `LeftoversGuard.cs` at its path ⇒ 0 findings and
+   `FilesScanned == 1`. RED first: every break-it is written and run against a STUB `Scan` that returns
+   `FilesScanned = 1` and no findings — the guard is new, so every "⇒ 1" is observed at 0 before its class exists.
 4. **A scan of nothing is red, not clean.** An empty tree ⇒ `FilesScanned == 0`; a root that does not exist ⇒
    `FilesScanned == 0` and no throw.
-5. **The token is registered and is ours.** On the real mount, `TokenFindings(rule, Owned.RepoToken, Owned.RepoRow)` ⇒
-   none, and the one-constant check over the real repository ⇒ none. Break-its on rule texts written in the test:
+5. **The token is registered and is ours.** On the real mount, `TokenFindings(rule, OwnedToken.RepoToken, OwnedToken.RepoRow)`
+   ⇒ none, and the one-constant check over the real repository ⇒ none (the one declaration is in `OwnedToken.cs`). Break-its on rule texts written in the test:
    `nosuchtoken`, `Mcp`, `x`, `u1000`, `w1` ⇒ one finding each; no `## Tokens` ⇒ one; a two-column table ⇒ one; `mcp`
    listed twice ⇒ one; `mcp` only in the `repository` column ⇒ one; the `mcp` row's repository `the embedding sidecar`
    ⇒ one naming both; identity `""` ⇒ one; the rule file missing ⇒ one. The one-constant check on a tree with
@@ -858,38 +1013,41 @@ containing `secret`; look at the list; delete only those.
    private OwnedDir NOT at the temp root's depth 1>)` left undisposed ⇒ `Undisposed()` names its path while
    `ClaimedBy(Owned.TempRoot(), …)` does not; after `Dispose()` it is gone from both. The test disposes everything it
    made before it ends.
-8. **The audit has teeth** (observed by hand, recorded in the PR, then reverted): remove `: IDisposable` and
-   `Dispose` from ONE migrated class (`ToolSurfaceTests`), run the executable ⇒ it exits non-zero with the audit's
-   message naming three `testsToDelete-<owner>-mcp-surface-…` folders; restore ⇒ green, and the temp root holds none.
-   If xUnit v3 does not fail the run on an assembly-fixture cleanup exception, stop and report — do not turn the audit
-   into a warning silently.
-9. **No leftover after a full run, and the janitor reads THIS helper's claim** (by hand, recorded in the PR, on
-   Windows under Git for Windows' bash AND on Linux). Before the migration, one full run leaves N new `mcp-…` folders
-   and `outside.txt` in the temp root (count them); after it, zero new entries of either, and `bash
+8. **The audit has teeth** — the CI self-test step above, RED first: the step is added BEFORE `LeftoversSelfTest`
+   exists (the filtered run then finds no test and exits zero: the step is red), then the self-test lands and the
+   step is green on a non-zero exit with the audit's message naming one `testsToDelete-<owner>-mcp-selftest-…` folder
+   in the job log, and the temp root holds none afterwards. Locally: `MCP_LEFTOVERS_SELFTEST=1 … --filter-class "*LeftoversSelfTest"`
+   exits non-zero; without the variable the self-test skips and the normal run is green.
+9. **No leftover after a full run, and the janitor reads THIS helper's claim on Windows** (by hand, recorded in the
+   PR; the Linux half is `LeftoversJanitorTests`, automated above). Before the migration, one full run leaves N new
+   `mcp-…` folders and `outside.txt` in the temp root (count them); after it, zero new entries of either, and `bash
    .claude/rules/shared/tools/janitor.sh --token mcp --dry-run`, run from this repository, prints no `would run:` line
-   and exits 0 (Windows: its forced-dry-run notice first, `J:22-24`). Then plant one folder
-   `Owned.NameBase + "janitor-" + <id>` in the temp root with a sibling claim in the C# helper's own format —
-   `new Owner(OwnerToken.This, Owner.This.Host, UnmatchablePid.Next(), Owner.This.Start, Owner.This.Ns).Format()`,
-   this user's token, this host (under WSL `host~distro`), this OS's tag, an unmatchable pid (premise asserted), and
-   on Linux this reader's namespace (the janitor says `unknown` without it, `janitor.sh:649`) — age folder and claim
-   to 11 minutes (`Directory.SetLastWriteTimeUtc` / `File.SetLastWriteTimeUtc`, or `touch -d`). Then
+   and exits 0 (Windows: its forced-dry-run notice first, `J:22-24`; Linux too, on the dev VM). Then, on Windows under
+   Git for Windows' bash, the plant of the automated check by hand: one folder `Owned.NameBase + "janitor-" + <id>`
+   with the C# helper's claim for an unmatchable pid (premise asserted), one under `Other`, both aged 11 minutes;
    `JANITOR_MIN_AGE_MINUTES=10 bash .claude/rules/shared/tools/janitor.sh --token mcp --dry-run` ⇒ one `would run:`
-   line on stdout naming that folder, no `skipped:` line for it, exit 0. Plant a second one claimed under `Other` ⇒ a
-   `foreign:` line, no `would run:`. Then remove what was planted. All lines go in the PR. If the janitor does not list
-   the first, the two implementations' records disagree: stop and report to the conventions owner, never adjust the
-   C# format to pass.
+   line naming the first, a `foreign:` line for the second, no `skipped:` for either, exit 0 — or, where scenario 0
+   measured `Administrators` as the owner, the `foreign:` / `-unsafe-root` lines the janitor prints for that case
+   (`research/security/test-leftovers-merged-core.md:239-243`), recorded as the Windows answer. Then remove what was
+   planted. All lines go in the PR. A disagreement of the two records: stop and report to the conventions owner, never
+   adjust the C# format to pass.
 
 - **Commands.** As S2, `--filter-class "*LeftoversGuardTests"` (RED, then GREEN), `--filter-class "*WorkspaceToolTests"`,
   the whole executable on Windows and Linux; `dotnet format dew_flow_mcp.slnx --verify-no-changes --no-restore` in
   Linux or WSL; the `plans` steps before the push: `node .claude/rules/shared/tools/pin-check.mjs`,
   `plan-lifecycle.mjs`, `gate-snippet-check.mjs`, `build-flags-check.mjs`, `node .github/scripts/branch-protection.mjs --selftest`.
 - **DoD.** The `Owned.cs` exemption in place before scenario 1's RED; scenarios 1, 2 and 7a observed RED with the
-  counts above, then GREEN; every break-it observed red (the block-comment, `const P` and binding cases included);
-  scenario 8's teeth observed and reverted; scenario 9 recorded with both janitor listings; CI green on all four jobs
-  with the new `build-test` step; `research/module_tests.md` created with every flow marked; `architecture.md`
-  updated; the merge condition of *Order* met and quoted in the PR; this document's status line becomes
-  `> Status: **E3 shipped, <YYYY-MM-DD>; promotes with its parent.**` — never the word *implemented* while it sits in
-  `todo/` — and its `todo/README.md` row says the same. The parent and this document promote together, after the last epic.
+  counts above, then GREEN; every break-it observed at 0 against the stub, then red (the block-comment, `const P`,
+  `Owned.Prefix`, script and `node`-missing cases included); the guard over its own file 0; the self-test step red
+  before `LeftoversSelfTest`, then green on a non-zero exit; `LeftoversJanitorTests` green on the Linux job; scenario
+  9 recorded with the Windows listing; CI green on all five jobs; `research/module_tests.md` created with every flow
+  marked; `architecture.md` updated; the merge condition of *Order* met and quoted in the PR. **Promotion rides in the
+  producer PR's last commit** (this repository has no other epic, and the shared planning rule's "parent and stories
+  promote together" is the parent's to do in its own repository): the status line becomes
+  `> Status: **IMPLEMENTED, <YYYY-MM-DD>.**` with the deviations recorded — the carve-out not recognised, legacy names
+  listed only, `.cs` `owner-blind` by literal, macOS not built, and whatever the measured Windows owner forced — the
+  links fixed for `research/`, `git mv todo/PLAN_test_leftovers_E3.md research/PLAN_test_leftovers_E3.md` LAST, its
+  `todo/README.md` row moved to `research/README.md`, and `plan-lifecycle.mjs` clean on the squash.
 
 ## Growth
 
@@ -907,7 +1065,8 @@ The boundary, so the copies need not rediscover it:
 
 | Item | Built here | What a copy does |
 |---|---|---|
-| The API shape (`Owned`, `OwnerToken`, `Owner`, `Liveness`, `Scope`, `Native`, `OwnedDir`, `OwnedScope`, `Removal`) | yes | same names; its own `RepoToken` and `RepoRow` from its own row of the `## Tokens` table — never a copy of this one's |
+| The API shape (`Owned`, `OwnerToken`, `Owner`, `Liveness`, `Scope`, `Native`, `OwnedDir`, `OwnedScope`, `Removal`) | yes | every file but `OwnedToken.cs` copied byte-identical save the namespace line; `OwnedToken.cs` rewritten with its own `RepoToken` and `RepoRow` from its own row of the `## Tokens` table — never a copy of this one's (`O:42`'s shape) |
+| The container label — `--label testsToDelete.owner=<record>` on `run` / `volume create` / `network create`, the same string a Testcontainers builder adds (`.WithLabel("testsToDelete.owner", Owner.RunRecord().Format())`), beside an owner-form `WithName`; a daemon object has no kernel owner, so the label's owner segment is the scope key (`R:130`, `R:137-138`) | **not built here** — nothing starts a container | E2's smoke, E6's Testcontainers fixture and E7 add it to their sweep (a `docker ps --filter label=…` inventory, judged by `Owner.Parse` + `Liveness.State`, removal by captured id) and to their guard's `docker-name` class |
 | The owner token: real uid, or the SHA-256 Windows form with ASCII-only lower-casing; `TESTSTODELETE_OWNER` validated | yes, vectors pinned | same bytes; the vectors file is the proof |
 | Claim first (`FileMode.CreateNew`), then an EXCLUSIVE `mkdir` through P/Invoke; an own id, never `CreateTempSubdirectory` | yes, measured above | same — the Windows id and the missing exclusive create are the reasons |
 | The record with the Linux start from `/proc` + `AT_CLKTCK` and the pid namespace; no start elsewhere | yes, measured against `Process.StartTime` (S2 sc. 10) | same formula — two helpers on one machine must agree within 2 s |
@@ -917,7 +1076,8 @@ The boundary, so the copies need not rediscover it:
 | The probe: `kill(pid, 0)` / `OpenProcess`, never `Process.GetProcessById` | yes | same |
 | Per-test disposal through `IDisposable` + `OwnedScope`; assembly-fixture sweep and end-of-run audit with the registry | yes | same, plus the kinds that repository creates (containers, databases) |
 | `FullName` accepting rule §1's 6–12-character id; legacy names listed, never collected | yes | same — write 6, accept 6–12 |
-| Guard: eight classes; `owner-blind` in `.cs` by literal (decision 3), one-level binding in scripts; the carve-out NOT recognised | all | a repository that starts containers implements the §5 carve-out in full; the `.cs` literal rule is the family's |
+| Guard: eight classes; `owner-blind` in `.cs` by literal plus the `Owned.Prefix` reference rule (decision 3), the shipped classifier through `node` for scripts; the carve-out NOT recognised; the guard scans itself clean | all | a repository that starts containers implements the §5 carve-out in full; the `.cs` literal rule and the `node` call are the family's |
+| The live janitor cross-check and the audit self-test step | yes (Linux) | same two tests; a copy with containers adds a labelled plant |
 | macOS | not built (no leg, no machine) | a copy with a Mac developer measures Darwin's `lstat` first |
 
 ## Plan-gate round 1 (2026-10-17)
@@ -950,6 +1110,35 @@ Rejected:
   nothing else.
 
 Also reflected from the contract, settled: `janitor.sh --token <t>` exists in the release (`J:26`; S4 docs and sc. 9).
+Of the rejections, the first is now overturned by round 2 (A4): the teeth are a CI step, not a by-hand revert.
+
+## Plan-gate round 2 (2026-10-31)
+
+The coai plan gate over the re-split, plus the Opus judge; all accepted and applied above, none rejected. The owner's
+standing answer: macOS stays "not built; the helper refuses with a clear message".
+
+- A0 a claim write that fails after the exclusive create removes the claim only under its own identity or content
+  (S2 step 2, sc. 9e). A1 a taken quarantine is retried by every run, listed with its command, never removed (S3 step 5,
+  sc. 5c). A2 the hand clean-up record is merge condition (d). A3 the janitor cross-check is a Linux CI test
+  (`LeftoversJanitorTests`). A4 the audit's teeth are a CI step under `MCP_LEFTOVERS_SELFTEST=1` (sc. 8). A5 promotion
+  to `research/` with `IMPLEMENTED` and deviations in the producer PR (S4 DoD). A6 `src/**/*.cs` scanned for the
+  literal classes and the token constant.
+- B1 the guard spells its detector words and the marker in pieces and scans itself clean (sc. 3). B2 `\z` and `[0-9]`
+  everywhere, the line end stripped by `EndsWith`, `u1\n` refused (sc. 3). B3 `RepositoryRoot.cs` and the submodule
+  step moved into S2; a missing vectors file fails. B4 S3 sc. 2: this pid with a start 3 s off ⇒ `unknown`, a dead pid
+  with any start ⇒ removed. B5 sc. 5c passes the window through `Now`. B6 the Windows probe with `SYNCHRONIZE` and
+  `WaitForSingleObject` — it matches libuv's `uv__kill` as stated. B7 pid bounds per OS, the tag-bit aliasing measured
+  first (sc. 13). B8 `CreateFileW` values in `Native`. B9 scripts judged by the SHIPPED classifier through `node`
+  (`tools/lib/sweeper-scan.mjs` `classifyLines`), `.py` added — the one-level re-implementation is gone. B10 a
+  `windows-latest` job; scenario 0 measures the runner's file owner before S2 code and every Windows assertion is the
+  measured answer; `Dispose` never consults `IsMine`; `ReadClaimText` has its `mine` seam; `OwnedToken.cs` holds the
+  token and row; the `grammar`, `scope` and `verdicts` vectors run through `Parse` and `State` (sc. 10, 12); the
+  container label is in the boundary table as "not built here". B11 the owner SID from `GetSecurityInfo` on the
+  `OPEN_REPARSE_POINT` handle, null ⇒ false, namespaces named; candidates are real directories and regular files; a
+  symlink case in S3 sc. 2. B12 `0x1C0`. B13 the `stx_mask` check, `static partial`, marshalling, musl unmeasured. B14
+  the collision by `HResult` / identity. B15 `o.Mine` reaches the claim read; orphan claims are regular files. B16 sc.
+  5a moves aside before it deletes. B17 `Owned.Prefix` / `Owned.LegacyPattern` outside `Leftovers/` is a finding. B18
+  sc. 3 RED against a stub `Scan`. The fail-closed edges are one bullet of S2.
 
 ## Judge's notes on the parent's E3 entry
 
@@ -972,7 +1161,7 @@ Opus, 2026-10-16, against `origin/main` b352881 of this repository and the E1 br
 
 **Sign-off: yes**, on S2–S4 as written; S1 is done. Three judgements are mine and are recorded as deviations for the
 promotion: the guard does not recognise the §5 container carve-out (stricter than the rule; nothing here starts a
-container); the `.cs` `owner-blind` class is a literal rule and the script half traces one binding (decision 3; the
-barrier scan is the full tracer); legacy names are listed and never collected (the rule allows preserving more; this
-repository never produced one). macOS is not built, and the facts say what was checked: no CI leg, no machine, and
-Darwin's `lstat` symbol differs by architecture — nobody measured it.
+container); the `.cs` `owner-blind` class is a literal rule, with the shipped classifier judging scripts (decision 3);
+legacy names are listed and never collected (the rule allows preserving more; this repository never produced one).
+macOS is not built, and the facts say what was checked: no CI leg, no machine, and Darwin's `lstat` symbol differs by
+architecture — nobody measured it.
