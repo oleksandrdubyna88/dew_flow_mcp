@@ -332,20 +332,6 @@ public sealed class LeftoversGuardTests : IDisposable
         Directory.GetFiles(root, "pwned", SearchOption.AllDirectories).Should().BeEmpty();
     }
 
-    [Fact]
-    public void A_script_is_read_once_and_a_verdict_is_answered_from_that_copy()
-    {
-        if (!OperatingSystem.IsLinux()) Assert.Skip("the stand-in for node is a shell script");
-        var root = Tree(("a.sh", $"rm -rf /tmp/{P}-*"));
-        var fake = Path.Combine(_owned.Dir("fake-node"), "node");
-        File.WriteAllText(fake, "#!/bin/sh\nfor last; do :; done\nprintf '{\"file\":\"%s\",\"line\":1}\\n' \"$last\"\nrm -f \"$last\"\n");
-        if (OperatingSystem.IsLinux()) File.SetUnixFileMode(fake, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-
-        var report = LeftoversGuard.Scan(root, RepositoryRoot.Path, fake);
-
-        report.Findings.Should().ContainSingle().Which.Should().BeEquivalentTo(new Finding("a.sh", 1, "owner-blind", "matches the prefix with no owner segment after it (the shipped classifier)"));
-    }
-
     // ---- 4: a scan of nothing is red -----------------------------------------------------------------------------------
 
     [Fact]

@@ -39,7 +39,7 @@ internal static class GuardScripts
     internal static List<Finding> Classify(IReadOnlyList<ScriptFile> scripts, string mountRoot, string node)
     {
         var run = Run(scripts, mountRoot, node);
-        return run.Failure is { } cause ? [Unjudged(scripts, cause)] : Findings(scripts, run.Output, node);
+        return run.Failure is { } cause ? [Unjudged(scripts, cause)] : Judge(scripts, run.Output, node);
     }
 
     private static NodeRun Run(IReadOnlyList<ScriptFile> scripts, string mountRoot, string node)
@@ -79,8 +79,9 @@ internal static class GuardScripts
     }
 
     /// <summary>One finding per <c>broad</c> line that is not a comment. A line of the answer that is not a verdict for one of the
-    /// scripts turns the whole answer into the one "could not judge" finding.</summary>
-    private static List<Finding> Findings(IReadOnlyList<ScriptFile> scripts, string output, string node)
+    /// scripts turns the whole answer into the one "could not judge" finding. Internal so a test can hand it an answer as TEXT and
+    /// read the findings, without starting any process.</summary>
+    internal static List<Finding> Judge(IReadOnlyList<ScriptFile> scripts, string output, string node)
     {
         var byPath = scripts.ToDictionary(s => s.Source.Absolute, StringComparer.Ordinal);
         var answers = output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(raw => new Answer(raw, Parse(raw, byPath))).ToList();
