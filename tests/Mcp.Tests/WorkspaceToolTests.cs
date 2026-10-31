@@ -245,6 +245,7 @@ public sealed class WorkspaceToolTests : IDisposable
         // At composition, where one message is read once — not as an empty answer on every read for
         // the life of a process nobody is watching.
         var build = () => new SandboxedFileReader(
+            // testsToDelete-exempt: raw-temp — a read-only use, the reader is only built and nothing is made in the temp root
             new WorkspaceRoot(Owned.TempRoot()),
             new SandboxedFileReaderOptions { MaxBytes = 0 },
             NullLogger<SandboxedFileReader>.Instance);
@@ -288,6 +289,7 @@ public sealed class WorkspaceToolTests : IDisposable
     {
         var (provider, _) = Build();
 
+        // testsToDelete-exempt: raw-temp — a read-only use, the temp root is only the absolute path to refuse
         var result = await Invoke(provider, $$"""{"path":"{{Owned.TempRoot().Replace("\\", "\\\\")}}"}""");
 
         result.Should().BeOfType<ToolResult.Refused>();

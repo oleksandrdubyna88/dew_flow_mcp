@@ -113,12 +113,25 @@ public static class LeftoversGuard
     // ---- legacy-name, owner-blind ------------------------------------------------------------------------------------------
 
     private static readonly Regex PrefixWord = Rx(Word + "[-_]", RegexOptions.IgnoreCase);
+
+    /// <summary>The word itself, whatever follows it: a glob, a character class, a pattern, a bare word, a separator in another literal.</summary>
+    private static readonly Regex WordAnywhere = Rx(Word, RegexOptions.IgnoreCase);
+
+    /// <summary>What may follow the word in C# without being a sweep: an owner segment between separators (a regex may write one as <c>[-_]</c>), the exempt marker word, the
+    /// quarantine sibling's word.</summary>
+    private static readonly Regex AllowedAfterWord = Rx(@"^(?:[-_]|\[-_\])(?:[uw][0-9]{1,10}(?:[-_]|\[-_\])|(?:exempt|quarantine)(?![a-z0-9]))", RegexOptions.IgnoreCase);
+
+    /// <summary>The owner environment variables (<c>TESTSTODELETE_RUN</c>): the word in upper case, an underscore, upper-case letters.</summary>
+    private static readonly Regex EnvironmentUse = Rx("^" + Word.ToUpperInvariant() + "_[A-Z]+(?![A-Za-z0-9])");
     private static readonly Regex OwnerSegmentAfter = Rx(@"^[uw][0-9]{1,10}[-_]", RegexOptions.IgnoreCase);
     private static readonly Regex SecondSegment = Rx("^[a-z0-9]+", RegexOptions.IgnoreCase);
     private static readonly Regex OwnerGrammar = Rx(@"^[uw][0-9]{1,10}\z", RegexOptions.IgnoreCase);
     private static readonly Regex EnvironmentName = Rx("^" + Word.ToUpperInvariant() + @"_[A-Z]+\z");
     private static readonly Regex BuiltFromToken = Rx(Word + @"[-_](?:\{\s*RepoToken\b|\$\{?\s*(?:REPO_TOKEN|RepoToken|repoToken)\b)", RegexOptions.IgnoreCase);
     private static readonly Regex HelperReference = Rx(@"\bOwned\.(?:Prefix|LegacyPattern)\b");
+
+    /// <summary>The helper's one door to the temp root: outside the helper's folder a path made under it is a temp path no <c>OwnedDir</c> claimed.</summary>
+    private static readonly Regex TempRootReference = Rx(@"\bOwned\.TempRoot\b");
 
     // ---- exemptions ------------------------------------------------------------------------------------------------------
 
@@ -245,8 +258,11 @@ public static class LeftoversGuard
         if (source.Kind is Kind.Tests or Kind.Source)
         {
             foreach (var hit in OwnerBlindHits(source, line)) yield return ("owner-blind", hit);
+            if (!InHelperFolder(source) && TempRootReference.Match(line) is { Success: true } root) yield return ("raw-temp", root.Value + " outside the helper's folder");
         }
     }
+
+    private static bool InHelperFolder(Source source) => source.Relative.StartsWith(HelperFolder, StringComparison.Ordinal);
 
     private static IEnumerable<string> Matches(IEnumerable<Regex> patterns, string line) =>
         patterns.Select(p => p.Match(line)).Where(m => m.Success).Select(m => m.Value.Trim());
@@ -391,23 +407,28 @@ public static class LeftoversGuard
         if (BuiltFromToken.IsMatch(line)) yield return "a prefix built from the repository token";
     }
 
-    /// <summary>Decision 3, in C#: any literal of the bare prefix not followed by an owner segment is a finding, in every <c>.cs</c> file
-    /// but the helper's own — and a reference to <c>Owned.Prefix</c> or <c>Owned.LegacyPattern</c> outside the helper's folder.</summary>
+    /// <summary>Decision 3, in C#: the word itself, in every <c>.cs</c> file but the helper's own, unless an owner segment follows it
+    /// (or it is the exempt marker word, the quarantine sibling's word or an environment variable) — a literal, a glob, a character
+    /// class, a pattern, a bare word or a separator in another literal all read as a sweep by the bare prefix. And a reference to
+    /// <c>Owned.Prefix</c> or <c>Owned.LegacyPattern</c> outside the helper's folder.</summary>
     private static IEnumerable<string> OwnerBlindHits(Source source, string line)
     {
         if (source.Relative != HelperFile)
         {
-            foreach (Match m in PrefixWord.Matches(line))
-            {
-                var rest = line[(m.Index + m.Length)..];
-                if (OwnerSegmentAfter.IsMatch(rest)) continue;
-                var second = SecondSegment.Match(rest);
-                if (second.Success && IsNotAName(m, second)) continue;
-                yield return m.Value + (second.Success ? second.Value : "");
-            }
+            foreach (var hit in BareWordHits(line)) yield return hit;
         }
 
-        if (!source.Relative.StartsWith(HelperFolder, StringComparison.Ordinal) && HelperReference.Match(line) is { Success: true } reference) yield return reference.Value;
+        if (!InHelperFolder(source) && HelperReference.Match(line) is { Success: true } reference) yield return reference.Value;
+    }
+
+    private static IEnumerable<string> BareWordHits(string line)
+    {
+        foreach (Match m in WordAnywhere.Matches(line))
+        {
+            var rest = line[(m.Index + m.Length)..];
+            if (AllowedAfterWord.IsMatch(rest) || EnvironmentUse.IsMatch(line[m.Index..])) continue;
+            yield return m.Value + rest[..Math.Min(rest.Length, 3)].TrimEnd('"', '\'');
+        }
     }
 
     /// <summary>The second segments that are not names: the exempt marker word, the quarantine sibling (<c>.&lt;name&gt;.&lt;prefix&gt;-quarantine-…</c>) and an

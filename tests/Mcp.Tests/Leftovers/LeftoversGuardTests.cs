@@ -131,6 +131,27 @@ public sealed class LeftoversGuardTests : IDisposable
         Add("a reference to Owned.NameBase is how a test builds a name", "tests/X/A.cs", "var p = Owned.NameBase + what;", "");
         Add("src is read for the literal classes only", "src/Y/Y.cs", "var d = Directory.CreateTempSubdirectory(\"x\");", "");
 
+        // owner-blind in .cs: the word itself, whatever follows it (a glob, a class, a pattern, a bare word)
+        Add("a directory listing by the bare word and a star", "tests/X/A.cs", $"foreach (var d in Directory.GetDirectories(Owned.TempRoot(), \"{P}*\")) Directory.Delete(d, true);", "owner-blind,raw-temp");
+        Add("a pattern over the bare word with a question mark", "tests/X/A.cs", $"var hits = Directory.GetDirectories(root, \"{P}?\");", "owner-blind");
+        Add("a regex over the word and a class separator", "tests/X/A.cs", $"var r = new Regex(\"^{Lower}[-_]mcp[-_]\");", "owner-blind");
+        Add("the word and its separator in two literals", "tests/X/A.cs", $"var n = \"{P}\" + \"-\";", "owner-blind");
+        Add("the word interpolated and a separator after it", "tests/X/A.cs", "var n = $\"{\"" + P + "\"}-\";", "owner-blind");
+        Add("the bare word alone", "tests/X/A.cs", $"var n = \"{P}\";", "owner-blind");
+        Add("the bare word in a verbatim string", "tests/X/A.cs", $"var n = @\"{Lower}*\";", "owner-blind");
+        Add("an owner-form glob", "tests/X/A.cs", $"var hits = Directory.GetDirectories(root, \"{P}-u1000-*\");", "");
+        Add("an owner-form regex", "tests/X/A.cs", $"var r = new Regex(\"^{Lower}[-_]u1000[-_]\");", "");
+        Add("the owner environment variable in a call", "tests/X/A.cs", "var v = Environment.GetEnvironmentVariable(\"TESTSTODELETE_RUN\");", "");
+        Add("a lower-case environment name is not the variable", "tests/X/A.cs", $"var v = \"{Lower}_run\";", "legacy-name,owner-blind");
+        Add("the bare word in a script is the classifier's, not the C# rule's", "a.sh", $"echo {P}", "");
+
+        // Owned.TempRoot() is the temp root: outside the helper's folder it is a raw-temp finding like any other spelling of it
+        Add("a folder made under Owned.TempRoot outside the helper", "tests/X/A.cs", "Directory.CreateDirectory(Path.Combine(Owned.TempRoot(), \"x\"));", "raw-temp");
+        Add("Owned.TempRoot in src", "src/Y/Y.cs", "var root = Owned.TempRoot();", "raw-temp");
+        Add("Owned.TempRoot in the helper's folder", "tests/Mcp.Tests/Leftovers/X.cs", "var root = Owned.TempRoot();", "");
+        Add("a read-only use of Owned.TempRoot, exempted with a reason", "tests/X/A.cs", $"// {Marker} raw-temp — a read-only use, nothing is made there\nvar root = Owned.TempRoot();", "");
+        Add("a commented Owned.TempRoot", "tests/X/A.cs", "// var root = Owned.TempRoot();", "");
+
         // scripts, judged by the shipped classifier through node
         Add("sh rm -rf glob", "a.sh", $"rm -rf \"$TMPDIR\"/{P}-*", "owner-blind");
         Add("sh find -name class", "a.sh", $"find /tmp -name '{Lower}[-_]*' -delete", "owner-blind");
