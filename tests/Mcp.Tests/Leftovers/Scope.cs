@@ -62,17 +62,25 @@ public static class Scope
         if (identity is null) return new ClaimRead.Missing();
         if (identity.Value.IsLink || !identity.Value.IsRegular) return new ClaimRead.Unreadable();
         if (!(mine ?? IsMine)(file)) return new ClaimRead.Unreadable("foreign-uid");
+        // Windows reads through ONE handle that is checked before any byte is read: a disk file, a regular one, the very file judged above —
+        // a named pipe or a device swapped in since cannot block this read. Elsewhere the file is opened the ordinary way.
+        var bytes = OperatingSystem.IsWindows() ? Native.ReadVerifiedRegular(file, identity.Value, ReadLimit) : ReadOpened(file);
+        return bytes is null ? new ClaimRead.Unreadable() : new ClaimRead.Text(Encoding.UTF8.GetString(bytes));
+    }
+
+    private static byte[]? ReadOpened(string file)
+    {
         try
         {
             using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             var buffer = new byte[ReadLimit];
             var read = 0;
             while (read < buffer.Length && stream.Read(buffer, read, buffer.Length - read) is var n and > 0) read += n;
-            return new ClaimRead.Text(Encoding.UTF8.GetString(buffer, 0, read));
+            return buffer[..read];
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
         {
-            return new ClaimRead.Unreadable();
+            return null;
         }
     }
 

@@ -1,6 +1,8 @@
+using System.IO.Pipes;
 using System.Runtime.Versioning;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using System.Text;
 using FluentAssertions;
 using Xunit;
 
@@ -145,6 +147,38 @@ public sealed class ScopeTests : IDisposable
         var text = Scope.ReadClaimText(Path.Combine(scratch, "long"), _ => true).Should().BeOfType<ClaimRead.Text>().Subject.Value;
 
         text.Should().HaveLength(513, "512 bytes are the most a claim may hold; the 513th makes it unreadable");
+    }
+
+    [Fact]
+    public void On_windows_a_pipe_a_device_or_another_file_in_place_of_the_claim_is_refused_without_a_read()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("GetFileType on the open handle — Windows only");
+            return;
+        }
+
+        WindowsVerifiedRead(_owned.Dir("scratch"));
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void WindowsVerifiedRead(string scratch)
+    {
+        var claim = Path.Combine(scratch, "claim");
+        File.WriteAllText(claim, "u1:h@windows:1\n");
+        var judged = Native.IdentityOf(claim)!.Value;
+        Encoding.UTF8.GetString(Native.ReadVerifiedRegular(claim, judged, 513)!).Should().Be("u1:h@windows:1\n", "premise: the judged file reads");
+
+        var name = "mcp-leftovers-" + Guid.NewGuid().ToString("N");
+        using var server = new NamedPipeServerStream(name, PipeDirection.InOut, 1); // nobody writes to it: a read would block for ever
+        var pipe = Task.Run(() => Native.ReadVerifiedRegular(@"\\.\pipe\" + name, judged, 513));
+        pipe.Wait(TimeSpan.FromSeconds(10)).Should().BeTrue("a named pipe is refused by its file type, not read");
+        pipe.Result.Should().BeNull();
+        Native.ReadVerifiedRegular(@"\\.\NUL", judged, 513).Should().BeNull("a device is not a disk file");
+
+        var swapped = Path.Combine(scratch, "swapped");
+        File.WriteAllText(swapped, "u1:h@windows:2\n");
+        Native.ReadVerifiedRegular(swapped, judged, 513).Should().BeNull("another file than the one judged: the 128-bit id differs");
     }
 
     [SupportedOSPlatform("windows")]

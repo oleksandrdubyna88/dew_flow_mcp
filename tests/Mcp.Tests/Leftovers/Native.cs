@@ -37,6 +37,7 @@ internal static partial class Native
     // one of them gives no identity, and an identity that is guessed could authorise a removal.
     private const uint StatxRequired = 0x1 | 0x2 | 0x8 | 0x40 | 0x80 | 0x100;
 
+    private const uint FileTypeDisk = 1; // FILE_TYPE_DISK
     private const uint ErrorFileNotFound = 2, ErrorPathNotFound = 3, ErrorAlreadyExists = 183;
 
     /// <summary>The caller's REAL uid — never the effective one.</summary>
@@ -245,6 +246,14 @@ internal static partial class Native
             return error is ErrorFileNotFound or ErrorPathNotFound ? null : throw Failure($"CreateFileW {path}", (int)error);
         }
 
+        return WindowsIdentityOfHandle(handle, path);
+    }
+
+    /// <summary>The identity of an OPEN handle: the volume serial and the 128-bit file id (<c>FileIdInfo</c>, which ReFS needs — the
+    /// 64-bit index of <c>GetFileInformationByHandle</c> is not unique there), and the attributes.</summary>
+    [SupportedOSPlatform("windows")]
+    private static Identity WindowsIdentityOfHandle(SafeFileHandle handle, string path)
+    {
         var id = new byte[24]; // FILE_ID_INFO: VolumeSerialNumber u64, FileId 128 bits
         var basic = new byte[40]; // FILE_BASIC_INFO: four FILETIMEs (creation, access, write, change), attributes u32
         if (!Kernel32.GetFileInformationByHandleEx(handle, 18, id, (uint)id.Length)) throw Failure($"FileIdInfo {path}", Marshal.GetLastPInvokeError());
@@ -262,6 +271,39 @@ internal static partial class Native
             Uid: null,
             ChangeTime: FileTime(basic.AsSpan(24)),
             WriteTime: FileTime(basic.AsSpan(16)));
+    }
+
+    /// <summary>At most <paramref name="limit"/> bytes of the file at <paramref name="path"/>, through ONE open handle that is checked
+    /// before any byte is read (Windows): the handle must be a disk file (<c>GetFileType</c> = <c>FILE_TYPE_DISK</c> — a named pipe or a
+    /// device swapped in since the caller looked cannot be read, and so cannot block the read), a regular file (no folder, no reparse point;
+    /// the open does not follow a link) and the very file <paramref name="expected"/> names (volume serial and 128-bit file id). Null when
+    /// any of that fails or the file cannot be opened: an unreadable claim, never a guess. Windows only: POSIX opens a claim the
+    /// ordinary way, after the same identity check.</summary>
+    internal static byte[]? ReadVerifiedRegular(string path, Identity expected, int limit)
+    {
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("the verified read is the Windows form");
+        try
+        {
+            return WindowsReadVerifiedRegular(path, expected, limit);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static byte[]? WindowsReadVerifiedRegular(string path, Identity expected, int limit)
+    {
+        // GENERIC_READ 0x80000000; share READ|WRITE|DELETE = 7; OPEN_EXISTING = 3; FILE_FLAG_OPEN_REPARSE_POINT 0x00200000 (a link is the entry itself)
+        using var handle = Kernel32.CreateFile(path, 0x80000000u, 7, IntPtr.Zero, 3, 0x00200000u, IntPtr.Zero);
+        if (handle.IsInvalid || Kernel32.GetFileType(handle) != FileTypeDisk) return null;
+        var now = WindowsIdentityOfHandle(handle, path);
+        if (!now.IsRegular || now.Dev != expected.Dev || now.Ino != expected.Ino) return null;
+        var buffer = new byte[limit];
+        var read = 0;
+        while (read < buffer.Length && RandomAccess.Read(handle, buffer.AsSpan(read), read) is var n and > 0) read += n;
+        return buffer[..read];
     }
 
     private static DateTimeOffset FileTime(ReadOnlySpan<byte> field) =>
@@ -331,6 +373,9 @@ internal static partial class Native
 
         [LibraryImport("kernel32", EntryPoint = "CreateFileW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
         internal static partial SafeFileHandle CreateFile(string path, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+
+        [LibraryImport("kernel32")]
+        internal static partial uint GetFileType(SafeFileHandle handle);
 
         [LibraryImport("kernel32", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
