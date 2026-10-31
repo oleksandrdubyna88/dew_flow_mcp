@@ -63,6 +63,8 @@ public static partial class Owned
 
     public const int MaxName = 63, IdLength = 6, StartToleranceSeconds = 2, MaxClaimBytes = 512, MaxDraws = 3;
 
+    private static readonly char[] WindowsReserved = ['<', '>', ':', '"', '|', '?', '*'];
+
     private const string IdAlphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
     // Every anchored expression here ends in \z (never $, which matches before a final \n) and spells [0-9] (never \d,
@@ -130,11 +132,17 @@ public static partial class Owned
     /// <summary>Rule §1: non-empty, no path separator, NUL or control character, no leading <c>-</c>, and short enough
     /// that the whole name stays within 63 characters under THIS owner. Spaces and non-ASCII are allowed on purpose:
     /// they are what a path test must cover. Thrown before anything exists.</summary>
-    internal static void CheckWhat(string what)
+    internal static void CheckWhat(string what) => CheckWhat(what, OperatingSystem.IsWindows());
+
+    /// <summary>The check for either platform, so the Windows half can be tested from anywhere. On Windows <c>&lt;&gt;:"|?*</c> are refused as
+    /// well: a colon makes the claim <c>&lt;name&gt;.owner</c> an alternate data stream of <c>&lt;name&gt;</c>, and the others are not
+    /// file-name characters at all.</summary>
+    internal static void CheckWhat(string what, bool windows)
     {
         if (what.Length == 0) throw Refused("`what` must not be empty", what);
         if (what.Any(c => c is '/' or '\\' || c < ' ' || c == '\u007f')) throw Refused("`what` may not hold a path separator or a control character", what);
         if (what[0] == '-') throw Refused("`what` may not start with \"-\"", what);
+        if (windows && what.IndexOfAny(WindowsReserved) >= 0) throw Refused("`what` may not hold any of <>:\"|?* on Windows (a colon makes the claim an alternate data stream)", what);
         if (what.Length > Room) throw Refused($"the whole name would pass {MaxName} characters — `what` is {what.Length}", what);
     }
 

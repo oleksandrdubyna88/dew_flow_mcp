@@ -85,6 +85,35 @@ public sealed class OwnedTests : IDisposable
         Directory.GetFileSystemEntries(parent).Should().BeEquivalentTo(before);
     }
 
+    [Theory]
+    [InlineData("a:b")]
+    [InlineData("a<b")]
+    [InlineData("a>b")]
+    [InlineData("a\"b")]
+    [InlineData("a|b")]
+    [InlineData("a?b")]
+    [InlineData("a*b")]
+    public void On_windows_a_what_the_file_system_reads_as_syntax_is_refused_and_elsewhere_it_is_only_a_character(string what)
+    {
+        // A colon makes the claim "<name>.owner" an alternate data stream of <name>; the others are not file-name characters at all.
+        var onWindows = () => Owned.CheckWhat(what, windows: true);
+        var elsewhere = () => Owned.CheckWhat(what, windows: false);
+
+        onWindows.Should().Throw<ArgumentException>().Which.Message.Should().Contain("Windows").And.Contain(Owned.Room.ToString());
+        elsewhere.Should().NotThrow();
+    }
+
+    [Fact]
+    public void The_real_check_is_the_windows_one_on_windows()
+    {
+        var parent = _owned.Dir("parent");
+
+        var act = () => _owned.Dir("a:b", parent);
+
+        if (OperatingSystem.IsWindows()) act.Should().Throw<ArgumentException>();
+        else act.Should().NotThrow("on Linux a colon is a character; the scope removes the folder with the rest");
+    }
+
     [Fact]
     public void A_what_longer_than_the_room_under_this_owner_throws_naming_the_room()
     {
