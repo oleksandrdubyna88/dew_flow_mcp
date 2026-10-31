@@ -182,12 +182,16 @@ helper by shape, not by file**: same names where C# allows, same order, same thr
 | Story | Model (brief · code · review) | Depends on | Lands |
 |---|---|---|---|
 | S1 — the pin on release `115bbf8` | — | — | **PR #57**, merged alone (owner decision 1); not built here |
-| S2 — the owner token and record, the C# owned-resource helper, liveness, the kernel-owner and identity reads | Opus · Sonnet · Opus | PR #57 merged | first commit of the producer branch |
-| S3 — the start-of-run sweep, as an assembly fixture | Opus · Sonnet · Opus | S2 | second |
+| S2 — the owner token and record, the C# owned-resource helper, liveness, the kernel-owner and identity reads | Opus · Sonnet · Opus | PR #57 merged | first, as THREE commits (below) |
+| S3 — the start-of-run sweep, as an assembly fixture | Opus · Sonnet · Opus | S2's commit 2 green on both legs | second |
 | S4 — the guard, the migration of 21 sites, the end-of-run audit | Opus · Sonnet · Opus | S2, S3 | last |
 
-**One branch, one pull request, squash-merged.** S2–S4 are commits on `feat/test-leftovers-e3`; each is reviewed as a
-unit; none merges alone — the guard's test over this repository is red until the migration lands, and a helper that
+**S2 is three commits, each green on its own on BOTH CI legs** (cadence consultation, 2026-10-31): **(1)** the
+runner facts (scenario 0) and the `build-test-windows` job; **(2)** `Native`, identity, `Scope.IsMine`, the probe,
+with their direct tests — the two Windows ownership outcomes of sc. 13 included; **S3 is not started until this
+commit is green on both legs**, because every later story trusts these answers; **(3)** naming, owner records,
+claims, disposal and the registry. **One branch, one pull request, squash-merged.** S2–S4 are commits on
+`feat/test-leftovers-e3`; each is reviewed as a unit; none merges alone — the guard's test over this repository is red until the migration lands, and a helper that
 emits the owner form without its sweep is half the promise. **The merge condition** (rule *The barrier*; remainder plan
 R6): the producer pull request merges only after (a) PR #57 is merged, (b) `dew_flow_conventions ·
 todo/PLAN_test_leftovers_merged_core_release.md` R6 records every consumer's sweep-only stage — this family's seven and
@@ -316,8 +320,9 @@ public sealed class OwnedDir : IDisposable                        // one folder;
     public string Path { get; }
     public static OwnedDir Create(string what, string? parent = null, Action<string>? warn = null);
     internal static OwnedDir Create(string what, string? parent, Action<string>? warn, Func<string> nextName, Action<string>? beforeClaimWrite = null, Action<string>? afterClaim = null);   // test seams: the names to try; a step between the claim's exclusive create and its write; a step between the claim and the folder
-    public void Dispose();                                        // Removal.Quietly(Path, warn); idempotent; never throws
-    internal static IReadOnlyList<OwnedDir> Undisposed();         // the process-wide registry: created, not yet disposed (S4 audit)
+    public void Dispose();                                        // Removal.Quietly(Path, warn); idempotent; never throws; marks the entry Attempted, leaves the registry only when folder AND claim are gone
+    public bool DisposeAttempted { get; }                         // Dispose() ran at least once
+    internal static IReadOnlyList<OwnedDir> Unreclaimed();        // the process-wide registry: never disposed, AND disposed but not removed (S4 audit)
 }
 
 public sealed class OwnedScope : IDisposable                      // many folders, one Dispose — a test class's field
@@ -397,9 +402,15 @@ internal static class Removal
   4. Return the `OwnedDir` and add it to the registry. After the draws: throw `owned: no free name for <what> in <parent> after 3 draws`.
   The caller registers the cleanup on the same statement (`using var` or `OwnedScope.Dir`); the window inside `Create`
   is covered by step 3's own catch. Nothing is ever written inside `dir`.
-- **The registry of undisposed instances.** One process-wide `ConcurrentDictionary<OwnedDir, byte>`; the FIRST
-  `Dispose()` removes the entry (before the removal is tried). `OwnedScope` holds `OwnedDir`s, so its folders are in
-  the registry too. `Undisposed()` is a snapshot. It is what lets S4's audit see a folder made under a CUSTOM `parent`.
+- **The registry of unreclaimed instances.** One process-wide `ConcurrentDictionary<OwnedDir, byte>`, entered at
+  `Create`. `Dispose()` sets `DisposeAttempted` FIRST, then tries the removal, and **removes the entry only when
+  `Removal.Quietly` returned true — folder and claim both gone**; a removal that gave up (a held handle on Windows, a
+  read-only subfolder on Linux) leaves the entry in place, so the audit still sees the folder. A later `Dispose()`
+  tries again (idempotent on success: no second warning once the entry is gone). `OwnedScope` holds `OwnedDir`s, so
+  its folders are in the registry too. `Unreclaimed()` is a snapshot of both kinds — never disposed, and disposed but
+  not removed — told apart by `DisposeAttempted`. It is what lets S4's audit see a folder made under a CUSTOM
+  `parent`, and a disposal that failed under any parent (cadence consultation, 2026-10-31; before it the first
+  `Dispose()` dropped the entry before the removal was tried, and a failed removal left no audit signal).
 - **`Removal.Quietly(dir, warn)`** (`O:582-590`): up to five tries, 100 ms apart, each: if the folder exists,
   `UnlinkTopLevelLinks(dir)` — every top-level entry whose `Attributes` carry `ReparsePoint` is removed as a LINK (a
   `DirectoryInfo` ⇒ `Directory.Delete(link)` non-recursive, which removes a junction or a directory symlink and never its
@@ -498,9 +509,27 @@ internal static class Removal
 - **CI (this story).** `build-test` gains, before `Build`, the step the other two jobs already have —
   `git submodule update --init --depth 1 .claude/rules/shared` — because the vectors test and S4's token check read
   the mount and fail without it. A new job `build-test-windows` on `windows-latest`: checkout, the same submodule
-  step, `setup-dotnet` 10.0.x, `dotnet build dew_flow_mcp.slnx -c Release`, then
-  `.\tests\Mcp.Tests\bin\Release\net10.0\Mcp.Tests.exe --filter-namespace Mcp.Tests.Leftovers` — the Windows half of
-  this epic is proven by a machine, not by hand.
+  step, `setup-dotnet` 10.0.x, `dotnet build dew_flow_mcp.slnx -c Release` (no `Formatted` step: `core.autocrlf`
+  noise, facts), then the test executable. **Until S4 lands the job runs
+  `.\tests\Mcp.Tests\bin\Release\net10.0\Mcp.Tests.exe --filter-namespace Mcp.Tests.Leftovers`; from S4's migration
+  commit on it runs the FULL executable** — all 11 migrated classes dispose through the helper on Windows, which is
+  what the job proves. A migrated test whose premise is Linux-only (a POSIX mode, a `/proc` read, `root`) says so
+  with `Assert.Skip("<the premise> — Linux only")`, never a `[Fact]` that fails on Windows and never a silent pass;
+  the job's log lists every skip and the PR quotes the count; a test that is red on Windows for a platform reason is
+  a red job, fixed or skipped with its reason before the merge. The Windows half of this epic is proven by a
+  machine, not by hand.
+- **Windows ownership fixtures (`WindowsOwnership.cs`, test code; commit 2).** On an elevated runner every own file
+  is `Administrators`-owned, so a green leg could prove preservation and never collection. Two helpers make BOTH
+  outcomes on any machine: `OwnedByCaller(path)` — `new DirectoryInfo(path)` (or `FileInfo`) `.GetAccessControl()`,
+  `SetOwner(WindowsIdentity.GetCurrent().User)`, `SetAccessControl(…)` (`System.IO.FileSystemAclExtensions`,
+  `System.Security.AccessControl.DirectorySecurity`): setting the owner to the caller's OWN user SID needs only
+  `WRITE_OWNER` on the object, which the creator's default DACL grants — no privilege; `SeRestorePrivilege` is needed
+  only to make a SID the token cannot own the owner. `ForeignToCaller(path)` — first tries `SetOwner(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null))`,
+  which succeeds where the token may own that group (an elevated token); where it throws (`PrivilegeNotHeldException`
+  / `UnauthorizedAccessException`, a normal token without `SeRestorePrivilege`) the fallback is key (1): the entry is
+  made under `Environment.GetFolderPath(SpecialFolder.CommonDocuments)` (`C:\Users\Public\Documents`, writable by every
+  user and OUTSIDE the caller's profile), so `IsMine` is false by the path key whatever the SID. Both helpers return
+  the path they prepared; neither skips.
 
 **Scenarios** (RED first — write the tests against the signatures above before the types exist and record the build
 failure, then stub the types and record each scenario failing on its assertion before the body is written). Every
@@ -535,7 +564,11 @@ file FAILS the test that needs it, never skips** (an uninitialised submodule is 
    folder whose name starts with `NameBase + "path Unicode пробел-"`, empty, and a sibling `<folder>.owner` whose
    text `Parse`s to `Owner.RunRecord()` and ends in one `\n`.
 5. **Disposal removes the folder and the claim, and is idempotent.** After `Dispose()` neither exists; a second
-   `Dispose()` writes no warning; the instance is in `Undisposed()` between `Create` and `Dispose`, not after.
+   `Dispose()` writes no warning; the instance is in `Unreclaimed()` between `Create` and `Dispose`, not after.
+   **A disposal that fails stays visible:** make the folder unremovable (sc. 6's method), `Dispose()` ⇒ the
+   instance is STILL in `Unreclaimed()` with `DisposeAttempted == true`; make it removable, `Dispose()` again ⇒ gone
+   from the registry, folder and claim gone. RED first: against a registry that drops the entry on the first
+   `Dispose()`, the failed instance is absent.
 6. **Teardown never throws, and what it cannot remove stays prefixed AND claimed.** Windows: hold
    `File.Open(<dir>/held.txt, FileMode.Create, FileAccess.Write, FileShare.None)`; POSIX: `File.SetUnixFileMode(parent, UserRead | UserExecute)`,
    `Assert.Skip` as root. `Dispose()` returns; exactly one warning `owned: could not remove … left for the start-of-run
@@ -595,7 +628,11 @@ file FAILS the test that needs it, never skips** (an uninitialised submodule is 
     `ProbeProcess(0)`, `(-1)`, `(2^53 + 1)`, on Linux `(int.MaxValue + 1L)`, on Windows `(uint.MaxValue + 1L)` ⇒
     `Unknown` with no native call; on Linux as a non-root user `ProbeProcess(1)` ⇒ `Unknown` (EPERM), `Assert.Skip` as
     root; `Scope.IsMine` of a file this test made ⇒ the MEASURED answer of scenario 0 (true where the owner SID is the
-    user's, false where it is `Administrators` — asserted, not skipped); `IsMine` of a symlink to that file ⇒ judged on
+    user's, false where it is `Administrators` — asserted, not skipped); **and on Windows, whatever the runner's
+    elevation, both outcomes through the fixtures:** `IsMine(OwnedByCaller(file))` ⇒ true and its `OwnerSidOf` equals
+    `WindowsIdentity.GetCurrent().User`; `IsMine(ForeignToCaller(file))` ⇒ false (the `Administrators` SID or the
+    out-of-profile path, the PR says which the runner took); RED first against an `IsMine` that checks the profile
+    alone (`O:215-222`): the elevated runner's `Administrators`-owned file inside the profile reads true; `IsMine` of a symlink to that file ⇒ judged on
     the LINK's own owner and identity, and `Native.IdentityOf` of it reports `IsLink`; a `mine` seam answering false
     makes `ReadClaimText` of the same file `Unreadable("foreign-uid")`; a DIRECTORY named like a claim ⇒ `Unreadable`
     (the regular-file check; a FIFO needs `mkfifo`, which .NET cannot make without a child — not provoked, the
@@ -611,9 +648,12 @@ file FAILS the test that needs it, never skips** (an uninitialised submodule is 
 - **Commands.** `node .claude/rules/shared/tools/low-priority.mjs dotnet build dew_flow_mcp.slnx -c Debug -m:4`;
   `node .claude/rules/shared/tools/low-priority.mjs ./tests/Mcp.Tests/bin/Debug/net10.0/Mcp.Tests.exe --filter-namespace "Mcp.Tests.Leftovers"`;
   on Linux (WSL or CI) `./tests/Mcp.Tests/bin/Debug/net10.0/Mcp.Tests --filter-namespace "Mcp.Tests.Leftovers"`; the whole executable.
-- **DoD.** Scenario 0's output recorded in the PR before the first helper commit; build at 0 warnings; every scenario
-  observed RED, then GREEN, on the Windows job and on the Linux job (scenario 6, 10 and 13 run a different branch on
-  each); the constants table of S1 in the commit message; the module has no caller yet — S3 and S4 adopt it.
+- **DoD.** Three commits, in *Order*'s sequence, each green on BOTH legs before the next is started: (1) scenario 0's
+  output recorded in the PR and the Windows job green; (2) `Native`, identity, `Scope`, the probe and their tests —
+  sc. 12, 13 (both Windows ownership outcomes included) — green on both legs, which is S3's starting condition; (3)
+  the rest. Build at 0 warnings; every scenario observed RED, then GREEN, on the Windows job and on the Linux job
+  (scenario 6, 10 and 13 run a different branch on each); the constants table of S1 in commit 3's message; the module
+  has no caller yet — S3 and S4 adopt it.
 
 ## S3 — The start-of-run sweep, as an assembly fixture
 
@@ -740,6 +780,13 @@ unless stated (on Linux the namespace must be this reader's or the verdict is `u
 7. **Silence when there is nothing.** An empty `Tmp` ⇒ an empty result, and the fixture's `report` seam got nothing.
 8. **The fixture ran before this test.** A test class taking `LeftoversSweepFixture fixture` asserts `fixture.LastRun`
    is not null — the sweep ran at the start of THIS run, over the real temp root.
+9. **Windows proves COLLECTION with the real keys, whatever the runner's elevation** (no `Mine` seam: `Scope.IsMine`
+   itself). In a `Tmp` under the profile: an old own folder and its dead-pid claim, both passed through
+   `OwnedByCaller` (S2) ⇒ `Removed` names it, folder and claim gone; a second old own folder and claim through
+   `ForeignToCaller` (its own `Tmp` where the fallback is the out-of-profile path) ⇒ `foreign-uid`, a `foreign:` line,
+   both still there. The PR records which branch each fixture took on the runner. RED first: against an `IsMine`
+   that checks the profile alone, the second is removed on an elevated runner; against the measured-only sc. 13, an
+   elevated runner never removes anything and the leg proves preservation only.
 
 - **Commands.** As S2, `--filter-class "*LeftoversSweepTests"`; then the whole executable twice in a row — the second
   run prints no `leftovers` line on a clean machine.
@@ -869,16 +916,19 @@ Assertions do not change, with one exception that is the point: `WorkspaceToolTe
 - `LeftoversAudit.ClaimedBy(string tmp, Owner owner) → IReadOnlyList<string>`: every depth-1 folder of `tmp` whose name
   matches `Owned.Pattern()` and whose sibling claim (through `Scope.ReadClaimText`) parses to exactly `owner` (token,
   host, pid, start, ns), plus every such claim whose folder is missing.
-- `LeftoversAudit.Undisposed() → IReadOnlyList<string>`: the paths of `OwnedDir.Undisposed()` — every folder created
-  and never disposed, **wherever its `parent` was**.
+- `LeftoversAudit.Unreclaimed() → IReadOnlyList<(string Path, bool DisposeAttempted)>`: `OwnedDir.Unreclaimed()` —
+  every folder created and never disposed, AND every folder whose disposal was tried and failed, **wherever its
+  `parent` was**.
 
 `LeftoversSweepFixture` implements `IAsyncDisposable`; `DisposeAsync` — after the last test of the assembly — first
-disposes every instance `Undisposed()` names, then computes `ClaimedBy(Owned.TempRoot(), Owner.RunRecord())` and
-removes each entry with `Removal.Quietly`, and, when either list was not empty, throws
-`InvalidOperationException("mcp tests: this run left <n> folder(s) it claimed — <paths>; a test made scratch outside a disposed scope")`.
-A green run's teardown leaves nothing it claimed; this is the whole-suite form of the epic's goal sentence, and it
-catches the one leak the guard cannot see. In an elevated Windows run the claim scan is blind (S2, *Elevated runs*);
-the registry check is not.
+takes the `Unreclaimed()` snapshot, disposes each of them once more (a handle released since lets this one succeed),
+then computes `ClaimedBy(Owned.TempRoot(), Owner.RunRecord())` and removes each entry with `Removal.Quietly`, and,
+when any list was not empty, throws ONE `InvalidOperationException` whose message names each path under its own
+words — `mcp tests: this run left <n> folder(s) it claimed — never disposed: <paths>; disposed but not removed:
+<paths>; claimed in the temp root: <paths>` (an empty group is omitted). A green run's teardown leaves nothing it
+claimed; this is the whole-suite form of the epic's goal sentence, and it catches the two leaks the guard cannot see:
+a helper call nobody disposes, and a disposal that gave up. In an elevated Windows run the claim scan is blind (S2,
+*Elevated runs*); the registry check is not.
 
 **The janitor cross-check, automated** (`LeftoversJanitorTests.cs`; the contract has TWO implementations, so the
 family's testing rule wants a LIVE check, not a by-hand one). On Linux only (on Windows `bash` on the path may be
@@ -895,28 +945,37 @@ second; stderr holds a `foreign:` line naming the second; no `skipped:` line nam
 `janitor.sh` FAILS the test. If the first is not listed, the two implementations' records disagree: stop and report to
 the conventions owner, never adjust the C# format to pass.
 
-**The audit's teeth, automated** (`LeftoversSelfTest.cs` + one CI step). `LeftoversSelfTest.Leaves_one_owned_dir_undisposed`
-runs ONLY when `MCP_LEFTOVERS_SELFTEST` is `1` (`Assert.Skip` otherwise, with the sentence that says so): it calls
-`OwnedDir.Create("selftest")` and returns without disposing. The normal run never sets the variable. CI's `build-test`
-gains, AFTER the normal `Test` step:
+**The audit's teeth, automated** (`LeftoversSelfTest.cs` + one CI step, two cases). The class runs ONLY when
+`MCP_LEFTOVERS_SELFTEST` is set (`Assert.Skip` otherwise, with the sentence that says so); the normal run never sets
+it. `Leaves_one_owned_dir_undisposed` (value `1`): `OwnedDir.Create("selftest")` and return without disposing.
+`Disposes_but_the_removal_fails` (value `failed-dispose`): `OwnedDir.Create("selftest-failed")`, make it unremovable —
+Linux: a subfolder holding a file, then `File.SetUnixFileMode(subfolder, UserRead | UserExecute)` (0o555: the file
+inside cannot be unlinked; `Assert.Skip` as root); Windows: a held `FileShare.None` handle on a file inside — call
+`Dispose()` (one warning, the entry stays `DisposeAttempted`), then make it removable again (restore the mode;
+release the handle) and return. The audit, at the end of the run, names it under *disposed but not removed*, removes
+it now, and throws; the temp root is clean afterwards. The step, AFTER the normal `Test` step:
 
 ```yaml
       - name: The audit fails a run that leaves a claimed folder
-        env: { MCP_LEFTOVERS_SELFTEST: "1" }
         run: |
           set -o pipefail
-          if ./tests/Mcp.Tests/bin/Release/net10.0/Mcp.Tests --filter-class "*LeftoversSelfTest" 2>&1 | tee selftest.log; then
-            echo "the end-of-run audit did not fail the run"; exit 1; fi
-          grep -E "testsToDelete-[uw][0-9]{1,10}-mcp-selftest-[A-Za-z0-9]{6}" selftest.log | grep -q "mcp tests: this run left" \
-            || { echo "the run failed, but not with the audit's message"; exit 1; }
-          left=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -iname 'teststodelete-*-mcp-selftest-*') \
-            || { echo "the temp root could not be listed"; exit 1; }
-          [ -z "$left" ] || { echo "the audit left the folder behind: $left"; exit 1; }
+          for case in "1:never disposed:selftest" "failed-dispose:disposed but not removed:selftest-failed"; do
+            IFS=: read -r value words what <<< "$case"
+            if MCP_LEFTOVERS_SELFTEST="$value" ./tests/Mcp.Tests/bin/Release/net10.0/Mcp.Tests --filter-class "*LeftoversSelfTest" 2>&1 | tee selftest.log; then
+              echo "the end-of-run audit did not fail the run ($value)"; exit 1; fi
+            grep -q "mcp tests: this run left" selftest.log || { echo "the run failed, but not with the audit's message ($value)"; exit 1; }
+            grep -E "$words: .*testsToDelete-[uw][0-9]{1,10}-mcp-$what-[A-Za-z0-9]{6}" selftest.log >/dev/null \
+              || { echo "the audit's message does not name the folder under '$words' ($value)"; exit 1; }
+            left=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -iname "teststodelete-*-mcp-$what-*") \
+              || { echo "the temp root could not be listed"; exit 1; }
+            [ -z "$left" ] || { echo "the audit left the folder behind: $left"; exit 1; }
+          done
 ```
 
-— green only on a NON-zero exit that carries the audit's own message (the audit's `mcp tests: this run left <n> folder(s) it
-claimed — <paths>` text, S4), and an empty listing of the temp root `Owned.TempRoot` resolves to on the runner (`Path.GetTempPath()`
-= `$TMPDIR` or `/tmp`); a listing error is red, never ignored (round 3).
+— green only on a NON-zero exit per case that carries the audit's own message with the case's own words (`never
+disposed:` / `disposed but not removed:`) before the folder's name, and an empty listing of the temp root
+`Owned.TempRoot` resolves to on the runner (`Path.GetTempPath()` = `$TMPDIR` or `/tmp`); a listing error is red,
+never ignored (round 3).
 If xUnit v3 does not fail the run on an assembly-fixture cleanup exception, this step is red on its first run: stop and
 report — do not turn the audit into a warning silently.
 
@@ -1019,15 +1078,19 @@ a reason — is merge condition (d) of *Order*.**
 7. **The audit names only what THIS run claimed.** In a private `tmp`: a folder claimed by `Owner.RunRecord()` ⇒
    listed; one claimed by a dead pid, one by `Other`, one by `other@<tag>`, one unclaimed, one of another token ⇒ not
    listed; an orphan claim of this run ⇒ listed.
-7a. **The audit sees an undisposed folder under ANY parent.** RED first: an `OwnedDir.Create("custom", parent: <a
-   private OwnedDir NOT at the temp root's depth 1>)` left undisposed ⇒ `Undisposed()` names its path while
-   `ClaimedBy(Owned.TempRoot(), …)` does not; after `Dispose()` it is gone from both. The test disposes everything it
-   made before it ends.
+7a. **The audit sees an undisposed folder under ANY parent, and a failed disposal.** RED first: an
+   `OwnedDir.Create("custom", parent: <a private OwnedDir NOT at the temp root's depth 1>)` left undisposed ⇒
+   `Unreclaimed()` names its path with `DisposeAttempted == false` while `ClaimedBy(Owned.TempRoot(), …)` does not;
+   after `Dispose()` it is gone from both. A second one made unremovable (S2 sc. 6's method) and disposed ⇒ named with
+   `DisposeAttempted == true`; made removable and disposed again ⇒ gone. The audit's message for a hand-built pair
+   carries both groups under their words. The test disposes everything it made before it ends.
 8. **The audit has teeth** — the CI self-test step above, RED first: the step is added BEFORE `LeftoversSelfTest`
    exists (the filtered run then finds no test and exits zero: the step is red), then the self-test lands and the
-   step is green on a non-zero exit with the audit's message naming one `testsToDelete-<owner>-mcp-selftest-…` folder
-   in the job log, and the temp root holds none afterwards. Locally: `MCP_LEFTOVERS_SELFTEST=1 … --filter-class "*LeftoversSelfTest"`
-   exits non-zero; without the variable the self-test skips and the normal run is green.
+   step is green on a non-zero exit per case with the audit's message naming one `testsToDelete-<owner>-mcp-selftest-…`
+   folder under `never disposed:` and one `…-mcp-selftest-failed-…` under `disposed but not removed:` in the job log,
+   and the temp root holds none afterwards. The second case is RED against the old registry (the entry dropped on the
+   first `Dispose()`): the run exits zero. Locally: `MCP_LEFTOVERS_SELFTEST=1` and `=failed-dispose` with
+   `--filter-class "*LeftoversSelfTest"` exit non-zero; without the variable the class skips and the normal run is green.
 9. **No leftover after a full run, and the janitor reads THIS helper's claim on Windows** (by hand, recorded in the
    PR; the Linux half is `LeftoversJanitorTests`, automated above). Before the migration, one full run leaves N new
    `mcp-…` folders and `outside.txt` in the temp root (count them); after it, zero new entries of either, and `bash
@@ -1152,6 +1215,17 @@ standing answer: macOS stays "not built; the helper refuses with a clear message
 
 
 Round 3 (2026-10-31; GPT alone — Gemini did not receive the 1167-line plan whole): `proceed` with three findings. Accepted: the self-test step is green only on the audit's own message and an empty, listable temp root (S4); the claim is deleted after the quarantine only under the identity and text captured before the rename (S3 step 3, sc. 5e). Rejected: "the audit can delete another live test's folder" — the audit runs in the assembly fixture's dispose, after every test of the assembly has finished, and takes only claims whose record is this process's own pid and start.
+
+**Cadence consultation (2026-10-31; GPT), three findings, all taken.** C1: the Windows leg proved preservation only —
+on an elevated runner every own folder is `foreign-uid`; now two test fixtures (`OwnedByCaller`, by `SetOwner` to the
+caller's own SID, no privilege needed; `ForeignToCaller`, the `Administrators` SID where the token may own it, else
+an out-of-profile path) make both outcomes on any machine, S2 sc. 13 asserts them through the real `IsMine` and S3
+sc. 9 asserts the sweep REMOVES the first and keeps the second; after S4 the Windows job runs the full executable,
+Linux-only premises as named skips. C2: a failed disposal was invisible to the audit (the registry entry went before
+the removal was tried); now the entry stays until folder and claim are gone, `Unreclaimed()` returns both kinds, the
+audit names them under distinct words, and the CI self-test has a second case, `failed-dispose`. C3: S2 lands as
+three commits, each green on both legs, S3 waiting on the second (*Order*, S2 DoD); the PR still merges as one squash.
+
 ## Judge's notes on the parent's E3 entry
 
 Opus, 2026-10-16, against `origin/main` b352881 of this repository and the E1 branch of the shared rules; the
