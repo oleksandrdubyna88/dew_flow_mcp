@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using Mcp.Contracts;
+using Mcp.Tests.Leftovers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Workspace.Application;
 using Workspace.Infrastructure;
@@ -9,8 +10,12 @@ using Xunit;
 namespace Mcp.Tests;
 
 /// <summary>The one real tool, covering what actually carries risk: the sandbox.</summary>
-public sealed class WorkspaceToolTests
+public sealed class WorkspaceToolTests : IDisposable
 {
+    private readonly OwnedScope _owned = new();
+
+    public void Dispose() => _owned.Dispose();
+
     [Fact]
     public async Task Reads_a_file_and_reports_the_line_span()
     {
@@ -240,7 +245,7 @@ public sealed class WorkspaceToolTests
         // At composition, where one message is read once — not as an empty answer on every read for
         // the life of a process nobody is watching.
         var build = () => new SandboxedFileReader(
-            new WorkspaceRoot(Path.GetTempPath()),
+            new WorkspaceRoot(Owned.TempRoot()),
             new SandboxedFileReaderOptions { MaxBytes = 0 },
             NullLogger<SandboxedFileReader>.Instance);
 
@@ -269,11 +274,21 @@ public sealed class WorkspaceToolTests
     }
 
     [Fact]
+    public void The_escape_target_is_written_inside_an_owned_folder_never_into_the_temp_root()
+    {
+        var (_, root) = Build();
+
+        var parent = Directory.GetParent(root)!.FullName;
+
+        Owned.Pattern().IsMatch(Path.GetFileName(parent)).Should().BeTrue($"{parent} must be an owned folder, not the temp root");
+    }
+
+    [Fact]
     public async Task Refuses_an_absolute_path()
     {
         var (provider, _) = Build();
 
-        var result = await Invoke(provider, $$"""{"path":"{{Path.GetTempPath().Replace("\\", "\\\\")}}"}""");
+        var result = await Invoke(provider, $$"""{"path":"{{Owned.TempRoot().Replace("\\", "\\\\")}}"}""");
 
         result.Should().BeOfType<ToolResult.Refused>();
     }
@@ -282,7 +297,7 @@ public sealed class WorkspaceToolTests
     public async Task Refuses_to_read_through_a_directory_link_that_points_outside_the_root()
     {
         var (provider, root) = Build();
-        var outside = Directory.CreateTempSubdirectory("mcp-outside").FullName;
+        var outside = _owned.Dir("outside");
         await File.WriteAllTextAsync(Path.Combine(outside, "secret.txt"), "secret", TestContext.Current.CancellationToken);
         DirectoryLinks.CreateOrSkip(Path.Combine(root, "vendor"), outside);
 
@@ -298,7 +313,7 @@ public sealed class WorkspaceToolTests
     public async Task Refuses_a_file_link_whose_target_lies_outside_the_root()
     {
         var (provider, root) = Build();
-        var outside = Directory.CreateTempSubdirectory("mcp-outside").FullName;
+        var outside = _owned.Dir("outside");
         var target = Path.Combine(outside, "secret.txt");
         await File.WriteAllTextAsync(target, "secret", TestContext.Current.CancellationToken);
         CreateLinkOrSkip(() => File.CreateSymbolicLink(Path.Combine(root, "alias.txt"), target));
@@ -364,9 +379,12 @@ public sealed class WorkspaceToolTests
             new ToolCall(WorkspaceToolProvider.ReadLocalFile, JsonDocument.Parse(argumentsJson).RootElement.Clone()),
             TestContext.Current.CancellationToken);
 
-    private static (WorkspaceToolProvider Provider, string Root) Build(SandboxedFileReaderOptions? caps = null)
+    private (WorkspaceToolProvider Provider, string Root) Build(SandboxedFileReaderOptions? caps = null)
     {
-        var root = Directory.CreateTempSubdirectory("mcp-workspace").FullName;
+        // The workspace root is a child of an OWNED folder, so whatever a test writes beside the root (the escape target of
+        // Refuses_to_escape_the_workspace_root) lands in `home`, dies with it, and is its own per theory row.
+        var home = _owned.Dir("workspace");
+        var root = Path.Combine(home, "root");
         Directory.CreateDirectory(Path.Combine(root, "sub"));
         var reader = new SandboxedFileReader(
             new WorkspaceRoot(root), caps ?? new SandboxedFileReaderOptions(), NullLogger<SandboxedFileReader>.Instance);

@@ -2,6 +2,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Mcp.Contracts;
 using Mcp.Telemetry;
+using Mcp.Tests.Leftovers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Xunit;
@@ -30,8 +31,12 @@ namespace Mcp.Tests;
 /// copied across by hand when the wire shape changes. Deliberately manual: a fixture that regenerated
 /// itself on every build would silently absorb the very change it exists to catch.</para>
 /// </summary>
-public sealed class SpoolFixtureTests
+public sealed class SpoolFixtureTests : IDisposable
 {
+    private readonly OwnedScope _owned = new();
+
+    public void Dispose() => _owned.Dispose();
+
     /// <summary>Where a regenerated fixture is left, relative to the test binary.</summary>
     public const string FixtureName = "mcp-spool-v0-correlated.jsonl";
 
@@ -43,7 +48,7 @@ public sealed class SpoolFixtureTests
     [Fact]
     public async Task The_emitter_writes_a_correlated_spool_a_consumer_can_regenerate_its_fixture_from()
     {
-        var root = Directory.CreateTempSubdirectory("mcp-spool-fixture").FullName;
+        var root = _owned.Dir("spool-fixture");
         var sink = new SpoolUsageSink(
             new SpoolOptions
             {

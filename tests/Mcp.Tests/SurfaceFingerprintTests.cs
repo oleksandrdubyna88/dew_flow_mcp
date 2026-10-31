@@ -2,6 +2,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Mcp.Application;
 using Mcp.Contracts;
+using Mcp.Tests.Leftovers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
 using Xunit;
@@ -11,8 +12,12 @@ namespace Mcp.Tests;
 /// <summary>Declare and echo, never assume. What a configuration ASKED for and what a process is
 /// SERVING are two different facts, and only the second one explains a result — so the fingerprint is
 /// built from what the catalog advertises, never from the files it was told to read.</summary>
-public sealed class SurfaceFingerprintTests
+public sealed class SurfaceFingerprintTests : IDisposable
 {
+    private readonly OwnedScope _owned = new();
+
+    public void Dispose() => _owned.Dispose();
+
     [Fact]
     public void The_echo_is_the_text_actually_advertised_and_not_the_file_it_came_from()
     {
@@ -128,9 +133,9 @@ public sealed class SurfaceFingerprintTests
     private static IReadOnlySet<string> Only(params string[] tools) =>
         new HashSet<string>(tools, StringComparer.Ordinal);
 
-    private static string DescriptionSet(string set, string tool, string text)
+    private string DescriptionSet(string set, string tool, string text)
     {
-        var root = Directory.CreateTempSubdirectory("mcp-fingerprint").FullName;
+        var root = _owned.Dir("fingerprint");
         var folder = Path.Combine(root, set);
         Directory.CreateDirectory(folder);
         File.WriteAllText(Path.Combine(folder, tool + ".md"), text);
