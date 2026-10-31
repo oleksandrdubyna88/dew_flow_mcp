@@ -65,25 +65,19 @@ internal static class LeftoversAudit
 
     private static bool ClaimIs(ClaimRead read, Owner owner) => read is ClaimRead.Text text && Owner.Parse(text.Value) == owner;
 
-    /// <summary>The message of a run that left something, or null when it left nothing. An empty group is omitted; a path both
+    /// <summary>The failure of a run that left something, or null when it left nothing. An empty group is omitted; a path both
     /// registered and found in the temp root is named once, under the registry's words.</summary>
-    public static string? Verdict(IReadOnlyList<(string Path, bool DisposeAttempted)> unreclaimed, IReadOnlyList<string> claimed)
+    public static LeftoversAuditException? Verdict(IReadOnlyList<(string Path, bool DisposeAttempted)> unreclaimed, IReadOnlyList<string> claimed)
     {
         var registered = unreclaimed.Select(u => u.Path).ToHashSet(StringComparer.Ordinal);
-        var onlyClaimed = claimed.Where(path => !registered.Contains(path)).ToList();
         var never = unreclaimed.Where(u => !u.DisposeAttempted).Select(u => u.Path).ToList();
         var failed = unreclaimed.Where(u => u.DisposeAttempted).Select(u => u.Path).ToList();
-        var count = never.Count + failed.Count + onlyClaimed.Count;
-        if (count == 0) return null;
-        var groups = new List<string>();
-        if (never.Count > 0) groups.Add("never disposed: " + string.Join(", ", never));
-        if (failed.Count > 0) groups.Add("disposed but not removed: " + string.Join(", ", failed));
-        if (onlyClaimed.Count > 0) groups.Add("claimed in the temp root: " + string.Join(", ", onlyClaimed));
-        return $"{OwnedToken.RepoToken} tests: this run left {count} folder(s) it claimed — " + string.Join("; ", groups);
+        var onlyClaimed = claimed.Where(path => !registered.Contains(path)).ToList();
+        return never.Count + failed.Count + onlyClaimed.Count == 0 ? null : new LeftoversAuditException(never, failed, onlyClaimed);
     }
 
     /// <summary>The audit: take the snapshot of <paramref name="registry"/>, dispose each of them once more (a handle released since
-    /// lets this one succeed), then remove what <see cref="ClaimedBy"/> finds, and throw ONE exception naming everything that was
+    /// lets this one succeed), then remove what <see cref="ClaimedBy"/> finds, and throw ONE exception (<see cref="LeftoversAuditException"/>) naming everything that was
     /// left — the folders are gone by then, so the next run starts clean and the red is this run's.</summary>
     public static void Run(string tmp, Owner owner, IReadOnlyList<OwnedDir> registry, Func<string, bool>? mine = null, Func<string, string?>? env = null, SweepHooks? hooks = null)
     {
@@ -91,7 +85,7 @@ internal static class LeftoversAudit
         foreach (var dir in registry) dir.Dispose();
         var claimed = Discover(tmp, owner, mine, env);
         foreach (var item in claimed) Remove(item, mine, hooks);
-        if (Verdict(left, [.. claimed.Select(c => c.Path)]) is { } message) throw new InvalidOperationException(message);
+        if (Verdict(left, [.. claimed.Select(c => c.Path)]) is { } failure) throw failure;
     }
 
     /// <summary>The sweep's own removal (<see cref="LeftoversSweep.RemoveCaptured"/>), by the identity captured at discovery: a

@@ -178,13 +178,26 @@ public sealed class LeftoversAuditTests : IDisposable
     // ---- the message -----------------------------------------------------------------------------------------------------
 
     [Fact]
-    public void The_message_carries_each_group_under_its_own_words_and_omits_an_empty_one()
+    public void The_failure_is_typed_and_its_message_has_a_first_line_one_folder_per_line_and_a_remedy()
     {
-        var message = LeftoversAudit.Verdict([("/t/a", false), ("/t/b", true), ("/t/c", false)], ["/t/d", "/t/a"]);
+        var error = LeftoversAudit.Verdict([("/t/a", false), ("/t/b", true), ("/t/c", false)], ["/t/d", "/t/a"]);
 
-        message.Should().Be("mcp tests: this run left 4 folder(s) it claimed — never disposed: /t/a, /t/c; disposed but not removed: /t/b; claimed in the temp root: /t/d");
-        LeftoversAudit.Verdict([("/t/b", true)], []).Should().Be("mcp tests: this run left 1 folder(s) it claimed — disposed but not removed: /t/b");
-        LeftoversAudit.Verdict([], ["/t/d"]).Should().Be("mcp tests: this run left 1 folder(s) it claimed — claimed in the temp root: /t/d");
+        error.Should().BeOfType<LeftoversAuditException>().Which.Should().BeAssignableTo<InvalidOperationException>();
+        error!.NeverDisposed.Should().Equal("/t/a", "/t/c");
+        error.DisposedNotRemoved.Should().Equal("/t/b");
+        error.ClaimedInTempRoot.Should().Equal("/t/d");
+        var lines = error.Message.Split('\n');
+        lines[0].Should().Be("mcp tests: this run left 4 folder(s) it claimed — 2 never disposed, 1 disposed but not removed, 1 claimed in the temp root");
+        lines[1..5].Should().Equal("  never disposed: /t/a", "  never disposed: /t/c", "  disposed but not removed: /t/b", "  claimed in the temp root: /t/d");
+        lines.Should().HaveCount(6);
+        lines[5].Should().StartWith("remedy: dispose the OwnedDir or OwnedScope").And.Contain("bash .claude/rules/shared/tools/janitor.sh --token mcp --dry-run");
+    }
+
+    [Fact]
+    public void An_empty_group_is_omitted_and_a_clean_run_has_no_failure()
+    {
+        LeftoversAudit.Verdict([("/t/b", true)], [])!.Message.Split('\n')[0].Should().Be("mcp tests: this run left 1 folder(s) it claimed — 1 disposed but not removed");
+        LeftoversAudit.Verdict([], ["/t/d"])!.Message.Split('\n')[0].Should().Be("mcp tests: this run left 1 folder(s) it claimed — 1 claimed in the temp root");
         LeftoversAudit.Verdict([], []).Should().BeNull();
     }
 
@@ -200,9 +213,11 @@ public sealed class LeftoversAuditTests : IDisposable
 
         var run = () => LeftoversAudit.Run(tmp, me, [undisposed], Mine, NoEnv);
 
-        var message = run.Should().Throw<InvalidOperationException>().Which.Message;
-        message.Should().StartWith("mcp tests: this run left 3 folder(s) it claimed — never disposed: " + undisposed.Path);
-        message.Should().Contain("claimed in the temp root: ").And.Contain(claimedFolder).And.Contain(orphan);
+        var error = run.Should().Throw<LeftoversAuditException>().Which;
+        error.Message.Should().StartWith("mcp tests: this run left 3 folder(s) it claimed — ");
+        error.NeverDisposed.Should().Equal(undisposed.Path);
+        error.ClaimedInTempRoot.Should().BeEquivalentTo([claimedFolder, orphan]);
+        error.DisposedNotRemoved.Should().BeEmpty();
         Directory.GetFileSystemEntries(tmp).Should().BeEmpty("the audit removes what it names");
         LeftoversAudit.Unreclaimed().Select(u => u.Path).Should().NotContain(undisposed.Path);
     }
