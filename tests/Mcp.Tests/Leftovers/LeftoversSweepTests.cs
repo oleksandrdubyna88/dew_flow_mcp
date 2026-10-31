@@ -536,18 +536,38 @@ public sealed class LeftoversSweepTests(LeftoversSweepFixture fixture) : IDispos
     }
 
     [Fact]
-    public void Something_to_say_is_one_summary_line_and_one_line_per_listed_and_error_entry()
+    public void Something_to_say_is_one_summary_line_and_one_line_per_listed_preserved_and_error_entry()
     {
         var reported = new List<string>();
         var result = new SweepResult(["a"], [("b", "live")], ["foreign: folder f — owner u1"], ["folder g: it broke"]);
 
         var built = new LeftoversSweepFixture(() => result, reported.Add);
 
-        reported.Should().HaveCount(3);
+        reported.Should().HaveCount(4);
         reported[0].Should().Be($"{OwnedToken.RepoToken} tests: leftovers — removed 1, preserved 1, listed 1");
         reported.Should().Contain(l => l.Contains("foreign: folder f — owner u1", StringComparison.Ordinal));
+        reported.Should().Contain("  preserved: b — live");
         reported.Should().Contain(l => l.Contains("folder g: it broke", StringComparison.Ordinal));
         built.LastRun.Should().BeSameAs(result);
+    }
+
+    [Fact]
+    public void Preserved_entries_are_named_with_their_reason_up_to_a_bound_and_a_summary_says_how_many_were_left_out()
+    {
+        var limit = LeftoversSweepFixture.MaxPreservedLines;
+        var over = Enumerable.Range(0, limit + 5).Select(i => ($"/t/kept-{i}", "live")).ToList();
+        var exact = over.Take(limit).ToList();
+        var reportedOver = new List<string>();
+        var reportedExact = new List<string>();
+
+        var built = new LeftoversSweepFixture(() => new SweepResult([], over, [], []), reportedOver.Add);
+        _ = new LeftoversSweepFixture(() => new SweepResult([], exact, [], []), reportedExact.Add);
+
+        reportedOver.Count(l => l.StartsWith("  preserved: ", StringComparison.Ordinal)).Should().Be(limit);
+        reportedOver[1].Should().Be("  preserved: /t/kept-0 — live");
+        reportedOver[^1].Should().Be("  … 5 more preserved entries are not shown (preserved 25 in all; the first 20 are named above)");
+        reportedExact.Should().HaveCount(1 + limit, "at the bound nothing is left out, so there is no summary");
+        built.LastRun.Preserved.Should().HaveCount(limit + 5, "the result itself is never trimmed");
     }
 
     // ---- 8 -------------------------------------------------------------------------------------------------------

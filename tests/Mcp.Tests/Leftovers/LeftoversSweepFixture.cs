@@ -11,6 +11,10 @@ namespace Mcp.Tests.Leftovers;
 /// audit, which DOES throw.</summary>
 public sealed class LeftoversSweepFixture : IAsyncDisposable
 {
+    /// <summary>How many preserved entries the start-of-run report names, path and reason each; past it one line says how many were left out
+    /// (the sweep's result itself, <see cref="LastRun"/>, is never trimmed).</summary>
+    public const int MaxPreservedLines = 20;
+
     private readonly Action _audit;
 
     public LeftoversSweepFixture()
@@ -36,10 +40,20 @@ public sealed class LeftoversSweepFixture : IAsyncDisposable
 
         LastRun = run;
         if (run.Count == 0) return;
-        Say(report, $"{Header} — removed {run.Removed.Count}, preserved {run.Preserved.Count}, listed {run.Listed.Count}");
-        foreach (var line in run.Listed) Say(report, "  " + line);
-        foreach (var error in run.Errors) Say(report, "  error: " + error);
+        foreach (var line in ReportLines(run)) Say(report, line);
     }
+
+    /// <summary>The lines said about a sweep that did something: the summary, the listed entries, the preserved entries (path and
+    /// reason, at most <see cref="MaxPreservedLines"/> of them, then one line for the rest) and the errors.</summary>
+    private static IEnumerable<string> ReportLines(SweepResult run) =>
+        new[] { $"{Header} — removed {run.Removed.Count}, preserved {run.Preserved.Count}, listed {run.Listed.Count}" }
+            .Concat(run.Listed.Select(line => "  " + line))
+            .Concat(run.Preserved.Take(MaxPreservedLines).Select(kept => $"  preserved: {kept.Path} — {kept.Reason}"))
+            .Concat(NotShown(run.Preserved.Count))
+            .Concat(run.Errors.Select(error => "  error: " + error));
+
+    private static IEnumerable<string> NotShown(int preserved) =>
+        preserved <= MaxPreservedLines ? [] : [$"  … {preserved - MaxPreservedLines} more preserved entries are not shown (preserved {preserved} in all; the first {MaxPreservedLines} are named above)"];
 
     /// <summary>What the sweep of this run did; empty when it threw.</summary>
     public SweepResult LastRun { get; }
