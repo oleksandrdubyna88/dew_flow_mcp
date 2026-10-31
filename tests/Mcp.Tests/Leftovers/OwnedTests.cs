@@ -220,6 +220,38 @@ public sealed class OwnedTests : IDisposable
     }
 
     [Fact]
+    public void A_scope_tries_every_folder_when_one_disposal_throws_and_reports_all_the_failures_together()
+    {
+        var parent = _owned.Dir("scope-parent");
+        var scope = new OwnedScope(_ => { });
+        var first = scope.Dir("first", parent);
+        scope.Own(new Throwing("one"), "/t/stuck-1");
+        var middle = scope.Dir("middle", parent);
+        scope.Own(new Throwing("two"), "/t/stuck-2");
+        var last = scope.Dir("last", parent);
+
+        var dispose = scope.Dispose;
+
+        var error = dispose.Should().Throw<AggregateException>().Which;
+        error.InnerExceptions.Should().HaveCount(2);
+        error.InnerExceptions.Select(e => e.Message).Should().SatisfyRespectively(
+            m => m.Should().Contain("/t/stuck-2").And.Contain("two"),
+            m => m.Should().Contain("/t/stuck-1").And.Contain("one"));
+        foreach (var path in new[] { first, middle, last })
+        {
+            Directory.Exists(path).Should().BeFalse($"{path} was still tried after a disposal threw");
+            File.Exists(path + ".owner").Should().BeFalse(path);
+        }
+
+        scope.Dispose(); // nothing is left to dispose: a second call is silent
+    }
+
+    private sealed class Throwing(string why) : IDisposable
+    {
+        public void Dispose() => throw new IOException(why);
+    }
+
+    [Fact]
     public void A_link_inside_is_unlinked_and_never_followed()
     {
         var sentinel = _owned.Dir("sentinel");
