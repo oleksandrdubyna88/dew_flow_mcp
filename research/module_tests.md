@@ -1,6 +1,6 @@
 # Module — tests
 
-> `tests/Mcp.Tests`, and inside it `tests/Mcp.Tests/Leftovers/`. The system as it is, 2026-10-31.
+> `tests/Mcp.Tests`, and inside it `tests/Mcp.Tests/Leftovers/`. The system as it is, 2026-10-31; macOS (Darwin) added 2026-11-01.
 
 ## Purpose
 
@@ -17,7 +17,8 @@ collected by the same user's next run if a run was killed, and kept so by a guar
   `node .claude/rules/shared/tools/low-priority.mjs dotnet build dew_flow_mcp.slnx -c Debug -m:4`, then
   `node .claude/rules/shared/tools/low-priority.mjs ./tests/Mcp.Tests/bin/Debug/net10.0/Mcp.Tests` (add
   `--filter-namespace "Mcp.Tests.Leftovers"`, `--filter-class`, `--filter-method`). CI runs the Release build of the same
-  executable on Linux (`build-test`) and on Windows (`build-test-windows`, the whole executable).
+  executable on Linux (`build-test`), on Windows (`build-test-windows`, the whole executable) and on macOS (`build-test-macos`, `macos-latest`, Arm64: the layout self-test, the
+  `Mcp.Tests.Leftovers` namespace, then the whole executable, bare — no low-priority wrapper on CI).
 - **`tests/Mcp.Tests/Leftovers/`** — the helper and everything that keeps it honest (below).
 - **`http/`** — the httpyac contract suite against a running host, run by the `contract` job (not by this executable).
 - **The janitor**, by hand on a machine that stopped running these tests:
@@ -49,7 +50,9 @@ flowchart TD
 |---|---|
 | `OwnedToken` | THIS repository's token (`mcp`) and its row of the rule's `## Tokens` table — the one file a copy rewrites |
 | `Owned`, `OwnerToken` | the name grammar, `NameFor`, the owner token (`u<uid>`, or `w<digits>` on Windows), `TempRoot()` — the one place a test learns the temp root |
-| `Owner`, `Liveness`, `Scope`, `Native` | the record `<owner>:<host>@<os>:<pid>[:<start>[:<ns>]]`, the three-valued liveness (`gone` only when no process has the pid), the kernel-owner read, the claim read through one handle checked as a regular file and the file judged (a FIFO or another file swapped in after the check is unreadable, never a hang), and every OS call through one P/Invoke file |
+| `Owner`, `Liveness`, `Scope`, `Native` | the record `<owner>:<host>@<os>:<pid>[:<start>[:<ns>]]` (`linux`, `macos` or `windows`; start and namespace on Linux only), the three-valued liveness (`gone` only when no process has the pid), the kernel-owner read (the entry's uid against `getuid` on Linux and macOS alike), the claim read through one handle checked as a regular file and the file judged (a FIFO or another file swapped in after the check is unreadable, never a hang), and every OS call through the P/Invoke files: `Native.cs` (Linux libc, Windows kernel32 and advapi32) and `NativeDarwin.cs` (macOS libSystem by its full path: `lstat` / `fstat` at Darwin's 144-byte layout, `renamex_np` for the exclusive rename with no fallback, `kill`) |
+| `Errno`, `ErrnoTable` | one errno table per system (Darwin's ENOTEMPTY 66, ENOTSUP 45, ENOSYS 78 are never the Linux numbers) |
+| `DarwinLayout`, `DarwinLayoutTests`, `DarwinNativeTests`, `DarwinFifoChild`, `NativeDarwinTests` | macOS only, but for the last: the layout self-test of Darwin's `struct stat` that every sweep, audit, native and scope test requires first; `renamex_np` onto a taken name; the FIFO read in a child process that is bounded, tree-killed and reaped; the kill probe. `NativeDarwinTests` and `ErrnoTests` are pure and run everywhere |
 | `OwnedDir`, `OwnedScope`, `Removal` | the helper tests use: claim → register → create; exact teardown that never throws; the process-wide registry of folders not yet reclaimed |
 | `LeftoversSweep`, `LeftoversSweepFixture` | the start-of-run sweep as an assembly fixture, and (in `DisposeAsync`) the end-of-run audit |
 | `LeftoversAudit`, `LeftoversAuditException` | `Unreclaimed()`, `ClaimedBy()`, `Verdict()`, `Run()`; the failure is typed (`NeverDisposed`, `DisposedNotRemoved`, `ClaimedInTempRoot`) |
@@ -87,6 +90,8 @@ public sealed class ExampleTests : IDisposable
 | The guard, its eight classes, the bare prefix word in any spelling (a literal, a glob, a class, a pattern, a bare word; and, read as the compiler reads it, an escape, pieces joined by `+` / `string.Concat` / interpolation holes, a one-character regex class, a `/tmp` or `/var/tmp` literal, a temp variable named in pieces), `Owned.TempRoot` outside the helper, a scan of nothing, its own test file scanned clean | covered | `LeftoversGuardTests`, `LeftoversRepositoryGuardTests` |
 | The token identity (the token file's pair against the solution file's name, kept outside the copied folder) | covered | `RepositoryIdentityTests`, `LeftoversGuardTests` |
 | The janitor reading this helper's claim (Linux) | covered | `LeftoversJanitorTests`, Linux job |
+| The helper on macOS: the identity read at Darwin's layout (self-test with `stat(1)` as a second witness), the exclusive create, `renamex_np` onto a taken name, the verified claim read on a FIFO swapped in, the kill probe, the sweep, the audit | covered, by the `build-test-macos` job — **Arm64 only**. X64 / Rosetta (`lstat$INODE64`) is **not covered** anywhere; a volume without `RENAME_EXCL` is covered only as an outcome function (its fail-closed rule), never on a real volume | `DarwinLayoutTests`, `DarwinNativeTests`, `NativeDarwinTests`, `LeftoversSweepTests` |
+| The janitor reading this helper's claim (macOS) | **not covered** — its test skips off Linux; `janitor.sh` was never measured on bash 3.2 and BSD tools here | — |
 | The janitor reading this helper's claim (Windows) | **not covered** by CI — by hand: forced dry-run under Git for Windows' bash; a WSL bash reads every Windows claim as foreign | — |
 | An elevated Windows run (new files owned by `BUILTIN\Administrators`, so the kernel-owner key fails closed and keeps them) | **not covered** by CI beyond the ownership fixtures — by hand on the owner's machine | `WindowsOwnership`, `ScopeTests` |
 | A real MCP client over stdio against the built host | **not covered** — no test starts the built host with `--stdio` and speaks to it; the protocol presentation is tested in process | — |
@@ -94,7 +99,8 @@ public sealed class ExampleTests : IDisposable
 ## What it does not prove
 
 - A SIGKILL of the real executable: the kill is built by hand in the sweep tests (a dead pid in a claim).
-- macOS: no CI leg and no machine; the helper refuses to run there with a clear message.
+- macOS on an Intel CPU or under Rosetta: the x86-64 entry points (`lstat$INODE64`, `fstat$INODE64`) are written from the header and never ran in this repository's CI; only Arm64 (`macos-latest`) is measured.
+  A volume that does not take `RENAME_EXCL` (a sweep then keeps the folder with one error — there is no fallback on Darwin), macOS before 10.12 and a case-sensitive APFS volume are not measured.
 - The container carve-out of rule §5: this repository starts no container, so the guard does not recognise it — a
   `docker run` without `--rm` is a finding.
 - The guard of C# is a SPELLING check. It decodes escapes (`\uXXXX`, `\UXXXXXXXX`, `\x…`), joins the literals that are operands of `+`
@@ -120,4 +126,4 @@ and `tools/janitor.sh`. `node` is on every runner and developer machine (`low-pr
 
 ## When it runs
 
-Every pull request (`build-test`, `build-test-windows`); the janitor by hand on a machine that stopped running these tests.
+Every pull request (`build-test`, `build-test-windows`, `build-test-macos`); the janitor by hand on a machine that stopped running these tests.

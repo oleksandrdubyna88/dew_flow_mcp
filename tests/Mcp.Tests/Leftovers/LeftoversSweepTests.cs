@@ -692,6 +692,25 @@ public sealed class LeftoversSweepTests(LeftoversSweepFixture fixture) : IDispos
         UnmatchablePid.AssertNoSuchProcess(dead);
     }
 
+    [Fact]
+    public void A_rename_into_quarantine_that_the_file_system_refuses_keeps_the_folder_with_one_error()
+    {
+        // What a macOS volume that does not take RENAME_EXCL does (ENOTSUP, EINVAL): the exclusive rename throws, there is no fallback, and
+        // the sweep says so once and leaves the folder and its claim alone. Made here by a name under a parent that is not there.
+        var tmp = NewTmp();
+        var dead = Dead();
+        var dir = PlantFolder(tmp, Name("refused"), Rec(dead));
+        var impossible = Path.Combine(tmp, "no-such-parent", "." + Path.GetFileName(dir) + "." + QuarantineWord + Environment.ProcessId + "-cccccccc");
+
+        var result = LeftoversSweep.Run(Options(tmp, hooks: new SweepHooks(QuarantineName: _ => impossible)));
+
+        result.Removed.Should().BeEmpty();
+        result.Errors.Should().ContainSingle();
+        File.Exists(Path.Combine(dir, "file.txt")).Should().BeTrue("the folder was never moved");
+        File.Exists(dir + ".owner").Should().BeTrue("its claim stays with it");
+        UnmatchablePid.AssertNoSuchProcess(dead);
+    }
+
     private static string[] Unaskable() =>
         OperatingSystem.IsWindows() ? ["0", "007", "9007199254740993", "4294967296", "1"] : ["0", "007", "9007199254740993", "2147483648", "99999999999999999999"];
 

@@ -106,6 +106,7 @@ internal static class DarwinLayout
         return new Report(values, problems);
     }
 
+    [SupportedOSPlatform("macos")]
     private static DarwinStat Stat(string path) => Native.DarwinLstat(path) ?? throw new InvalidOperationException($"lstat found nothing at {path}");
 
     private static bool IsFolder(DarwinStat s) => (s.Mode & 0xF000) == 0x4000;

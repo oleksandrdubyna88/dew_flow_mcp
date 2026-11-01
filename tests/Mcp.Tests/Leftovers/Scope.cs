@@ -22,7 +22,7 @@ public abstract record ClaimRead
 /// <summary>Rule §3, "scope evidence": the name selects, the kernel authorises. A folder, a claim — anything the file
 /// system owns — must belong to the caller, and a claim another user wrote is unreadable (a stranger wrote it).
 ///
-/// <para>POSIX: the entry's own uid is the caller's REAL uid. Windows has no uid, and a shared temp root would erase
+/// <para>POSIX (Linux and macOS alike): the entry's own uid is the caller's REAL uid. Windows has no uid, and a shared temp root would erase
 /// the key, so BOTH keys must hold on one handle that opens the entry itself: it lies strictly inside the caller's
 /// profile AND its owner SID is the caller's user SID. Either unreadable fails closed. An elevated run's files are
 /// owned by <c>BUILTIN\Administrators</c>, so they fail closed and are kept for a person to look at.</para></summary>
@@ -36,7 +36,8 @@ public static class Scope
         try
         {
             if (OperatingSystem.IsWindows()) return WindowsIsMine(path);
-            return Native.IdentityOf(path)?.Uid == Native.GetUid();
+            if (!Native.IsPosix) return false; // a system the helper does not serve: no evidence
+            return Native.IdentityOf(path)?.Uid == Native.GetUid(); // Linux and macOS: ONE comparison, the entry's own uid against the real uid
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or PlatformNotSupportedException)
         {

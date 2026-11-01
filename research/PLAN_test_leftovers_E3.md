@@ -35,7 +35,7 @@ written; where it and the list below disagree, the list is what runs. Each item 
 a `docker run` without `--rm` is a finding). Legacy names are listed with their exact command and never collected.
 `owner-blind` in C# is a rule about the WORD (owner decision 3; first shipped as a literal rule and widened by review fix C: a glob, a character
 class, a regex, a bare word and a separator in another literal are findings too), with the shipped classifier judging scripts and workflows.
-macOS is not built (the helper refuses with a clear message). The Windows runner's measured owner
+macOS is not built (the helper refuses with a clear message) — **superseded 2026-11-01 by the Darwin path below**. The Windows runner's measured owner
 (`BUILTIN\Administrators`, an elevated job) is recorded by `RunnerFactsTests` in the job log; both ownership outcomes are
 asserted through the two `WindowsOwnership` fixtures, never from the runner's own files.
 
@@ -181,6 +181,47 @@ asserted through the two `WindowsOwnership` fixtures, never from the runner's ow
 - **Rename fallback clean-up (was open).** `Native.LinuxRenameExclusively` ended its placeholder clean-up in `catch (Exception) { }`; it now catches only `IOException`, `UnauthorizedAccessException` and `InvalidOperationException` (an unreadable identity) and lets anything else propagate. The fallback is `Native.RenameByReservation(from, to, afterFailedRename)`, the seam being the hook that runs after the failed rename. RED before: a hook throwing `InvalidCastException` came back as the rename's `IOException` (`NativeTests`).
 - **Rename fallback placeholder (was open).** The clean-up removed the placeholder with `Directory.Delete` after a check by path that it was some folder. It now keeps the placeholder's identity from the `mkdir` and calls `rmdir(2)` (P/Invoke: an EMPTY folder only, a link never followed) only while the entry at the name is still a folder of the caller's uid with that (device, inode). RED before: an empty folder renamed onto the placeholder after the failed rename was deleted (`NativeTests`).
 - **Audit orphan scan (N+1 listing).** `LeftoversAudit.OfOrphan` listed the temp root's quarantines once per orphan claim; `Discover` now lists them once per audit and passes the set in (`Discover` takes the lister as an optional seam). RED before: 5 orphan claims gave 5 listings, expected 1 (`LeftoversAuditTests`).
+
+**Darwin path (2026-11-01).** Owner decision of 2026-11-01: the helper runs on macOS. The plan above and the items before this one say "macOS is not built"; from this
+section on, what runs is the list below. Done on branch `feat/leftovers-darwin` in two commits, so that CI shows the order a fix is meant to have: the first commit holds
+the Darwin tests and the `build-test-macos` job with the Darwin native path still throwing (RED on macOS by construction), the second implements it (GREEN).
+
+*What was built (`NativeDarwin.cs`, a part of `Native`).*
+- **Calls.** libSystem by its full path (`/usr/lib/libSystem.dylib`): the name `libc` was not confirmed to resolve on macOS and nothing here depends on that. `getuid`; the identity by
+  `lstat` and `fstat` read at the fixed offsets of Darwin's 64-bit-inode `struct stat` — `st_dev` i32 @0, `st_mode` u16 @4, `st_nlink` u16 @6, `st_ino` u64 @8, `st_uid` u32 @16, `st_gid` u32 @20,
+  `st_rdev` i32 @24, `st_atimespec` @32, `st_mtimespec` @48, `st_ctimespec` @64, `st_birthtimespec` @80 (each `{ i64 sec, i64 nsec }`), `st_size` i64 @96, 144 bytes in all (written from the
+  `sys/stat.h` layout from memory, not fetched, and checked on the runner by the layout self-test). An inode of 0, a short buffer or a time that cannot be one is an exception, never an identity.
+  Entry point by CPU: Arm64 calls `lstat` / `fstat`; X64 (and Rosetta) calls `lstat$INODE64` / `fstat$INODE64`, because the plain X64 names are the old 32-bit-inode calls.
+- **Exclusive create and rename.** `mkdir` mode 0x1C0 with `EEXIST` = taken. The exclusive rename is `renamex_np(from, to, RENAME_EXCL = 0x4)`: `EEXIST` means the name is taken and nothing moved;
+  `ENOTSUP`, `EINVAL` (or a libSystem without the call) FAIL CLOSED — an `IOException`, the sweep records one error and the folder stays. **No reserve-then-rename fallback on Darwin:**
+  the fallback of the Linux path exists for `renameat2` on a file system without the flag, and on Darwin a rename without the flag could replace an empty folder.
+  The restore after a changed folder is still `mkdir` then `rename(2)` onto our own empty placeholder (the same on every POSIX system).
+- **The verified claim read.** `open` with `O_RDONLY | O_NONBLOCK (0x4) | O_NOFOLLOW (0x100) | O_CLOEXEC (0x1000000)`, `fstat` on the descriptor: a regular file with the judged (device, inode), then at most 513 bytes.
+- **Liveness.** `kill(pid, 0)`: `ESRCH` is the only dead; `EPERM` and any other errno unknown. Askable pids 1 to `int.MaxValue`. No start (no read without a child per test process) and no namespace, so a live pid is live with no start comparison.
+  `HidepidActive` is false off Linux. The owner record is `<host>@macos:<pid>`.
+- **Errno.** One table per system (`ErrnoTable.Linux`, `ErrnoTable.Darwin`; `Errno.Current`): ENOENT 2, EEXIST 17, ENOTDIR 20, EISDIR 21, EINVAL 22, ENOTEMPTY 66, ENOTSUP 45, ENOSYS 78 on Darwin
+  (39, 95, 38 on Linux). A Darwin branch reads only the Darwin table; a test pins that a Linux number is not read as a Darwin one.
+- **Scope and the guards.** `Scope.IsMine` is one POSIX branch (the entry's `lstat` uid against `getuid`) for Linux and macOS. `Native.IsPosix` (Linux or macOS) stands where a check meant "POSIX";
+  `statx`, `/proc`, the start, the namespace, `hidepid` and `AT_CLKTCK` stay Linux-only.
+
+*What the tests prove, and where.*
+- **CI job `build-test-macos`** (`macos-latest`, run bare through the test executable): the runner's `uname -m` must be `arm64` and is printed with the uid; build; the layout self-test (`DarwinLayoutTests`) with
+  its values printed as test warnings and a `grep` that the shell's uid equals the one the self-test read; `--filter-namespace Mcp.Tests.Leftovers`; the whole executable; the audit self-test in bash for both
+  `MCP_LEFTOVERS_SELFTEST` values. Steps after the build run even when one before failed, so one run lists everything red.
+- **The layout self-test** (`DarwinLayout`): uid equals `getuid` (file, folder, link); `S_ISDIR` / `S_ISREG` / `S_ISLNK` on a folder, a file and a link; the permission bits equal what .NET reports and 0700 for `mkdir`; inode non-zero, stable over two reads and
+  different for four entries; the device equal inside one folder; an mtime set to a known second reads back, then moves to now after a write; ctime and birth time near now; the size equals the bytes written; and `/usr/bin/stat -f` agrees on inode, uid,
+  size, device and mtime. Every sweep, audit, native and scope test builds its scope through `DarwinLayout.FreshOwnedScope()`, which throws when the layout does not hold, so a wrong layout fails them all, loudly.
+- **New Darwin tests** (`DarwinNativeTests`): `renamex_np` onto a taken name (an empty folder, a full one, a file) leaves the existing entry with its identity; the FIFO read runs in a CHILD process (this executable, `DarwinFifoChild`) with a 90 s bound, killed with
+  its whole tree and reaped on timeout, and the test asserts the pid is gone; the kill probe says live for this pid and dead for an unmatchable one. Pure tests that run on every system (`NativeDarwinTests`, `ErrnoTests`): the offsets, the failures, the
+  outcome table of the exclusive rename, and the sweep keeping a folder with one error when its quarantine rename is refused.
+- **The existing scenarios run on macOS** with POSIX guards in place of Linux-only ones; the premises that are Linux-only (`statx`, the start, the namespace, the reservation fallback, the janitor script) skip with their reason.
+
+*RED before (the first commit on macOS).* Everything that builds an `Owner` or reads an identity throws `PlatformNotSupportedException`: the assembly fixture's audit, every `OwnedScope` user (the Leftovers namespace and the classes that migrated to it),
+the four `DarwinNativeTests`, `DarwinLayoutTests`, the macOS owner-record test. On Linux that commit is green.
+
+*Measured on CI, and not.* On the `macos-latest` job (Arm64): the layout, the uid, `EEXIST` of `renamex_np`, the non-blocking open of a FIFO and the `fstat` refusal, `kill` for a live and a dead pid, the audit with both self-test values. The values are printed in that job's log
+(`darwin layout: …` lines). **Not measured anywhere:** X64 and Rosetta (`lstat$INODE64`, `fstat$INODE64` — the code is written from the header; a run on an Intel Mac is the first measurement); a volume that does not take `RENAME_EXCL` (only the outcome function is tested,
+with Darwin's numbers, never a real `ENOTSUP`); macOS before 10.12 (no `renamex_np`); a case-sensitive APFS volume; the janitor script on macOS (its test skips off Linux); whether the plain name `libc` resolves (not used).
 
 ## The contract this document encodes
 

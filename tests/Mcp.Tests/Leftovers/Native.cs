@@ -8,8 +8,8 @@ using Microsoft.Win32.SafeHandles;
 namespace Mcp.Tests.Leftovers;
 
 /// <summary>What a directory entry IS at one moment, read from the entry itself — a link is never followed.
-/// <c>Dev</c> and <c>Ino</c> are the identity (Linux: device and inode; Windows: volume serial and the 128-bit
-/// file id, which ReFS needs); <c>Uid</c> is the kernel owner on Linux and null on Windows, where the owner is a
+/// <c>Dev</c> and <c>Ino</c> are the identity (Linux and macOS: device and inode; Windows: volume serial and the 128-bit
+/// file id, which ReFS needs); <c>Uid</c> is the kernel owner on Linux and macOS and null on Windows, where the owner is a
 /// SID (<see cref="Native.OwnerSidOf"/>).</summary>
 public readonly record struct Identity(
     ulong Dev, UInt128 Ino, bool IsDirectory, bool IsLink, bool IsRegular, uint? Uid, DateTimeOffset ChangeTime, DateTimeOffset WriteTime);
@@ -20,15 +20,14 @@ public readonly record struct Identity(
 ///
 /// <para>.NET has no exclusive <c>mkdir</c> (<c>Directory.CreateDirectory</c> succeeds on an existing folder), no
 /// inode or file-id API, no uid and no <c>kill(pid, 0)</c>. Linux goes through libc (<c>statx</c> needs glibc 2.28
-/// or later; musl is not measured), Windows through kernel32 and advapi32. macOS is not built: Darwin's
-/// <c>lstat</c> layout differs by symbol, and nobody has measured it.</para>
+/// or later; musl is not measured), Windows through kernel32 and advapi32, macOS through libSystem
+/// (<c>NativeDarwin.cs</c>: <c>lstat</c> with Darwin's own 144-byte layout, <c>renamex_np</c> for the exclusive rename; Arm64 is measured on CI,
+/// X64 is not).</para>
 ///
 /// <para>Failure is closed: an identity that cannot be read is an exception here and "changed" or "not mine" to
 /// the caller — never an answer that could authorise a removal.</para></summary>
 internal static partial class Native
 {
-    internal const int Enoent = 2, Esrch = 3, Eexist = 17;
-
     private const int AtFdcwd = -100, AtSymlinkNofollow = 0x100, AtEmptyPath = 0x1000;
     private const uint RenameNoreplace = 1;
     private const uint StatxBasicStats = 0x7ff;
@@ -46,14 +45,17 @@ internal static partial class Native
 
     /// <summary>The caller's REAL uid — never the effective one.</summary>
     internal static uint GetUid() =>
-        OperatingSystem.IsLinux() ? Libc.GetUid() : throw new PlatformNotSupportedException("getuid is POSIX only");
+        OperatingSystem.IsLinux() ? Libc.GetUid()
+        : OperatingSystem.IsMacOS() ? Darwin.GetUid()
+        : throw new PlatformNotSupportedException("getuid is POSIX only");
 
     /// <summary>The entry ITSELF, a link never followed; null when it is not there; an exception for anything unreadable.</summary>
     internal static Identity? IdentityOf(string path)
     {
         if (OperatingSystem.IsLinux()) return LinuxIdentityOf(path);
+        if (OperatingSystem.IsMacOS()) return DarwinIdentityOf(path);
         if (OperatingSystem.IsWindows()) return WindowsIdentityOf(path);
-        throw new PlatformNotSupportedException("the leftovers helper supports Linux and Windows only");
+        throw new PlatformNotSupportedException("the leftovers helper supports Linux, macOS and Windows only");
     }
 
     /// <summary>The kernel's fixed <c>struct statx</c> layout: <c>stx_mask</c> u32 @0, <c>stx_uid</c> u32 @20,
@@ -81,7 +83,7 @@ internal static partial class Native
             WriteTime: UnixTime(buffer[112..]));
     }
 
-    /// <summary>Make <paramref name="path"/> with <c>mkdir</c> (mode 0700 on Linux: only the caller's processes read a
+    /// <summary>Make <paramref name="path"/> with <c>mkdir</c> (mode 0700 on Linux and macOS: only the caller's processes read a
     /// scratch folder) or <c>CreateDirectoryW</c>. False = it already exists, so it is somebody else's and is never
     /// adopted; any other failure throws.</summary>
     internal static bool MakeDirectoryExclusively(string path)
@@ -90,7 +92,14 @@ internal static partial class Native
         {
             if (Libc.Mkdir(path, 0x1C0) == 0) return true; // 0o700 — C# has no octal literal; 0700 would be decimal
             var errno = Marshal.GetLastPInvokeError();
-            return errno == Eexist ? false : throw Failure($"mkdir {path}", errno);
+            return errno == Errno.Linux.Eexist ? false : throw Failure($"mkdir {path}", errno);
+        }
+
+        if (OperatingSystem.IsMacOS())
+        {
+            if (Darwin.Mkdir(path, 0x1C0) == 0) return true;
+            var errno = Marshal.GetLastPInvokeError();
+            return errno == Errno.Darwin.Eexist ? false : throw Failure($"mkdir {path}", errno);
         }
 
         if (OperatingSystem.IsWindows())
@@ -100,16 +109,22 @@ internal static partial class Native
             return error == ErrorAlreadyExists ? false : throw Failure($"CreateDirectoryW {path}", error);
         }
 
-        throw new PlatformNotSupportedException("the leftovers helper supports Linux and Windows only");
+        throw new PlatformNotSupportedException("the leftovers helper supports Linux, macOS and Windows only");
     }
 
-    /// <summary>Linux <c>rename(2)</c> (atomic, and onto an EMPTY directory too); Windows <c>Directory.Move</c>, which
+    /// <summary>Linux and macOS <c>rename(2)</c> (atomic, and onto an EMPTY directory too); Windows <c>Directory.Move</c>, which
     /// refuses an existing target and so is exclusive by itself.</summary>
     internal static void RenameOnto(string from, string to)
     {
         if (OperatingSystem.IsLinux())
         {
             if (Libc.Rename(from, to) != 0) throw Failure($"rename {from} to {to}", Marshal.GetLastPInvokeError());
+            return;
+        }
+
+        if (OperatingSystem.IsMacOS())
+        {
+            if (Darwin.Rename(from, to) != 0) throw Failure($"rename {from} to {to}", Marshal.GetLastPInvokeError());
             return;
         }
 
@@ -121,10 +136,12 @@ internal static partial class Native
     /// — atomic, where <c>rename(2)</c> replaces an empty folder and .NET's <c>Directory.Move</c> only checks first and then renames; a file
     /// system that does not take the flag (EINVAL, ENOSYS, or a libc without the call) falls back to reserving the name with an
     /// exclusive <c>mkdir</c> and renaming over that placeholder. Windows: <c>Directory.Move</c>, which refuses an existing target
-    /// itself.</summary>
+    /// itself. macOS: <c>renamex_np(RENAME_EXCL)</c>, with NO fallback — a volume that does not take the flag throws, and the folder is kept
+    /// (<see cref="DarwinExclusiveRenameOutcome"/>).</summary>
     internal static bool RenameExclusively(string from, string to)
     {
         if (OperatingSystem.IsLinux()) return LinuxRenameExclusively(from, to);
+        if (OperatingSystem.IsMacOS()) return DarwinRenameExclusively(from, to);
         try
         {
             Directory.Move(from, to);
@@ -139,7 +156,6 @@ internal static partial class Native
     [SupportedOSPlatform("linux")]
     private static bool LinuxRenameExclusively(string from, string to)
     {
-        const int Einval = 22, Enosys = 38;
         int errno;
         try
         {
@@ -148,11 +164,11 @@ internal static partial class Native
         }
         catch (EntryPointNotFoundException)
         {
-            errno = Enosys; // a libc older than 2.28
+            errno = Errno.Linux.Enosys; // a libc older than 2.28
         }
 
-        if (errno == Eexist) return false;
-        if (errno is not (Einval or Enosys)) throw Failure($"renameat2 {from} to {to}", errno);
+        if (errno == Errno.Linux.Eexist) return false;
+        if (errno != Errno.Linux.Einval && errno != Errno.Linux.Enosys) throw Failure($"renameat2 {from} to {to}", errno);
         return RenameByReservation(from, to);
     }
 
@@ -199,8 +215,9 @@ internal static partial class Native
 
     /// <summary><c>kill(pid, 0)</c>: 0 when the process exists and may be signalled, else the errno.</summary>
     internal static int Kill(int pid) =>
-        !OperatingSystem.IsLinux() ? throw new PlatformNotSupportedException("kill(2) is POSIX only")
-        : Libc.Kill(pid, 0) == 0 ? 0 : Marshal.GetLastPInvokeError();
+        OperatingSystem.IsLinux() ? (Libc.Kill(pid, 0) == 0 ? 0 : Marshal.GetLastPInvokeError())
+        : OperatingSystem.IsMacOS() ? (Darwin.Kill(pid, 0) == 0 ? 0 : Marshal.GetLastPInvokeError())
+        : throw new PlatformNotSupportedException("kill(2) is POSIX only");
 
     private static IOException Failure(string what, int code) => new($"{what} failed: {new Win32Exception(code).Message} ({code})", new Win32Exception(code));
 
@@ -213,7 +230,7 @@ internal static partial class Native
         Span<byte> buffer = stackalloc byte[256];
         if (Libc.Statx(AtFdcwd, path, AtSymlinkNofollow, StatxBasicStats, buffer) == 0) return ParseStatx(buffer);
         var errno = Marshal.GetLastPInvokeError();
-        return errno == Enoent ? null : throw Failure($"statx {path}", errno);
+        return errno == Errno.Linux.Enoent ? null : throw Failure($"statx {path}", errno);
     }
 
     /// <summary>The entry's final path (its parents resolved, the entry itself a link when it is one) and its owner SID,
@@ -311,7 +328,8 @@ internal static partial class Native
     /// handle must be a disk file (<c>GetFileType</c> = <c>FILE_TYPE_DISK</c>), a regular file (no folder, no reparse point; the open does
     /// not follow a link) and the very file <paramref name="expected"/> names (volume serial and 128-bit file id). Linux: <c>open(2)</c> with
     /// <c>O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC</c> (a FIFO opens at once instead of waiting for a writer; a link is refused), then
-    /// <c>statx</c> on the descriptor itself (<c>AT_EMPTY_PATH</c>): a regular file with the (device, inode) judged. Null when any of that fails
+    /// <c>statx</c> on the descriptor itself (<c>AT_EMPTY_PATH</c>): a regular file with the (device, inode) judged. macOS: the same with Darwin's flag
+    /// numbers (<c>O_NONBLOCK</c> 0x4, <c>O_NOFOLLOW</c> 0x100, <c>O_CLOEXEC</c> 0x1000000) and <c>fstat</c>. Null when any of that fails
     /// or the file cannot be opened: an unreadable claim, never a guess.</summary>
     internal static byte[]? ReadVerifiedRegular(string path, Identity expected, int limit)
     {
@@ -319,13 +337,14 @@ internal static partial class Native
         {
             if (OperatingSystem.IsWindows()) return WindowsReadVerifiedRegular(path, expected, limit);
             if (OperatingSystem.IsLinux()) return LinuxReadVerifiedRegular(path, expected, limit);
+            if (OperatingSystem.IsMacOS()) return DarwinReadVerifiedRegular(path, expected, limit);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             return null;
         }
 
-        throw new PlatformNotSupportedException("the leftovers helper supports Linux and Windows only");
+        throw new PlatformNotSupportedException("the leftovers helper supports Linux, macOS and Windows only");
     }
 
     [SupportedOSPlatform("linux")]

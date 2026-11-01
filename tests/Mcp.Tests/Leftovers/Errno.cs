@@ -12,8 +12,12 @@ internal readonly record struct ErrnoTable(int Enoent, int Esrch, int Eperm, int
     internal static readonly ErrnoTable Darwin = new(2, 3, 1, 17, 20, 21, 22, 66, 45, 78);
 }
 
-/// <summary>The table of the system this process runs on.</summary>
+/// <summary>The tables by name (a code that serves ONE system says which), and the table of the system this process runs on.</summary>
 internal static class Errno
 {
+    internal static ErrnoTable Linux => ErrnoTable.Linux;
+
+    internal static ErrnoTable Darwin => ErrnoTable.Darwin;
+
     internal static ErrnoTable Current => OperatingSystem.IsMacOS() ? ErrnoTable.Darwin : ErrnoTable.Linux;
 }
