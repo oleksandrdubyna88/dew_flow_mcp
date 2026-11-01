@@ -238,6 +238,13 @@ with Darwin's numbers, never a real `ENOTSUP`); macOS before 10.12 (no `renamex_
   that answered false). The child's own assertion runs on macOS only, so that RED is macOS-only and not observed here.
 - **3. `DarwinNativeTests` built its scope with `new()`.** It now uses `DarwinLayout.FreshOwnedScope()`, as the other Darwin-sensitive classes do. No behaviour differs (each of its tests already called `DarwinLayout.Require()` through `RequireMacOs` before its first folder), so there is no RED:
   the change is consistency, and item 2 makes every owned folder require the layout whoever builds the scope.
+- **2. The layout self-test did not guard the destructive paths.** The real start-of-run sweep (`LeftoversSweepFixture`) and the end-of-run audit ran on the real temp root, and `OwnedDir` creation and teardown ran for about 14 classes that build `new OwnedScope()`, none of them
+  through `DarwinLayout.Require()`; on macOS an identity read that is not trusted must not authorise a removal. Now `Require` is called (a) at the top of the real sweep, inside the constructor's existing try (`GuardedSweep`): a failure is ONE reported
+  error line and no sweep runs; (b) at the top of the real audit (`GuardedAudit`, used by `RealAudit`): the exception ends the audit and nothing is removed; (c) first in `OwnedDir.Create`, before the claim exists; (d) first in `Removal.Quietly`, so `OwnedDir.Dispose`
+  (and with it `OwnedScope.Dispose`, the audit's re-dispose and the sweep's quarantine removal) removes nothing on a failing layout, warns once and keeps the entry in the registry. Teardown never throws, so (d) returns false with a warning where (c) throws.
+  The layout measurement itself creates its folder inside the `Lazy` that `Require` reads, and a `Require` there would re-enter the `Lazy` and throw: it passes a no-op requirement (`OwnedDir.Create(..., requireLayout: static () => { })`), which the folder keeps for its own teardown.
+  The requirement is an argument everywhere, so the gates run on Linux with one that throws (`LayoutGateTests`). RED on Linux: 7 of 8 (a sweep and an audit ran, a folder was made and removed, the requirement was asked 0 times); the eighth, the audit with a holding layout, is the companion.
+  Off macOS `Require` is a no-op, so Linux and Windows do not change. **Not measured here:** the real layout failing on a Mac, and the measurement's own folder under the no-op requirement (the macOS job runs `DarwinLayoutTests`).
 
 **2026-11-01 (pin moved to release 105d53c).**
 - The `## Tokens` table moved from `common/test-leftovers.md` to `common/test-leftovers-detail.md` when the rule was split into a core and a detail.

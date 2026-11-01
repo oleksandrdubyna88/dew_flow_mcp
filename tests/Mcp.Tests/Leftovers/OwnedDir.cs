@@ -40,6 +40,7 @@ public sealed class OwnedDir : IDisposable
     internal static OwnedDir Create(string what, string? parent, Action<string>? warn, Func<string>? nextName, Action<string>? beforeClaimWrite = null, Action<string>? afterClaim = null, Action? requireLayout = null)
     {
         requireLayout ??= DarwinLayout.Require;
+        requireLayout(); // before anything exists: on macOS no folder is made on an identity read that is not trusted
         Owned.CheckWhat(what); // before anything exists
         parent ??= Owned.TempRoot();
         warn ??= Owned.DefaultWarn;
