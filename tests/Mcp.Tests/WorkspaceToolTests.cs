@@ -588,6 +588,59 @@ public sealed class WorkspaceToolTests : IDisposable
     }
 
     [Fact]
+    public async Task Refuses_a_dot_dot_after_an_existing_file_because_the_kernel_answers_not_a_directory()
+    {
+        var (provider, root) = Build();
+        await File.WriteAllTextAsync(Path.Combine(root, "a.txt"), "one", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(root, "b.txt"), "bee", TestContext.Current.CancellationToken);
+        CreateLinkOrSkip(() => File.CreateSymbolicLink(
+            Path.Combine(root, "f2"), Path.Combine("a.txt", "..", "b.txt")));
+
+        // `a.txt/..` is not the directory beside the file: opening it fails ("not a directory").
+        var result = await Invoke(provider, """{"path":"f2"}""");
+
+        (result as ToolResult.Ok)?.Content.Should().NotContain("bee", "a dot-dot above a FILE was popped textually");
+        result.Should().BeOfType<ToolResult.Refused>();
+    }
+
+    [Fact]
+    public async Task A_path_with_a_NUL_is_echoed_with_the_control_character_escaped_in_the_reason_and_the_log()
+    {
+        var home = _owned.Dir("workspace");
+        var root = Path.Combine(home, "root");
+        Directory.CreateDirectory(root);
+        var log = new RecordingLogger<SandboxedFileReader>();
+        var reader = new SandboxedFileReader(new WorkspaceRoot(root), new SandboxedFileReaderOptions(), log);
+
+        var outcome = await reader.ReadAsync(new FileReadRequest("a\0b\n", 0, 0), TestContext.Current.CancellationToken);
+
+        var reason = outcome.Should().BeOfType<FileReadOutcome.Refused>().Which.Reason;
+        reason.Should().Contain("a\\0b\\n").And.NotContain("\0").And.NotContain("\n");
+        var warning = log.Warnings.Should().ContainSingle().Which;
+        warning.Should().Contain("a\\0b\\n").And.NotContain("\0").And.NotContain("\n");
+    }
+
+    [Fact]
+    public async Task A_capped_read_logs_the_path_truncated_not_whole()
+    {
+        var home = _owned.Dir("workspace");
+        var root = Path.Combine(home, "root");
+        var parts = Enumerable.Range(0, 30).Select(i => $"directory{i:D3}").ToArray();
+        var deep = Path.Combine([root, .. parts]);
+        Directory.CreateDirectory(deep);
+        await File.WriteAllLinesAsync(Path.Combine(deep, "f.txt"), Numbered(10), TestContext.Current.CancellationToken);
+        var log = new RecordingLogger<SandboxedFileReader>();
+        var reader = new SandboxedFileReader(new WorkspaceRoot(root), new SandboxedFileReaderOptions { MaxLines = 3 }, log);
+        var requested = string.Join('/', parts) + "/f.txt";
+
+        var outcome = await reader.ReadAsync(new FileReadRequest(requested, 0, 0), TestContext.Current.CancellationToken);
+
+        outcome.Should().BeOfType<FileReadOutcome.Ok>();
+        var line = log.Infos.Should().ContainSingle().Which;
+        line.Should().NotContain(requested).And.Contain("…");
+    }
+
+    [Fact]
     public async Task A_rooted_link_target_without_a_drive_resolves_on_the_links_own_volume()
     {
         if (!OperatingSystem.IsWindows())
