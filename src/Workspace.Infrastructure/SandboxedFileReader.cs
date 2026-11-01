@@ -28,11 +28,28 @@ public sealed record SandboxedFileReaderOptions
 /// <summary>Reads files under one workspace root and nothing else.
 /// <para>The guard is two checks, because each alone misses what the other catches. The LEXICAL one —
 /// <c>GetFullPath</c> then a prefix compare — stops <c>..</c> traversal, which a string scan for
-/// "<c>..</c>" does not (<c>a/../../b</c> spells fine). It cannot see NTFS links: <c>GetFullPath</c>
+/// "<c>..</c>" does not (<c>a/../../b</c> spells fine). It cannot see links: <c>GetFullPath</c>
 /// normalizes dots without touching the disk, while the read below follows links transparently, so a
 /// junction inside the root pointing outside it passed until 2026-08-19 — the SECURITY.md claim was
-/// ahead of the code. The REAL-PATH check closes that: every existing segment is resolved through
-/// <c>ResolveLinkTarget</c> and the final target must lie under the equally-resolved root.</para>
+/// ahead of the code. The REAL-PATH check closes that, and it is ONE root-down resolver in the manner of
+/// <c>realpath(3)</c>: pending segments on a stack; <c>.</c> is skipped; <c>..</c> steps to the parent
+/// of the path resolved so far (never above the filesystem root); any other segment is appended, and if
+/// that entry is a link, its IMMEDIATE target is read and its segments are pushed in front of the
+/// remaining ones — an absolute target restarts from its own root, a relative one continues from the
+/// link's directory. So the directories INSIDE a link's target are resolved too: until 2026-11-01 only
+/// the target's final spelling was kept, and a link whose target ran through a second link
+/// (<c>alias</c> to <c>&lt;root&gt;/l2/secret.txt</c> with <c>l2</c> pointing outside) passed the prefix
+/// check and read straight out of the root. One cumulative budget of <see cref="MaxLinkHops"/> link
+/// expansions covers the whole resolution (plain segments cost nothing, so a deep path is free and a
+/// link loop ends fast); over budget, or any error while resolving, REFUSES — the guard fails closed.
+/// A segment that does not exist ends the walking: the rest is appended and the caller's existence
+/// check answers it. The root is resolved by the same resolver, and the final path must equal the real
+/// root or start with it plus a separator.</para>
+/// <para>What is OPENED is exactly the path that was checked: the fully resolved path, never the
+/// spelling that led to it. RACE MODEL: this guard checks and then opens by path, with no no-follow
+/// open. A link swapped between the check and the open is outside what it covers — an attacker who can
+/// write inside the root concurrently with a read is not in the threat model (SECURITY.md); the root
+/// is to be a directory only trusted parties can write to.</para>
 /// <para>The read STREAMS. It used to be <c>File.ReadAllLinesAsync</c> — the entire file into a
 /// <c>string[]</c> whatever its size — with the window sliced afterwards, so a single large file in
 /// the workspace was a multi-hundred-megabyte allocation on a process that never restarts. Memory now
@@ -45,6 +62,11 @@ public sealed class SandboxedFileReader : ISandboxedFileReader
     private readonly WorkspaceRoot root;
     private readonly SandboxedFileReaderOptions caps;
     private readonly ILogger<SandboxedFileReader> logger;
+    private readonly Func<string, CancellationToken, IAsyncEnumerable<string>> openLines;
+
+    /// <summary>The most link expansions ONE resolution may spend. Forty, as the Linux kernel allows
+    /// (<c>ELOOP</c> past 40): far more than any real checkout chains, and a loop reaches it at once.</summary>
+    internal const int MaxLinkHops = 40;
 
     /// <summary>The root with its own links resolved, computed once. The candidate's REAL path is
     /// compared against this rather than the configured spelling — a root reached through a link
@@ -55,12 +77,27 @@ public sealed class SandboxedFileReader : ISandboxedFileReader
         WorkspaceRoot root,
         SandboxedFileReaderOptions caps,
         ILogger<SandboxedFileReader> logger)
+        : this(root, caps, logger, (path, token) => File.ReadLinesAsync(path, token))
+    {
+    }
+
+    /// <summary>The seam: how the checked path is OPENED. A test passes a recorder to prove the read is
+    /// handed the resolved path and not the spelling it was asked with.</summary>
+    internal SandboxedFileReader(
+        WorkspaceRoot root,
+        SandboxedFileReaderOptions caps,
+        ILogger<SandboxedFileReader> logger,
+        Func<string, CancellationToken, IAsyncEnumerable<string>> openLines)
     {
         GuardAgainstUnusableCaps(caps);
         this.root = root;
         this.caps = caps;
         this.logger = logger;
-        realRoot = ResolveRealPath(root.FullPath);
+        this.openLines = openLines;
+        realRoot = TryResolveRealPath(root.FullPath, out var resolvedRoot)
+            ? resolvedRoot
+            : throw new InvalidOperationException(
+                $"The workspace root '{root.FullPath}' cannot be resolved (a link loop, more than {MaxLinkHops} links, or an unreadable link).");
     }
 
     public string Sandbox => root.FullPath;
@@ -118,7 +155,7 @@ public sealed class SandboxedFileReader : ISandboxedFileReader
         var window = new Window(Math.Max(1, request.StartLine), requested, caps);
 
         var total = 0;
-        await foreach (var line in File.ReadLinesAsync(fullPath, cancellationToken))
+        await foreach (var line in openLines(fullPath, cancellationToken))
         {
             total++;
             window.Offer(total, line);
@@ -250,7 +287,11 @@ public sealed class SandboxedFileReader : ISandboxedFileReader
         // points outside it still spells fine. The read follows links transparently; the guard must
         // follow them first. Links that stay inside the root are legitimate — a checkout may link
         // within itself — so the refusal is about where the target LIVES, not about links as such.
-        var real = ResolveRealPath(candidate);
+        if (!TryResolveRealPath(candidate, out var real))
+        {
+            return false;
+        }
+
         if (real != realRoot
             && !real.StartsWith(realRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal))
         {
@@ -262,41 +303,94 @@ public sealed class SandboxedFileReader : ISandboxedFileReader
         return true;
     }
 
-    /// <summary>The path with every EXISTING segment's links resolved, walked root-down so a junction
-    /// in the middle of the chain is seen, not only one at the leaf — <c>ResolveLinkTarget</c> on the
-    /// full path alone resolves the leaf and nothing above it. Segments that do not exist yet are
-    /// appended verbatim: there is nothing on disk to follow, and the caller's own existence check
-    /// answers those.</summary>
-    private static string ResolveRealPath(string absolutePath)
+    /// <summary>The real path of <paramref name="absolutePath"/>, resolved root-down like
+    /// <c>realpath(3)</c>; false (and nothing usable in <paramref name="real"/>) when it cannot be
+    /// resolved inside the budget. See the class doc for the walk.
+    /// <para>The link's IMMEDIATE target is read as the raw <c>LinkTarget</c> string and split here,
+    /// rather than taken from <c>ResolveLinkTarget(false).FullName</c>: that call normalizes <c>..</c>
+    /// lexically, and <c>sub/../x</c> with <c>sub</c> a link is not <c>x</c> beside it.</para></summary>
+    internal static bool TryResolveRealPath(string absolutePath, out string real)
     {
-        var current = Path.GetPathRoot(absolutePath) ?? string.Empty;
-        var segments = absolutePath[current.Length..]
-            .Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
-
-        for (var i = 0; i < segments.Length; i++)
+        real = string.Empty;
+        try
         {
-            current = Path.Combine(current, segments[i]);
-            FileSystemInfo info = Directory.Exists(current)
-                ? new DirectoryInfo(current)
-                : new FileInfo(current);
-            if (!info.Exists)
+            var fsRoot = Path.GetPathRoot(absolutePath);
+            if (string.IsNullOrEmpty(fsRoot))
             {
-                for (var rest = i + 1; rest < segments.Length; rest++)
+                return false;
+            }
+
+            var current = fsRoot;
+            var pending = new Stack<string>();
+            PushSegments(pending, absolutePath[fsRoot.Length..]);
+            var hops = 0;
+            var missing = false;
+
+            while (pending.Count > 0)
+            {
+                var segment = pending.Pop();
+                if (segment == ".")
                 {
-                    current = Path.Combine(current, segments[rest]);
+                    continue;
                 }
 
-                return current;
+                if (segment == "..")
+                {
+                    current = Path.GetDirectoryName(current) ?? fsRoot;
+                    continue;
+                }
+
+                current = Path.Join(current, segment);
+                if (missing)
+                {
+                    continue; // nothing on disk below an absent entry; appended, and the caller's existence check answers
+                }
+
+                FileSystemInfo info = Directory.Exists(current) ? new DirectoryInfo(current) : new FileInfo(current);
+                var target = info.LinkTarget;
+                if (target is null)
+                {
+                    missing = !info.Exists;
+                    continue;
+                }
+
+                if (++hops > MaxLinkHops)
+                {
+                    return false;
+                }
+
+                if (Path.IsPathRooted(target))
+                {
+                    fsRoot = Path.GetFullPath(Path.GetPathRoot(target)!);
+                    current = fsRoot;
+                    PushSegments(pending, target[Path.GetPathRoot(target)!.Length..]);
+                }
+                else
+                {
+                    current = Path.GetDirectoryName(current) ?? fsRoot;
+                    PushSegments(pending, target);
+                }
             }
 
-            var target = info.ResolveLinkTarget(returnFinalTarget: true);
-            if (target is not null)
-            {
-                current = target.FullName;
-            }
+            real = Path.TrimEndingDirectorySeparator(current);
+            return true;
         }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Security.SecurityException)
+        {
+            return false; // fails closed: a path that cannot be resolved is a path that is not read
+        }
+    }
 
-        return Path.TrimEndingDirectorySeparator(current);
+    /// <summary>The segments of <paramref name="path"/> pushed so the FIRST ends up on top.</summary>
+    private static void PushSegments(Stack<string> pending, string path)
+    {
+        var segments = path.Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries);
+        for (var i = segments.Length - 1; i >= 0; i--)
+        {
+            pending.Push(segments[i]);
+        }
     }
 }
 

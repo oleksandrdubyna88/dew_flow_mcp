@@ -27,7 +27,7 @@ flowchart TD
     ROOTED -->|no| RESOLVE["GetFullPath(root + path)"]
     RESOLVE --> INSIDE{"starts with root + separator?"}
     INSIDE -->|no| OUT
-    INSIDE -->|yes| REAL["resolve links segment by segment<br/>ResolveLinkTarget, root-down"]
+    INSIDE -->|yes| REAL["resolve root-down like realpath(3):<br/>a link's target segments are pushed<br/>in front of the rest; 40 hops in all"]
     REAL --> REALIN{"real path under<br/>the real root?"}
     REALIN -->|no| OUT
     REALIN -->|yes| EXISTS{"file exists?"}
@@ -68,10 +68,16 @@ flowchart TD
 - **Resolve, then compare — twice.** The lexical pass (`GetFullPath` + prefix compare) stops `..`
   traversal, which a string scan does not: `a/../../b` spells fine. It cannot see NTFS links, because
   `GetFullPath` never touches the disk — so until 2026-08-19 a junction inside the root pointing outside
-  it read straight through, while SECURITY.md claimed otherwise. The REAL-PATH pass closes that: every
-  existing segment resolved through `ResolveLinkTarget` (root-down, so a junction mid-chain is seen, not
-  only at the leaf), compared against the equally-resolved root. Links that stay inside the root still
-  read — the refusal is about where the target lives, not about links as such.
+  it read straight through, while SECURITY.md claimed otherwise. The REAL-PATH pass closes that with ONE
+  root-down resolver in the manner of `realpath(3)`: pending segments on a stack, `.` skipped, `..` to
+  the parent of the path resolved so far, and a link read as its IMMEDIATE target whose segments are
+  pushed in front of the rest — so the directories inside a target are resolved too (until 2026-11-01
+  only the target's final spelling was kept, and `alias` to `<root>/l2/secret.txt` with `l2` pointing
+  outside read straight out). One budget of 40 link expansions covers the whole walk; over it, or on
+  any resolution error, the read is refused. The result is compared against the root resolved the same
+  way, and the file opened is that resolved path. Links that stay inside the root still read — the
+  refusal is about where the target lives, not about links as such. A link swapped between the check
+  and the open is outside the guard (open by path, no no-follow).
 - **A denial is a `Refused`, not a `Failed`.** The guard working is the opposite event from the disk
   breaking, and a ledger that files both under one flag can count neither.
 - **A read returns a line WINDOW**, and every result reports `startLine`/`endLine`/`totalLines`, so

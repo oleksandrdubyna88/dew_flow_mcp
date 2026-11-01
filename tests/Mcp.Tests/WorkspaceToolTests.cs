@@ -401,6 +401,146 @@ public sealed class WorkspaceToolTests : IDisposable
             .Which.Content.Should().Contain("real");
     }
 
+    [Fact]
+    public async Task A_relative_link_that_climbs_out_of_the_root_with_dot_dot_is_refused()
+    {
+        var (provider, root) = Build();
+        var outside = _owned.Dir("outside");
+        var secret = Path.Combine(outside, "secret.txt");
+        await File.WriteAllTextAsync(secret, "secret", TestContext.Current.CancellationToken);
+        CreateLinkOrSkip(() => File.CreateSymbolicLink(Path.Combine(root, "up.txt"), Path.GetRelativePath(root, secret)));
+
+        var result = await Invoke(provider, """{"path":"up.txt"}""");
+
+        (result as ToolResult.Ok)?.Content.Should().NotContain("secret", "the read followed a relative link out of the root");
+        result.Should().BeOfType<ToolResult.Refused>()
+            .Which.Reason.Should().Contain("outside the workspace");
+    }
+
+    [Fact]
+    public async Task A_relative_link_that_stays_inside_the_root_reads()
+    {
+        var (provider, root) = Build();
+        await File.WriteAllTextAsync(Path.Combine(root, "sub", "real.txt"), "real", TestContext.Current.CancellationToken);
+        DirectoryLinks.CreateOrSkip(Path.Combine(root, "alias"), Path.Combine("sub", "..", "sub"));
+
+        var result = await Invoke(provider, """{"path":"alias/real.txt"}""");
+
+        result.Should().BeOfType<ToolResult.Ok>()
+            .Which.Content.Should().Contain("real");
+    }
+
+    [Fact]
+    public async Task A_link_loop_is_refused_promptly_and_never_hangs()
+    {
+        var (provider, root) = Build();
+        CreateLinkOrSkip(() => File.CreateSymbolicLink(Path.Combine(root, "a"), "b"));
+        CreateLinkOrSkip(() => File.CreateSymbolicLink(Path.Combine(root, "b"), "a"));
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+
+        var result = await Invoke(provider, """{"path":"a"}""");
+
+        // Forty-one expansions and the budget is spent: the guard answers, it does not walk forever.
+        result.Should().BeOfType<ToolResult.Refused>()
+            .Which.Reason.Should().Contain("outside the workspace");
+        clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(10));
+    }
+
+    [Theory]
+    [InlineData(SandboxedFileReader.MaxLinkHops, true)]
+    [InlineData(SandboxedFileReader.MaxLinkHops + 1, false)]
+    public async Task A_chain_of_links_reads_up_to_the_hop_budget_and_is_refused_one_past_it(int hops, bool reads)
+    {
+        var (provider, root) = Build();
+        await File.WriteAllTextAsync(Path.Combine(root, "real.txt"), "real", TestContext.Current.CancellationToken);
+
+        // link1 -> link2 -> ... -> link{hops} -> real.txt: reading link1 expands exactly `hops` links.
+        for (var i = 1; i <= hops; i++)
+        {
+            var next = i == hops ? "real.txt" : $"link{i + 1}";
+            CreateLinkOrSkip(() => File.CreateSymbolicLink(Path.Combine(root, $"link{i}"), next));
+        }
+
+        var result = await Invoke(provider, """{"path":"link1"}""");
+
+        if (reads)
+        {
+            result.Should().BeOfType<ToolResult.Ok>().Which.Content.Should().Contain("real");
+        }
+        else
+        {
+            result.Should().BeOfType<ToolResult.Refused>().Which.Reason.Should().Contain("outside the workspace");
+        }
+    }
+
+    [Fact]
+    public async Task A_deep_path_of_plain_directories_reads_because_only_links_spend_the_budget()
+    {
+        var (provider, root) = Build();
+        var parts = Enumerable.Range(0, SandboxedFileReader.MaxLinkHops + 20).Select(i => $"d{i}").ToArray();
+        var deep = Path.Combine([root, .. parts]);
+        Directory.CreateDirectory(deep);
+        await File.WriteAllTextAsync(Path.Combine(deep, "f.txt"), "deep", TestContext.Current.CancellationToken);
+
+        var result = await Invoke(provider, $$"""{"path":"{{string.Join('/', parts)}}/f.txt"}""");
+
+        result.Should().BeOfType<ToolResult.Ok>()
+            .Which.Content.Should().Contain("deep");
+    }
+
+    [Fact]
+    public async Task A_chained_junction_that_reaches_the_outside_is_refused()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("a junction is an NTFS reparse point; the symlink twin of this chain runs on every OS (alias2/alias3 above)");
+        }
+
+        var (provider, root) = Build();
+        var outside = _owned.Dir("outside");
+        await File.WriteAllTextAsync(Path.Combine(outside, "secret.txt"), "secret", TestContext.Current.CancellationToken);
+        DirectoryLinks.CreateOrSkip(Path.Combine(root, "j2"), outside);
+        DirectoryLinks.CreateOrSkip(Path.Combine(root, "j1"), Path.Combine(root, "j2"));
+
+        var result = await Invoke(provider, """{"path":"j1/secret.txt"}""");
+
+        (result as ToolResult.Ok)?.Content.Should().NotContain("secret", "the read followed a chained junction out of the root");
+        result.Should().BeOfType<ToolResult.Refused>()
+            .Which.Reason.Should().Contain("outside the workspace");
+    }
+
+    [Fact]
+    public async Task What_is_opened_is_the_resolved_path_that_was_checked_and_never_the_link_spelling()
+    {
+        var home = _owned.Dir("workspace");
+        var root = Path.Combine(home, "root");
+        Directory.CreateDirectory(Path.Combine(root, "sub"));
+        await File.WriteAllTextAsync(Path.Combine(root, "sub", "real.txt"), "real", TestContext.Current.CancellationToken);
+        DirectoryLinks.CreateOrSkip(Path.Combine(root, "alias"), Path.Combine(root, "sub"));
+        var opened = new List<string>();
+        var reader = new SandboxedFileReader(
+            new WorkspaceRoot(root),
+            new SandboxedFileReaderOptions(),
+            NullLogger<SandboxedFileReader>.Instance,
+            (path, token) =>
+            {
+                opened.Add(path);
+                return File.ReadLinesAsync(path, token);
+            });
+
+        var outcome = await reader.ReadAsync(new FileReadRequest("alias/real.txt", 0, 0), TestContext.Current.CancellationToken);
+
+        outcome.Should().BeOfType<FileReadOutcome.Ok>();
+        var path = opened.Should().ContainSingle().Which;
+        path.Should().EndWith(Path.Combine("sub", "real.txt"));
+        path.Should().NotContain("alias");
+        // No segment of what was opened is a link: nothing is left for the open to follow.
+        for (var dir = Path.GetDirectoryName(path); !string.IsNullOrEmpty(dir); dir = Path.GetDirectoryName(dir))
+        {
+            new DirectoryInfo(dir).LinkTarget.Should().BeNull($"{dir} is part of the opened path");
+        }
+    }
+
     /// <summary>Creating a symlink on Windows needs Developer Mode or elevation. A run without either
     /// SKIPS these tests loudly rather than passing them vacuously — an escape test that never created
     /// its link proves nothing about the guard.</summary>
