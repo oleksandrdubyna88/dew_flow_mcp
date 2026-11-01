@@ -34,6 +34,22 @@ public sealed class NativeDarwinTests
         BinaryPrimitives.WriteInt64LittleEndian(buffer.AsSpan(at + 8), nanoseconds);
     }
 
+    [Theory]
+    [InlineData(0x1000, true)] // a FIFO
+    [InlineData(0x4000, false)]
+    [InlineData(0x8000, false)]
+    [InlineData(0xA000, false)]
+    [InlineData(0x2000, false)]
+    [InlineData(0xC000, false)] // a socket
+    [InlineData(0x0000, false)] // the type bits of a path that was not read at all
+    public void A_fifo_is_told_by_the_type_bits_of_the_mode_and_by_nothing_else(int kind, bool fifo)
+    {
+        // The FIFO child asserts this on the claim BEFORE its read: a null read of a path that is missing (ENOENT) must not pass for a refused FIFO.
+        var stat = Native.ParseDarwinStat(Buffer(b => BinaryPrimitives.WriteUInt16LittleEndian(b.AsSpan(4), (ushort)(kind | 0x1ED))));
+
+        stat.IsFifo.Should().Be(fifo);
+    }
+
     [Fact]
     public void A_stat_buffer_is_read_at_darwins_fixed_offsets()
     {

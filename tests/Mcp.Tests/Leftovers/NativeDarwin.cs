@@ -9,7 +9,11 @@ namespace Mcp.Tests.Leftovers;
 /// <see cref="Identity"/>) so the layout self-test can check every field this reads against something known.</summary>
 internal readonly record struct DarwinStat(
     int Dev, ushort Mode, ushort Nlink, ulong Ino, uint Uid, uint Gid, int Rdev,
-    DateTimeOffset Atime, DateTimeOffset Mtime, DateTimeOffset Ctime, DateTimeOffset Birthtime, long Size);
+    DateTimeOffset Atime, DateTimeOffset Mtime, DateTimeOffset Ctime, DateTimeOffset Birthtime, long Size)
+{
+    /// <summary>The entry is a named pipe (<c>S_ISFIFO</c>).</summary>
+    internal bool IsFifo => false;
+}
 
 /// <summary>The macOS (Darwin) half of <see cref="Native"/>: <c>lstat</c> and <c>fstat</c> for the identity, an exclusive <c>mkdir</c>, an exclusive
 /// <c>renamex_np</c>, the verified claim read and <c>kill(pid, 0)</c>, all through libSystem by its full path (the name <c>libc</c> resolves there
