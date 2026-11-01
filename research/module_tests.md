@@ -114,7 +114,9 @@ public sealed class ExampleTests : IDisposable
 ## External dependencies
 
 The mounted conventions (`.claude/rules/shared`, a git submodule — **fetched by every CI job that runs these tests**; a
-missing mount FAILS the tests that read it, it is not a clean setup): the rule text and its `## Tokens` table, the owner
+missing mount FAILS the tests that read it, it is not a clean setup): the rule text and its `## Tokens` table (the guard reads the table from the rule file that holds it, found by content: `common/test-leftovers-detail.md`
+since release 105d53c, else `common/test-leftovers.md` on a mount from before the split, else one finding naming both; `dew_flow_sidecar_rust`
+has its own guard and takes the same change in its PR #66), the owner
 vectors (`tools/fixtures/owner-vectors.json`), `tools/lib/sweeper-scan.mjs` (the guard's script half, run through `node`),
 and `tools/janitor.sh`. `node` is on every runner and developer machine (`low-priority.mjs` needs it too).
 

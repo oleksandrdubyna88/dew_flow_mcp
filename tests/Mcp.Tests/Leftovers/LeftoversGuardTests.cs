@@ -461,6 +461,76 @@ public sealed class LeftoversGuardTests : IDisposable
         found.Should().ContainSingle().Which.Text.Should().Contain("git submodule update --init");
     }
 
+    private const string DetailName = "common/test-leftovers-detail.md";
+    private const string CoreName = "common/test-leftovers.md";
+
+    /// <summary>A synthetic repository whose mount holds the given rule files (name → text).</summary>
+    private string MountWith(string what, params (string Name, string Text)[] files)
+    {
+        var root = _owned.Dir(what);
+        foreach (var (name, text) in files)
+        {
+            var full = Path.Combine(root, ".claude", "rules", "shared", name);
+            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+            File.WriteAllText(full, text);
+        }
+
+        return root;
+    }
+
+    [Fact]
+    public void A_split_mount_reads_the_table_from_the_detail_and_the_messages_name_the_detail()
+    {
+        var root = MountWith("split-mount", (CoreName, "# core\n\nno table\n"), (DetailName, Rule(McpRow)));
+
+        LeftoversGuard.RegisteredTokenFindings(root, "mcp", "the MCP server").Should().BeEmpty();
+        var found = LeftoversGuard.RegisteredTokenFindings(root, "mcp", "the embedding sidecar").Should().ContainSingle().Subject;
+        found.File.Should().Be(DetailName);
+        found.Text.Should().Contain(DetailName).And.NotContain(CoreName);
+    }
+
+    [Fact]
+    public void A_mount_from_before_the_split_reads_the_table_from_the_core_and_the_messages_name_the_core()
+    {
+        var root = MountWith("presplit-mount", (CoreName, Rule(McpRow)));
+
+        LeftoversGuard.RegisteredTokenFindings(root, "mcp", "the MCP server").Should().BeEmpty();
+        var found = LeftoversGuard.RegisteredTokenFindings(root, "mcp", "the embedding sidecar").Should().ContainSingle().Subject;
+        found.File.Should().Be(CoreName);
+        found.Text.Should().Contain(CoreName).And.NotContain("detail");
+    }
+
+    [Fact]
+    public void A_detail_without_a_table_does_not_hide_the_table_of_the_core()
+    {
+        var root = MountWith("detail-no-table", (DetailName, "# detail\n\nno table\n"), (CoreName, Rule(McpRow)));
+
+        LeftoversGuard.RegisteredTokenFindings(root, "mcp", "the MCP server").Should().BeEmpty();
+        LeftoversGuard.RegisteredTokenFindings(root, "mcp", "the embedding sidecar").Should().ContainSingle().Which.File.Should().Be(CoreName);
+    }
+
+    [Fact]
+    public void The_detail_wins_when_both_files_have_a_table()
+    {
+        var root = MountWith("both-tables", (CoreName, Rule("| `mcp` | dew_flow | the core row |")), (DetailName, Rule(McpRow)));
+
+        LeftoversGuard.RegisteredTokenFindings(root, "mcp", "the MCP server").Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_mount_with_no_table_in_either_file_is_one_finding_naming_both_files(bool filesExist)
+    {
+        var root = filesExist
+            ? MountWith("neither-table", (CoreName, "# core\n"), (DetailName, "# detail\n"))
+            : _owned.Dir("neither-file");
+
+        var found = LeftoversGuard.RegisteredTokenFindings(root, "mcp", "the MCP server");
+
+        found.Should().ContainSingle().Which.Text.Should().Contain(DetailName).And.Contain(CoreName);
+    }
+
     private const string TokenFile = "tests/Mcp.Tests/Leftovers/OwnedToken.cs";
 
     [Fact]

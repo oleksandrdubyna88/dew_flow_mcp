@@ -182,6 +182,12 @@ asserted through the two `WindowsOwnership` fixtures, never from the runner's ow
 - **Rename fallback placeholder (was open).** The clean-up removed the placeholder with `Directory.Delete` after a check by path that it was some folder. It now keeps the placeholder's identity from the `mkdir` and calls `rmdir(2)` (P/Invoke: an EMPTY folder only, a link never followed) only while the entry at the name is still a folder of the caller's uid with that (device, inode). RED before: an empty folder renamed onto the placeholder after the failed rename was deleted (`NativeTests`).
 - **Audit orphan scan (N+1 listing).** `LeftoversAudit.OfOrphan` listed the temp root's quarantines once per orphan claim; `Discover` now lists them once per audit and passes the set in (`Discover` takes the lister as an optional seam). RED before: 5 orphan claims gave 5 listings, expected 1 (`LeftoversAuditTests`).
 
+**2026-11-01 (pin moved to release 105d53c).**
+- The `## Tokens` table moved from `common/test-leftovers.md` to `common/test-leftovers-detail.md` when the rule was split into a core and a detail.
+  `GuardTokens.RegisteredTokenFindings` reads it by content, as `resolveRule` of the mounted `tools/leftovers-check.mjs` does: the detail when it
+  exists AND has a `## Tokens` section, else the core when it has one (a mount from before the split), else ONE finding naming both files. Every
+  message names the file actually read. Boundary: the same change lands in `dew_flow_sidecar_rust` PR #66, which has its own guard; the two guards share no code.
+
 ## The contract this document encodes
 
 The released rule: `dew_flow_conventions · common/test-leftovers.md` at the `release` tip **`115bbf8`** (promoted
@@ -1033,8 +1039,8 @@ unless stated (on Linux the namespace must be this reader's or the verdict is `u
   by a GFM table whose header is exactly `| token | family | repository |`; the token must be the first cell (backticks
   stripped) of exactly one row; no token twice; the row's `repository` cell must equal `identity` (trimmed,
   case-insensitive), and an empty `identity` is a finding (fail closed). The real check reads
-  `<root>/.claude/rules/shared/common/test-leftovers.md` with `OwnedToken.RepoToken` and `OwnedToken.RepoRow`; **a
-  missing file is a finding** (an uninitialised submodule registers nothing — run `git submodule update --init .claude/rules/shared`).
+  `<root>/.claude/rules/shared/common/test-leftovers.md` with `OwnedToken.RepoToken` and `OwnedToken.RepoRow` (since 2026-11-01 the file that
+  holds the table, found by content — see *Deviations*); **a missing file is a finding** (an uninitialised submodule registers nothing — run `git submodule update --init .claude/rules/shared`).
   **One constant** (`R:63-65`; `G:731-732`): over every tracked `.cs` (`src/` and `tests/`), `.mjs`, `.js`, `.cjs`,
   `.sh`, `.ps1`, `.py` file, a non-comment line matching `\bRepoToken\b\s*(?::\s*\w+\s*)?=\s*["']([^"'\n]*)["']` must
   occur exactly once — in `tests/Mcp.Tests/Leftovers/OwnedToken.cs` — and its value must be `token`; a second
