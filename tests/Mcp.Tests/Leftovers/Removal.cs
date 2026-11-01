@@ -14,7 +14,7 @@ internal static class Removal
     /// neither is not the helper's to remove. The claim goes only when the entry is GONE — re-read by identity, since
     /// <c>Directory.Exists</c> follows links and says false for an error as it does for an absence. True only when BOTH are gone; a
     /// path already gone is success.</summary>
-    internal static bool Quietly(string dir, Action<string> warn)
+    internal static bool Quietly(string dir, Action<string> warn, Action? requireLayout = null)
     {
         var failure = Retry(() => RemoveEntry(dir));
         if (failure is not null)

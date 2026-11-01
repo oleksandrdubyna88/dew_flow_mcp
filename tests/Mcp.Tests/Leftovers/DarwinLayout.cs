@@ -51,7 +51,8 @@ internal static class DarwinLayout
     [SupportedOSPlatform("macos")]
     private static Report MeasureInAFolderOfItsOwn()
     {
-        using var folder = OwnedDir.Create("darwin-layout");
+        // INSIDE the lazy that Require reads: a Require here would re-enter it and throw. The folder and its teardown therefore use no requirement.
+        using var folder = OwnedDir.Create("darwin-layout", null, null, null, requireLayout: static () => { });
         return Measure(folder.Path);
     }
 
