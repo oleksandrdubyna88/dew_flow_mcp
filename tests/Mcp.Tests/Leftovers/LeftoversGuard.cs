@@ -165,7 +165,8 @@ public static class LeftoversGuard
         scripts.Count == 0 ? [] : GuardScripts.Classify(scripts, mountRoot, node);
 
     /// <summary>The token checks (class <c>token</c>): see <see cref="GuardTokens"/>.</summary>
-    public static IReadOnlyList<Finding> TokenFindings(string ruleText, string token, string identity) => GuardTokens.TokenFindings(ruleText, token, identity);
+    /// <param name="rule">the name of the rule file <paramref name="ruleText"/> was read from — every message names it.</param>
+    public static IReadOnlyList<Finding> TokenFindings(string ruleText, string token, string identity, string rule) => GuardTokens.TokenFindings(ruleText, token, identity, rule);
 
     public static IReadOnlyList<Finding> RegisteredTokenFindings(string repoRoot, string token, string identity) => GuardTokens.RegisteredTokenFindings(repoRoot, token, identity);
 
