@@ -236,6 +236,8 @@ with Darwin's numbers, never a real `ENOTSUP`); macOS before 10.12 (no `renamex_
 - **4. The FIFO child test could pass for the wrong reason.** `DarwinFifoChild` asserted only that the read returned null, but `DarwinReadVerifiedRegular` also returns null when `open` fails for any reason (ENOENT, for one). Before the read the child now `lstat`s the
   claim and asserts that it is there and is a FIFO (`(Mode & 0xF000) == 0x1000`, as `DarwinStat.IsFifo`). The bit test is pure and runs on Linux: RED there was `A_fifo_is_told_by_the_type_bits_of_the_mode_and_by_nothing_else` (1 of 7 cases, against a stub
   that answered false). The child's own assertion runs on macOS only, so that RED is macOS-only and not observed here.
+- **3. `DarwinNativeTests` built its scope with `new()`.** It now uses `DarwinLayout.FreshOwnedScope()`, as the other Darwin-sensitive classes do. No behaviour differs (each of its tests already called `DarwinLayout.Require()` through `RequireMacOs` before its first folder), so there is no RED:
+  the change is consistency, and item 2 makes every owned folder require the layout whoever builds the scope.
 
 **2026-11-01 (pin moved to release 105d53c).**
 - The `## Tokens` table moved from `common/test-leftovers.md` to `common/test-leftovers-detail.md` when the rule was split into a core and a detail.

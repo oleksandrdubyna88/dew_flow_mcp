@@ -12,7 +12,7 @@ public sealed class DarwinNativeTests : IDisposable
     /// <summary>What the child may take: a start of the whole test runner, then one read. Past it the child is a hang.</summary>
     private static readonly TimeSpan ChildTimeout = TimeSpan.FromSeconds(90);
 
-    private readonly OwnedScope _owned = new();
+    private readonly OwnedScope _owned = DarwinLayout.FreshOwnedScope();
 
     public void Dispose() => _owned.Dispose();
 
