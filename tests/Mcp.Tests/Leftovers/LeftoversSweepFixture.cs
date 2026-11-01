@@ -72,10 +72,26 @@ public sealed class LeftoversSweepFixture : IAsyncDisposable
     /// the environment. It looks for THIS process's own record, never the run's (<c>TESTSTODELETE_RUN</c>): under rule §3 every child
     /// of a run writes the run's record, so the run's record would name a sibling's folders too.</summary>
     internal static void RealAudit(string tmp, IReadOnlyList<OwnedDir> registry, Func<string, bool>? mine = null, Func<string, string?>? env = null) =>
-        LeftoversAudit.Run(tmp, Owner.This, registry, mine, env);
+        GuardedAudit(DarwinLayout.Require, () => LeftoversAudit.Run(tmp, Owner.This, registry, mine, env));
 
     private static SweepResult RealSweep() =>
-        LeftoversSweep.Run(new SweepOptions(Owned.TempRoot(), DateTimeOffset.UtcNow, LeftoversSweep.MinAge, Liveness.ProbeProcess, Scope.IsMine));
+        GuardedSweep(DarwinLayout.Require, () => LeftoversSweep.Run(new SweepOptions(Owned.TempRoot(), DateTimeOffset.UtcNow, LeftoversSweep.MinAge, Liveness.ProbeProcess, Scope.IsMine)));
+
+    /// <summary>The sweep behind the layout requirement: it removes by identity, so on macOS it runs only after the layout holds. A requirement
+    /// that throws means NO sweep runs and the one exception is what the constructor reports.</summary>
+    internal static SweepResult GuardedSweep(Action requireLayout, Func<SweepResult> sweep)
+    {
+        requireLayout();
+        return sweep();
+    }
+
+    /// <summary>The same for the end-of-run audit, which removes folders by identity too: the requirement's exception ends the run's audit, and
+    /// nothing is removed.</summary>
+    internal static void GuardedAudit(Action requireLayout, Action audit)
+    {
+        requireLayout();
+        audit();
+    }
 
     private static void Say(Action<string> report, string line)
     {

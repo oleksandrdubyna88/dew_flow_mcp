@@ -10,7 +10,7 @@ namespace Mcp.Tests.Leftovers;
 /// refuses to replace what it should not. Everything here reads the entry itself and fails closed.</summary>
 public sealed class NativeTests : IDisposable
 {
-    private readonly OwnedScope _owned = new();
+    private readonly OwnedScope _owned = DarwinLayout.FreshOwnedScope();
 
     public void Dispose() => _owned.Dispose();
 
@@ -31,7 +31,7 @@ public sealed class NativeTests : IDisposable
     }
 
     [Fact]
-    public void The_uid_of_an_entry_is_the_callers_on_linux_and_absent_on_windows()
+    public void The_uid_of_an_entry_is_the_callers_on_posix_and_absent_on_windows()
     {
         var scratch = _owned.Dir("scratch");
 
@@ -153,11 +153,11 @@ public sealed class NativeTests : IDisposable
     }
 
     [Fact]
-    public void On_linux_the_folder_is_private_to_the_caller()
+    public void On_posix_the_folder_is_private_to_the_caller()
     {
-        if (!OperatingSystem.IsLinux())
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
         {
-            Assert.Skip("a POSIX mode — Linux only");
+            Assert.Skip("a POSIX mode — Linux and macOS only");
             return;
         }
 
@@ -171,7 +171,7 @@ public sealed class NativeTests : IDisposable
     }
 
     [Fact]
-    public void A_folder_is_renamed_onto_a_free_name_and_onto_an_empty_folder_on_linux_only()
+    public void A_folder_is_renamed_onto_a_free_name_and_off_windows_onto_an_empty_folder()
     {
         var scratch = _owned.Dir("scratch");
         Directory.CreateDirectory(Path.Combine(scratch, "a"));

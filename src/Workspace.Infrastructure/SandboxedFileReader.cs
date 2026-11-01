@@ -49,7 +49,10 @@ public sealed record SandboxedFileReaderOptions
 /// ("not a directory"). A NUL in the request, or a path over <see cref="MaxPathLength"/>, is
 /// refused before any walking, and a rooted link target restarts from its own root (on Windows a
 /// target without a drive keeps the link's volume, and <c>C:x</c> is refused). The root is resolved by the same resolver, and the final path must equal the real
-/// root or start with it plus a separator.</para>
+/// root or start with it plus a separator.
+/// A request is walked from that REAL root, not from the root's spelling, so the budget is spent only on links below the root:
+/// until 2026-11-01 the root's own links were paid again by every read, and on macOS (temp under <c>/var</c>, a link to
+/// <c>/private/var</c>) a chain of exactly the budget was refused.</para>
 /// <para>What is OPENED is exactly the path that was checked: the fully resolved path, never the
 /// spelling that led to it. RACE MODEL: this guard checks and then opens by path, with no no-follow
 /// open. A link swapped between the check and the open is outside what it covers — an attacker who can
@@ -69,9 +72,16 @@ public sealed class SandboxedFileReader : ISandboxedFileReader
     private readonly ILogger<SandboxedFileReader> logger;
     private readonly Func<string, CancellationToken, IAsyncEnumerable<string>> openLines;
 
-    /// <summary>The most link expansions ONE resolution may spend. Forty, as the Linux kernel allows
-    /// (<c>ELOOP</c> past 40): far more than any real checkout chains, and a loop reaches it at once.</summary>
-    internal const int MaxLinkHops = 40;
+    /// <summary>The most link expansions ONE resolution may spend on THIS system (<see cref="LinkHopBudget"/>): the one place the
+    /// number lives. The resolver's budget must not exceed the kernel's, or a chain the resolver accepts fails the later open with
+    /// <c>ELOOP</c>.</summary>
+    internal static readonly int MaxLinkHops = LinkHopBudget(OperatingSystem.IsMacOS());
+
+    /// <summary>The budget for a system, from the OS fact alone (so a test on any system checks both values). macOS: 32, its kernel's
+    /// <c>MAXSYMLINKS</c> (a chain of 40 fails <c>open(2)</c> with <c>ELOOP</c> there). Elsewhere 40, as the Linux kernel allows
+    /// (<c>ELOOP</c> past 40); Windows allows 63, so 40 is the stricter value and stays. Far more than any real checkout chains, and a
+    /// loop reaches it at once.</summary>
+    internal static int LinkHopBudget(bool isMacOs) => isMacOs ? 32 : 40;
 
     /// <summary>The longest path, in characters, the guard will resolve or accept. Far past any real
     /// path (the kernels stop at 4 KiB to 32 KiB); a request over it is refused, which also bounds the
@@ -357,7 +367,9 @@ public sealed class SandboxedFileReader : ISandboxedFileReader
         // points outside it still spells fine. The read follows links transparently; the guard must
         // follow them first. Links that stay inside the root are legitimate — a checkout may link
         // within itself — so the refusal is about where the target LIVES, not about links as such.
-        if (!TryResolveRealPath(candidate, out var real))
+        // Walked from the REAL root, which has no links left on it: the root's own links (macOS's /var) were resolved once in
+        // the constructor, and paying them again would spend the request's budget on a path it never named.
+        if (!TryResolveRealPath(Path.Join(realRoot, candidate[(root.FullPath.Length + 1)..]), out var real))
         {
             return false;
         }

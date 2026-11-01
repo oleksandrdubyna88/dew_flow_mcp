@@ -27,9 +27,13 @@ Worth stating plainly, because the deployment shape decides most of the answer:
   skipped and `..` goes to the parent of the path resolved so far, never above the filesystem root.
   Once a segment does not exist, nothing below it does: the rest is appended as written, and a `..`
   in that rest is REFUSED (the kernel answers "not found" for `missing/..`, and "not a directory"
-  for `file/..`, which is refused as well). One budget of 40 link
-  expansions covers the whole resolution (plain directories cost nothing, so deep paths are fine; a
-  link loop reaches the budget at once). A missing, empty or null path, a path with a NUL, or one
+  for `file/..`, which is refused as well). One budget of link
+  expansions covers the whole resolution: 40, or 32 on macOS, whose kernel stops a chain there with `ELOOP` (a resolver that allowed
+  more would accept a chain that the later open then fails; Windows allows 63, so 40 stays the stricter value there). The root's
+  own links (macOS's `/var` → `/private/var`) are resolved once, when the reader starts, and a request is walked from that real
+  root, so only links below the root spend the budget. Plain directories
+  cost nothing, so deep paths are fine, and a
+  link loop reaches the budget at once. A missing, empty or null path, a path with a NUL, or one
   longer than 32 KiB, is refused before any walking (the reader refuses a null or empty path itself,
   not only the tool provider in front of it). Over the budget, over the length cap, or any error while resolving, the read is
   REFUSED. The read then opens exactly the resolved path that was checked, not the spelling it was

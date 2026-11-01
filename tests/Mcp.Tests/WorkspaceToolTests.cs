@@ -446,9 +446,25 @@ public sealed class WorkspaceToolTests : IDisposable
         clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(10));
     }
 
+    /// <summary>The budget of the system this runs on, and one past it: the chain test reads the constant, never a literal.</summary>
+    public static TheoryData<int, bool> ChainsAroundTheBudget => new()
+    {
+        { SandboxedFileReader.MaxLinkHops, true },
+        { SandboxedFileReader.MaxLinkHops + 1, false },
+    };
+
+    [Fact]
+    public void The_link_budget_is_the_kernels_limit_on_macOS_32_and_40_elsewhere()
+    {
+        // macOS's MAXSYMLINKS is 32: a chain of 40 fails open(2) with ELOOP there, so the resolver must refuse it first.
+        // Windows allows 63 and Linux 40, so 40 (the stricter one for Windows) stays everywhere else.
+        SandboxedFileReader.LinkHopBudget(isMacOs: true).Should().Be(32);
+        SandboxedFileReader.LinkHopBudget(isMacOs: false).Should().Be(40);
+        SandboxedFileReader.MaxLinkHops.Should().Be(SandboxedFileReader.LinkHopBudget(OperatingSystem.IsMacOS()));
+    }
+
     [Theory]
-    [InlineData(SandboxedFileReader.MaxLinkHops, true)]
-    [InlineData(SandboxedFileReader.MaxLinkHops + 1, false)]
+    [MemberData(nameof(ChainsAroundTheBudget))]
     public async Task A_chain_of_links_reads_up_to_the_hop_budget_and_is_refused_one_past_it(int hops, bool reads)
     {
         var (provider, root) = Build();
@@ -471,6 +487,31 @@ public sealed class WorkspaceToolTests : IDisposable
         {
             result.Should().BeOfType<ToolResult.Refused>().Which.Reason.Should().Contain("outside the workspace");
         }
+    }
+
+    [Fact]
+    public async Task A_chain_of_the_full_budget_reads_when_the_root_itself_is_spelled_through_a_link()
+    {
+        // macOS's temp folder is /var/folders/..., and /var is a link to /private/var: a request resolved through the root's
+        // SPELLING spent one hop of its budget on the root's own link, so a chain of exactly the budget was refused there.
+        // The root's links are resolved once, when the reader is made; a request spends the budget only below it.
+        var home = _owned.Dir("aliased");
+        var realRoot = Path.Combine(home, "real-root");
+        Directory.CreateDirectory(realRoot);
+        var alias = Path.Combine(home, "alias");
+        CreateLinkOrSkip(() => Directory.CreateSymbolicLink(alias, realRoot));
+        await File.WriteAllTextAsync(Path.Combine(realRoot, "real.txt"), "real", TestContext.Current.CancellationToken);
+        var hops = SandboxedFileReader.MaxLinkHops;
+        for (var i = 1; i <= hops; i++)
+        {
+            var next = i == hops ? "real.txt" : $"link{i + 1}";
+            CreateLinkOrSkip(() => File.CreateSymbolicLink(Path.Combine(realRoot, $"link{i}"), next));
+        }
+
+        var result = await Invoke(ProviderAt(alias), """{"path":"link1"}""");
+
+        result.Should().BeOfType<ToolResult.Ok>("the root's own link is not the request's to pay for")
+            .Which.Content.Should().Contain("real");
     }
 
     [Fact]

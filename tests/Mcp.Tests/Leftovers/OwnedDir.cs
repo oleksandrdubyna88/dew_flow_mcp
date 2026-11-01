@@ -16,13 +16,15 @@ public sealed class OwnedDir : IDisposable
     private static readonly ConcurrentDictionary<OwnedDir, byte> Registry = new();
 
     private readonly Action<string> _warn;
+    private readonly Action _requireLayout;
     private volatile bool _disposeAttempted;
     private volatile bool _removed;
 
-    private OwnedDir(string path, Action<string> warn)
+    private OwnedDir(string path, Action<string> warn, Action requireLayout)
     {
         Path = path;
         _warn = warn;
+        _requireLayout = requireLayout;
     }
 
     public string Path { get; }
@@ -33,9 +35,12 @@ public sealed class OwnedDir : IDisposable
     public static OwnedDir Create(string what, string? parent = null, Action<string>? warn = null) => Create(what, parent, warn, null);
 
     /// <summary>The same, with the seams the tests need: the names to try, a step between the claim's exclusive create and
-    /// its write, and a step between the claim and the folder.</summary>
-    internal static OwnedDir Create(string what, string? parent, Action<string>? warn, Func<string>? nextName, Action<string>? beforeClaimWrite = null, Action<string>? afterClaim = null)
+    /// its write, a step between the claim and the folder, and the layout requirement (default <see cref="DarwinLayout.Require"/>; only
+    /// the layout measurement itself passes a no-op, since it runs INSIDE that requirement).</summary>
+    internal static OwnedDir Create(string what, string? parent, Action<string>? warn, Func<string>? nextName, Action<string>? beforeClaimWrite = null, Action<string>? afterClaim = null, Action? requireLayout = null)
     {
+        requireLayout ??= DarwinLayout.Require;
+        requireLayout(); // before anything exists: on macOS no folder is made on an identity read that is not trusted
         Owned.CheckWhat(what); // before anything exists
         parent ??= Owned.TempRoot();
         warn ??= Owned.DefaultWarn;
@@ -46,7 +51,7 @@ public sealed class OwnedDir : IDisposable
             var dir = System.IO.Path.Combine(parent, nextName());
             if (TryClaim(dir, written, beforeClaimWrite) is not { } ours) continue; // somebody else's claim on this name
             if (!MakeFolder(dir, written, ours, warn, afterClaim)) continue;
-            var made = new OwnedDir(dir, warn);
+            var made = new OwnedDir(dir, warn, requireLayout);
             Registry[made] = 0;
             return made;
         }
@@ -61,7 +66,7 @@ public sealed class OwnedDir : IDisposable
     {
         _disposeAttempted = true;
         if (_removed) return;
-        if (!Removal.Quietly(Path, _warn)) return;
+        if (!Removal.Quietly(Path, _warn, _requireLayout)) return;
         _removed = true;
         Registry.TryRemove(this, out _);
     }

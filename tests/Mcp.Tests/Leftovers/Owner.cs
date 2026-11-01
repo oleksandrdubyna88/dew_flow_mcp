@@ -20,7 +20,8 @@ public sealed partial record Owner(string Token, string Host, long Pid, long? St
     public bool NonCanonical { get; init; }
 
     /// <summary>This process: computed once. Start and namespace only on Linux and only together; when the rate or any
-    /// read is missing, NO start and NO namespace — never a guess. Throws on any platform but Linux and Windows.</summary>
+    /// read is missing, NO start and NO namespace — never a guess; macOS and Windows carry neither (no read without a child process).
+    /// Throws on any platform but Linux, macOS and Windows.</summary>
     public static Owner This => Current.Value;
 
     /// <summary>The record a helper writes: the run's own, handed down in <c>TESTSTODELETE_RUN</c> when that is set and
@@ -78,8 +79,9 @@ public sealed partial record Owner(string Token, string Host, long Pid, long? St
     private static Owner ComputeThis()
     {
         var tag = OperatingSystem.IsLinux() ? "linux"
+            : OperatingSystem.IsMacOS() ? "macos"
             : OperatingSystem.IsWindows() ? "windows"
-            : throw new PlatformNotSupportedException("owned: the leftovers helper supports Linux and Windows only — macOS is not built (no CI leg, no machine, and Darwin's lstat layout was never measured)");
+            : throw new PlatformNotSupportedException("owned: the leftovers helper supports Linux, macOS and Windows only");
         var host = HostId(Dns.GetHostName(), Environment.GetEnvironmentVariable("WSL_DISTRO_NAME") ?? "") + "@" + tag;
         var owner = new Owner(OwnerToken.This, host, Environment.ProcessId, null, null);
         if (tag != "linux") return owner;

@@ -18,13 +18,14 @@ public sealed class LeftoversSweepTests(LeftoversSweepFixture fixture) : IDispos
 
     private static readonly TimeSpan Old = TimeSpan.FromMinutes(11);
 
-    private readonly OwnedScope _owned = new();
+    /// <summary>On macOS every test here stands on the identity read, so the layout self-test must hold first (it fails them all, loudly, when it does not).</summary>
+    private readonly OwnedScope _owned = DarwinLayout.FreshOwnedScope();
 
     public void Dispose() => _owned.Dispose();
 
     private static string Other => OwnerFixtures.Other;
 
-    private static string OsTag => OperatingSystem.IsWindows() ? "windows" : "linux";
+    private static string OsTag => OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux";
 
     private static string OtherTag => OperatingSystem.IsWindows() ? "linux" : "windows";
 
@@ -688,6 +689,25 @@ public sealed class LeftoversSweepTests(LeftoversSweepFixture fixture) : IDispos
         result.Errors.Should().ContainSingle().Which.Should().Contain("no free quarantine name");
         File.Exists(Path.Combine(dir, "file.txt")).Should().BeTrue("the folder was never moved");
         taken.Should().OnlyContain(path => Directory.Exists(path));
+        UnmatchablePid.AssertNoSuchProcess(dead);
+    }
+
+    [Fact]
+    public void A_rename_into_quarantine_that_the_file_system_refuses_keeps_the_folder_with_one_error()
+    {
+        // What a macOS volume that does not take RENAME_EXCL does (ENOTSUP, EINVAL): the exclusive rename throws, there is no fallback, and
+        // the sweep says so once and leaves the folder and its claim alone. Made here by a name under a parent that is not there.
+        var tmp = NewTmp();
+        var dead = Dead();
+        var dir = PlantFolder(tmp, Name("refused"), Rec(dead));
+        var impossible = Path.Combine(tmp, "no-such-parent", "." + Path.GetFileName(dir) + "." + QuarantineWord + Environment.ProcessId + "-cccccccc");
+
+        var result = LeftoversSweep.Run(Options(tmp, hooks: new SweepHooks(QuarantineName: _ => impossible)));
+
+        result.Removed.Should().BeEmpty();
+        result.Errors.Should().ContainSingle();
+        File.Exists(Path.Combine(dir, "file.txt")).Should().BeTrue("the folder was never moved");
+        File.Exists(dir + ".owner").Should().BeTrue("its claim stays with it");
         UnmatchablePid.AssertNoSuchProcess(dead);
     }
 

@@ -150,7 +150,7 @@ public sealed partial class LivenessTests
     [Fact]
     public void Another_users_process_cannot_be_asked_and_is_unknown()
     {
-        if (!OperatingSystem.IsLinux()) Assert.Skip("kill(2) answering EPERM — Linux only");
+        if (!Native.IsPosix) Assert.Skip("kill(2) answering EPERM for another user's process — Linux and macOS only");
         if (Native.GetUid() == 0) Assert.Skip("root may signal pid 1, so EPERM cannot be provoked");
 
         Liveness.ProbeProcess(1).State.Should().Be(ProbeState.Unknown, "EPERM says the process exists and nothing about its owner");

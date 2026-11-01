@@ -3,7 +3,8 @@ namespace Mcp.Tests.Leftovers;
 /// <summary>Teardown by the run's own EXACT path (never by the prefix), five tries 100 ms apart, never throwing: it runs in
 /// <c>Dispose</c>, where a throw would hide the test's own failure. The folder goes first, its claim last, so what cannot
 /// be removed stays prefixed AND claimed and ONE warning names it — the start-of-run sweep and the janitor can still judge
-/// it by its owner. It never asks who owns what: the run removes its own exact path, whoever the kernel says owns it.</summary>
+/// it by its owner. It never asks who owns what: the run removes its own exact path, whoever the kernel says owns it. On macOS it first
+/// requires the layout self-test to hold (<see cref="DarwinLayout.Require"/>), because the entry is read by identity.</summary>
 internal static class Removal
 {
     private const int Tries = 5;
@@ -14,8 +15,18 @@ internal static class Removal
     /// neither is not the helper's to remove. The claim goes only when the entry is GONE — re-read by identity, since
     /// <c>Directory.Exists</c> follows links and says false for an error as it does for an absence. True only when BOTH are gone; a
     /// path already gone is success.</summary>
-    internal static bool Quietly(string dir, Action<string> warn)
+    internal static bool Quietly(string dir, Action<string> warn, Action? requireLayout = null)
     {
+        try
+        {
+            (requireLayout ?? DarwinLayout.Require)(); // on macOS no removal by identity runs before the layout holds; it never throws, so it says so once
+        }
+        catch (Exception ex)
+        {
+            warn($"owned: {dir} is kept: {ex.Message}");
+            return false;
+        }
+
         var failure = Retry(() => RemoveEntry(dir));
         if (failure is not null)
         {

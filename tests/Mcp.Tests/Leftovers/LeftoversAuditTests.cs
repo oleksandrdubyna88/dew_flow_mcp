@@ -14,7 +14,7 @@ public sealed class LeftoversAuditTests : IDisposable
     /// <summary>No <c>TESTSTODELETE_RUN</c>: this process writes its own record, whatever the environment of the run that started it.</summary>
     private static readonly Func<string, string?> NoEnv = _ => null;
 
-    private readonly OwnedScope _owned = new();
+    private readonly OwnedScope _owned = DarwinLayout.FreshOwnedScope();
 
     public void Dispose() => _owned.Dispose();
 

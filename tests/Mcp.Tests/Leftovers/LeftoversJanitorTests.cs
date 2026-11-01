@@ -25,7 +25,7 @@ public sealed class LeftoversJanitorTests : IDisposable
     {
         if (!OperatingSystem.IsLinux())
         {
-            Assert.Skip("on Windows the bash on the path may be WSL's, which reads every Windows claim as foreign (janitor companion rule) — the Windows half is run by hand with Git for Windows' bash, S4 scenario 9");
+            Assert.Skip("Linux only: on Windows the bash on the path may be WSL's, which reads every Windows claim as foreign (janitor companion rule) — the Windows half is run by hand with Git for Windows' bash, S4 scenario 9; on macOS the janitor (bash 3.2, BSD find) was never measured here");
         }
 
         var root = RepositoryRoot.Path;

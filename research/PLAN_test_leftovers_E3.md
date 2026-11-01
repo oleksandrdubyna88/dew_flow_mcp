@@ -35,7 +35,7 @@ written; where it and the list below disagree, the list is what runs. Each item 
 a `docker run` without `--rm` is a finding). Legacy names are listed with their exact command and never collected.
 `owner-blind` in C# is a rule about the WORD (owner decision 3; first shipped as a literal rule and widened by review fix C: a glob, a character
 class, a regex, a bare word and a separator in another literal are findings too), with the shipped classifier judging scripts and workflows.
-macOS is not built (the helper refuses with a clear message). The Windows runner's measured owner
+macOS is not built (the helper refuses with a clear message) — **superseded 2026-11-01 by the Darwin path below**. The Windows runner's measured owner
 (`BUILTIN\Administrators`, an elevated job) is recorded by `RunnerFactsTests` in the job log; both ownership outcomes are
 asserted through the two `WindowsOwnership` fixtures, never from the runner's own files.
 
@@ -181,6 +181,74 @@ asserted through the two `WindowsOwnership` fixtures, never from the runner's ow
 - **Rename fallback clean-up (was open).** `Native.LinuxRenameExclusively` ended its placeholder clean-up in `catch (Exception) { }`; it now catches only `IOException`, `UnauthorizedAccessException` and `InvalidOperationException` (an unreadable identity) and lets anything else propagate. The fallback is `Native.RenameByReservation(from, to, afterFailedRename)`, the seam being the hook that runs after the failed rename. RED before: a hook throwing `InvalidCastException` came back as the rename's `IOException` (`NativeTests`).
 - **Rename fallback placeholder (was open).** The clean-up removed the placeholder with `Directory.Delete` after a check by path that it was some folder. It now keeps the placeholder's identity from the `mkdir` and calls `rmdir(2)` (P/Invoke: an EMPTY folder only, a link never followed) only while the entry at the name is still a folder of the caller's uid with that (device, inode). RED before: an empty folder renamed onto the placeholder after the failed rename was deleted (`NativeTests`).
 - **Audit orphan scan (N+1 listing).** `LeftoversAudit.OfOrphan` listed the temp root's quarantines once per orphan claim; `Discover` now lists them once per audit and passes the set in (`Discover` takes the lister as an optional seam). RED before: 5 orphan claims gave 5 listings, expected 1 (`LeftoversAuditTests`).
+
+**Darwin path (2026-11-01).** Owner decision of 2026-11-01: the helper runs on macOS. The plan above and the items before this one say "macOS is not built"; from this
+section on, what runs is the list below. Done on branch `feat/leftovers-darwin` in two commits, so that CI shows the order a fix is meant to have: the first commit holds
+the Darwin tests and the `build-test-macos` job with the Darwin native path still throwing (RED on macOS by construction), the second implements it (GREEN).
+
+*What was built (`NativeDarwin.cs`, a part of `Native`).*
+- **Calls.** libSystem by its full path (`/usr/lib/libSystem.dylib`): the name `libc` was not confirmed to resolve on macOS and nothing here depends on that. `getuid`; the identity by
+  `lstat` and `fstat` read at the fixed offsets of Darwin's 64-bit-inode `struct stat` — `st_dev` i32 @0, `st_mode` u16 @4, `st_nlink` u16 @6, `st_ino` u64 @8, `st_uid` u32 @16, `st_gid` u32 @20,
+  `st_rdev` i32 @24, `st_atimespec` @32, `st_mtimespec` @48, `st_ctimespec` @64, `st_birthtimespec` @80 (each `{ i64 sec, i64 nsec }`), `st_size` i64 @96, 144 bytes in all (written from the
+  `sys/stat.h` layout from memory, not fetched, and checked on the runner by the layout self-test). An inode of 0, a short buffer or a time that cannot be one is an exception, never an identity.
+  Entry point by CPU: Arm64 calls `lstat` / `fstat`; X64 (and Rosetta) calls `lstat$INODE64` / `fstat$INODE64`, because the plain X64 names are the old 32-bit-inode calls.
+- **Exclusive create and rename.** `mkdir` mode 0x1C0 with `EEXIST` = taken. The exclusive rename is `renamex_np(from, to, RENAME_EXCL = 0x4)`: `EEXIST` means the name is taken and nothing moved;
+  `ENOTSUP`, `EINVAL` (or a libSystem without the call) FAIL CLOSED — an `IOException`, the sweep records one error and the folder stays. **No reserve-then-rename fallback on Darwin:**
+  the fallback of the Linux path exists for `renameat2` on a file system without the flag, and on Darwin a rename without the flag could replace an empty folder.
+  The restore after a changed folder is still `mkdir` then `rename(2)` onto our own empty placeholder (the same on every POSIX system).
+- **The verified claim read.** `open` with `O_RDONLY | O_NONBLOCK (0x4) | O_NOFOLLOW (0x100) | O_CLOEXEC (0x1000000)`, `fstat` on the descriptor: a regular file with the judged (device, inode), then at most 513 bytes.
+- **Liveness.** `kill(pid, 0)`: `ESRCH` is the only dead; `EPERM` and any other errno unknown. Askable pids 1 to `int.MaxValue`. No start (no read without a child per test process) and no namespace, so a live pid is live with no start comparison.
+  `HidepidActive` is false off Linux. The owner record is `<host>@macos:<pid>`.
+- **Errno.** One table per system (`ErrnoTable.Linux`, `ErrnoTable.Darwin`; `Errno.Current`): ENOENT 2, EEXIST 17, ENOTDIR 20, EISDIR 21, EINVAL 22, ENOTEMPTY 66, ENOTSUP 45, ENOSYS 78 on Darwin
+  (39, 95, 38 on Linux). A Darwin branch reads only the Darwin table; a test pins that a Linux number is not read as a Darwin one.
+- **Scope and the guards.** `Scope.IsMine` is one POSIX branch (the entry's `lstat` uid against `getuid`) for Linux and macOS. `Native.IsPosix` (Linux or macOS) stands where a check meant "POSIX";
+  `statx`, `/proc`, the start, the namespace, `hidepid` and `AT_CLKTCK` stay Linux-only.
+
+*What the tests prove, and where.*
+- **CI job `build-test-macos`** (`macos-latest`, run bare through the test executable): the runner's `uname -m` must be `arm64` and is printed with the uid; build; the layout self-test (`DarwinLayoutTests`) with
+  its values printed as test warnings and a `grep` that the shell's uid equals the one the self-test read; `--filter-namespace Mcp.Tests.Leftovers`; the whole executable; the audit self-test in bash for both
+  `MCP_LEFTOVERS_SELFTEST` values. Steps after the build run even when one before failed, so one run lists everything red.
+- **The layout self-test** (`DarwinLayout`): uid equals `getuid` (file, folder, link); `S_ISDIR` / `S_ISREG` / `S_ISLNK` on a folder, a file and a link; the permission bits equal what .NET reports and 0700 for `mkdir`; inode non-zero, stable over two reads and
+  different for four entries; the device equal inside one folder; an mtime set to a known second reads back, then moves to now after a write; ctime and birth time near now; the size equals the bytes written; and `/usr/bin/stat -f` agrees on inode, uid,
+  size, device and mtime. Every sweep, audit, native and scope test builds its scope through `DarwinLayout.FreshOwnedScope()`, which throws when the layout does not hold, so a wrong layout fails them all, loudly.
+- **New Darwin tests** (`DarwinNativeTests`): `renamex_np` onto a taken name (an empty folder, a full one, a file) leaves the existing entry with its identity; the FIFO read runs in a CHILD process (this executable, `DarwinFifoChild`) with a 90 s bound, killed with
+  its whole tree and reaped on timeout, and the test asserts the pid is gone; the kill probe says live for this pid and dead for an unmatchable one. Pure tests that run on every system (`NativeDarwinTests`, `ErrnoTests`): the offsets, the failures, the
+  outcome table of the exclusive rename, and the sweep keeping a folder with one error when its quarantine rename is refused.
+- **The existing scenarios run on macOS** with POSIX guards in place of Linux-only ones; the premises that are Linux-only (`statx`, the start, the namespace, the reservation fallback, the janitor script) skip with their reason.
+
+*RED before (the first commit on macOS).* Everything that builds an `Owner` or reads an identity throws `PlatformNotSupportedException`: the assembly fixture's audit, every `OwnedScope` user (the Leftovers namespace and the classes that migrated to it),
+the four `DarwinNativeTests`, `DarwinLayoutTests`, the macOS owner-record test. On Linux that commit is green.
+
+*Measured on CI, and not.* On the `macos-latest` job (Arm64): the layout, the uid, `EEXIST` of `renamex_np`, the non-blocking open of a FIFO and the `fstat` refusal, `kill` for a live and a dead pid, the audit with both self-test values. The values are printed in that job's log
+(`darwin layout: …` lines). **Not measured anywhere:** X64 and Rosetta (`lstat$INODE64`, `fstat$INODE64` — the code is written from the header; a run on an Intel Mac is the first measurement); a volume that does not take `RENAME_EXCL` (only the outcome function is tested,
+with Darwin's numbers, never a real `ENOTSUP`); macOS before 10.12 (no `renamex_np`); a case-sensitive APFS volume; the janitor script on macOS (its test skips off Linux); whether the plain name `libc` resolves (not used).
+
+*Darwin follow-ups, in the order they were made (appended 2026-11-01).*
+- **1. The macOS job was red on the link budget.** `A_chain_of_links_reads_up_to_the_hop_budget_and_is_refused_one_past_it(hops: 40, reads: True)` failed on `macos-latest` (run 41308605328, head 3ce80ee; 603 tests, 1 failed, 572 passed, 30 skipped):
+  the resolver allowed 40 link expansions, but macOS's kernel limit (`MAXSYMLINKS`) is 32, so the open of a chain of 40 failed with `ELOOP` after the check had passed. The budget is now one function of the OS fact,
+  `SandboxedFileReader.LinkHopBudget(isMacOs)` (32 on macOS, 40 elsewhere; Windows allows 63, so 40 stays the stricter value there), and `MaxLinkHops` is that function applied to the running system. The chain test takes its data from the constant
+  (budget, budget + 1) through `MemberData`, not from a literal. A Linux test checks both values of the function. RED on Linux: that one pure test (1 failed, against a stub that returned 40 for both). RED of the chain itself: macOS only, run 41308605328.
+  The earlier macOS failure `A_link_that_stays_inside_the_root_still_reads` (run 41300554916, before main was merged) is not in run 41308605328: that log lists exactly one failed test (the chain), the run's own totals are 603 / 1 failed, and the realpath
+  fix from main (the root resolved once, `/var` to `/private/var`) is the expected reason. The log prints failed and skipped tests only, so "it passed" is read from "not failed and counted in the 572 that succeeded".
+- **5. `Errno.Current` guessed Linux on any system that is not macOS** (a coai gate finding, accepted). It is now `Errno.For(isLinux, isMacOS)` applied to the running system: Linux gets the Linux table, macOS the Darwin one, anything else throws
+  `PlatformNotSupportedException`. The only callers are the POSIX liveness probe (`Liveness.ProbeByKill`) and the Darwin tests, none of which runs on Windows. RED on Linux: `A_system_that_is_neither_Linux_nor_macOS_has_no_table_and_never_gets_the_Linux_one`
+  (1 of 4 `ErrnoTests`, against a stub that answered Linux); `The_current_table_is_the_one_of_the_system_this_runs_on` now states the Windows case as well (it throws).
+- **4. The FIFO child test could pass for the wrong reason.** `DarwinFifoChild` asserted only that the read returned null, but `DarwinReadVerifiedRegular` also returns null when `open` fails for any reason (ENOENT, for one). Before the read the child now `lstat`s the
+  claim and asserts that it is there and is a FIFO (`(Mode & 0xF000) == 0x1000`, as `DarwinStat.IsFifo`). The bit test is pure and runs on Linux: RED there was `A_fifo_is_told_by_the_type_bits_of_the_mode_and_by_nothing_else` (1 of 7 cases, against a stub
+  that answered false). The child's own assertion runs on macOS only, so that RED is macOS-only and not observed here.
+- **3. `DarwinNativeTests` built its scope with `new()`.** It now uses `DarwinLayout.FreshOwnedScope()`, as the other Darwin-sensitive classes do. No behaviour differs (each of its tests already called `DarwinLayout.Require()` through `RequireMacOs` before its first folder), so there is no RED:
+  the change is consistency, and item 2 makes every owned folder require the layout whoever builds the scope.
+- **2. The layout self-test did not guard the destructive paths.** The real start-of-run sweep (`LeftoversSweepFixture`) and the end-of-run audit ran on the real temp root, and `OwnedDir` creation and teardown ran for about 14 classes that build `new OwnedScope()`, none of them
+  through `DarwinLayout.Require()`; on macOS an identity read that is not trusted must not authorise a removal. Now `Require` is called (a) at the top of the real sweep, inside the constructor's existing try (`GuardedSweep`): a failure is ONE reported
+  error line and no sweep runs; (b) at the top of the real audit (`GuardedAudit`, used by `RealAudit`): the exception ends the audit and nothing is removed; (c) first in `OwnedDir.Create`, before the claim exists; (d) first in `Removal.Quietly`, so `OwnedDir.Dispose`
+  (and with it `OwnedScope.Dispose`, the audit's re-dispose and the sweep's quarantine removal) removes nothing on a failing layout, warns once and keeps the entry in the registry. Teardown never throws, so (d) returns false with a warning where (c) throws.
+  The layout measurement itself creates its folder inside the `Lazy` that `Require` reads, and a `Require` there would re-enter the `Lazy` and throw: it passes a no-op requirement (`OwnedDir.Create(..., requireLayout: static () => { })`), which the folder keeps for its own teardown.
+  The requirement is an argument everywhere, so the gates run on Linux with one that throws (`LayoutGateTests`). RED on Linux: 7 of 8 (a sweep and an audit ran, a folder was made and removed, the requirement was asked 0 times); the eighth, the audit with a holding layout, is the companion.
+  Off macOS `Require` is a no-op, so Linux and Windows do not change. **Not measured here:** the real layout failing on a Mac, and the measurement's own folder under the no-op requirement (the macOS job runs `DarwinLayoutTests`).
+- **6. The macOS job was red on the budget again, at 32.** `A_chain_of_links_reads_up_to_the_hop_budget_and_is_refused_one_past_it(hops: 32, reads: True)` failed on `macos-latest` (run 41309807128, head bb886ba; 621 tests, 1 failed, 590 passed, 30 skipped).
+  Item 1's reading was incomplete: the root WAS resolved once, but only for the containment compare; every request was still walked from `/` through the root's spelling, so `/var` → `/private/var` spent one hop of the request's
+  budget and a chain of exactly the budget cost 33. A request is now walked from the real root (`Path.Join(realRoot, <the part below the root>)`), so only links below the root spend it. The same shows on Linux with a root spelled
+  through a link (40 + 1): RED on Linux `A_chain_of_the_full_budget_reads_when_the_root_itself_is_spelled_through_a_link` (1 failed), GREEN with the fix (whole suite 622, 0 failed, 602 passed, 20 skipped), RED again with the fix stashed. SECURITY.md and the reader's class doc say it.
 
 **2026-11-01 (pin moved to release 105d53c).**
 - The `## Tokens` table moved from `common/test-leftovers.md` to `common/test-leftovers-detail.md` when the rule was split into a core and a detail.

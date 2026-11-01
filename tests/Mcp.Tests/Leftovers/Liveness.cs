@@ -37,16 +37,17 @@ public static partial class Liveness
     {
         if (!Askable(pid)) return new Probe(ProbeState.Unknown, null);
         if (OperatingSystem.IsLinux()) return ProbeLinux((int)pid);
-        return OperatingSystem.IsWindows() ? new Probe(Native.WindowsProcessState((uint)pid), null) : new Probe(ProbeState.Unknown, null); // macOS: not built
+        if (OperatingSystem.IsMacOS()) return ProbeDarwin((int)pid);
+        return OperatingSystem.IsWindows() ? new Probe(Native.WindowsProcessState((uint)pid), null) : new Probe(ProbeState.Unknown, null); // any other system: nobody was asked
     }
 
-    /// <summary>May the probe be asked about this number at all? 1 to 2^53-1; on Linux no more than what <c>kill(2)</c> takes (a signed
+    /// <summary>May the probe be asked about this number at all? 1 to 2^53-1; on Linux and macOS no more than what <c>kill(2)</c> takes (a signed
     /// 32-bit int); on Windows no more than a DWORD and never 1 (Windows has no pid 1: a bash started by a native process reports it
-    /// for itself); on any other system never — macOS is not built.</summary>
+    /// for itself); on any other system never.</summary>
     internal static bool Askable(long pid)
     {
         if (pid < 1 || pid > MaxSafeInteger) return false;
-        if (OperatingSystem.IsLinux()) return pid <= int.MaxValue;
+        if (Native.IsPosix) return pid <= int.MaxValue;
         return OperatingSystem.IsWindows() && pid <= uint.MaxValue && pid != 1;
     }
 
@@ -165,12 +166,20 @@ public static partial class Liveness
         }
     }
 
-    private static Probe ProbeLinux(int pid) => Native.Kill(pid) switch
+    private static Probe ProbeLinux(int pid) => ProbeByKill(pid, () => ReadLinuxStart(pid));
+
+    /// <summary>macOS: the same question, <c>kill(pid, 0)</c>; no start (it would need a child per test process, which the rule forbids), so a live
+    /// pid is <c>Live</c> without a start comparison — a reused pid then PRESERVES, it never deletes.</summary>
+    private static Probe ProbeDarwin(int pid) => ProbeByKill(pid, () => null);
+
+    /// <summary>ESRCH is the one <c>Dead</c> there is; 0 is <c>Live</c> with the start the platform can read; EPERM or any other errno is
+    /// <c>Unknown</c> (the process may be there, nothing is known). The code is read from the table of the system this runs on.</summary>
+    private static Probe ProbeByKill(int pid, Func<long?> start)
     {
-        0 => new Probe(ProbeState.Live, ReadLinuxStart(pid)),
-        Native.Esrch => new Probe(ProbeState.Dead, null),
-        _ => new Probe(ProbeState.Unknown, null), // EPERM or any other errno: the process may be there, nothing is known
-    };
+        var answer = Native.Kill(pid);
+        if (answer == 0) return new Probe(ProbeState.Live, start());
+        return answer == Errno.Current.Esrch ? new Probe(ProbeState.Dead, null) : new Probe(ProbeState.Unknown, null);
+    }
 
     private static long? ReadClockTicks()
     {

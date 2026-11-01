@@ -14,7 +14,7 @@ namespace Mcp.Tests.Leftovers;
 /// the entry itself. Any failure is "not mine".</summary>
 public sealed class ScopeTests : IDisposable
 {
-    private readonly OwnedScope _owned = new();
+    private readonly OwnedScope _owned = DarwinLayout.FreshOwnedScope();
 
     public void Dispose() => _owned.Dispose();
 
@@ -150,19 +150,20 @@ public sealed class ScopeTests : IDisposable
     }
 
     [Fact]
-    public void On_linux_a_fifo_swapped_in_after_the_identity_check_is_unreadable_and_never_blocks()
+    public void On_posix_a_fifo_swapped_in_after_the_identity_check_is_unreadable_and_never_blocks()
     {
-        if (!OperatingSystem.IsLinux())
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
         {
-            Assert.Skip("open(2) with O_NONBLOCK on the claim — Linux only");
+            Assert.Skip("open(2) with O_NONBLOCK on the claim — Linux and macOS only");
             return;
         }
 
-        LinuxFifoSwappedIn(_owned.Dir("scratch"));
+        PosixFifoSwappedIn(_owned.Dir("scratch"));
     }
 
     [SupportedOSPlatform("linux")]
-    private static void LinuxFifoSwappedIn(string scratch)
+    [SupportedOSPlatform("macos")]
+    private static void PosixFifoSwappedIn(string scratch)
     {
         var claim = Path.Combine(scratch, "claim");
         File.WriteAllText(claim, "u1:h@linux:1\n");
@@ -187,11 +188,11 @@ public sealed class ScopeTests : IDisposable
     }
 
     [Fact]
-    public void On_linux_another_regular_file_swapped_in_after_the_identity_check_is_unreadable()
+    public void On_posix_another_regular_file_swapped_in_after_the_identity_check_is_unreadable()
     {
-        if (!OperatingSystem.IsLinux())
+        if (!Native.IsPosix)
         {
-            Assert.Skip("fstat on the opened descriptor — Linux only");
+            Assert.Skip("fstat on the opened descriptor — Linux and macOS only");
             return;
         }
 
