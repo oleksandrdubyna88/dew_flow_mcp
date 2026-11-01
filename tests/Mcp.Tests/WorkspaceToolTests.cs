@@ -640,6 +640,33 @@ public sealed class WorkspaceToolTests : IDisposable
         line.Should().NotContain(requested).And.Contain("…");
     }
 
+    [Theory]
+    [InlineData("""{}""")]
+    [InlineData("""{"path":null}""")]
+    [InlineData("""{"path":""}""")]
+    public async Task A_missing_null_or_empty_path_is_a_refusal_through_the_tool(string arguments)
+    {
+        var (provider, _) = Build();
+
+        var result = await Invoke(provider, arguments);
+
+        result.Should().BeOfType<ToolResult.Refused>();
+    }
+
+    [Fact]
+    public async Task A_null_path_reaching_the_reader_is_a_refusal_and_never_a_null_reference()
+    {
+        var home = _owned.Dir("workspace");
+        var root = Path.Combine(home, "root");
+        Directory.CreateDirectory(root);
+        var reader = new SandboxedFileReader(
+            new WorkspaceRoot(root), new SandboxedFileReaderOptions(), NullLogger<SandboxedFileReader>.Instance);
+
+        var outcome = await reader.ReadAsync(new FileReadRequest(null!, 0, 0), TestContext.Current.CancellationToken);
+
+        outcome.Should().BeOfType<FileReadOutcome.Refused>();
+    }
+
     [Fact]
     public async Task A_rooted_link_target_without_a_drive_resolves_on_the_links_own_volume()
     {
