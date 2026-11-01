@@ -541,6 +541,73 @@ public sealed class WorkspaceToolTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData("a", "nonexistent/../evil", "a")]
+    [InlineData("a2", "zz/..", "a2/evil")]
+    public async Task Refuses_a_dot_dot_after_a_missing_segment_because_the_kernel_answers_not_found_there(
+        string alias, string aliasTarget, string path)
+    {
+        var (provider, root) = Build();
+        var outside = _owned.Dir("outside");
+        var secret = Path.Combine(outside, "secret.txt");
+        await File.WriteAllTextAsync(secret, "secret", TestContext.Current.CancellationToken);
+        CreateLinkOrSkip(() => File.CreateSymbolicLink(Path.Combine(root, "evil"), secret));
+        CreateLinkOrSkip(() => File.CreateSymbolicLink(Path.Combine(root, alias), aliasTarget.Replace('/', Path.DirectorySeparatorChar)));
+
+        // `nonexistent/..` is NOT the directory beside it: opening it fails with "not found". A resolver
+        // that popped the missing segment lexically landed on `<root>/evil`, then stopped looking at links.
+        var result = await Invoke(provider, $$"""{"path":"{{path}}"}""");
+
+        (result as ToolResult.Ok)?.Content.Should().NotContain("secret", "the read followed a lexical dot-dot out of the root");
+        result.Should().BeOfType<ToolResult.Refused>();
+    }
+
+    [Fact]
+    public async Task A_path_of_two_hundred_thousand_segments_is_refused_at_once_and_the_refusal_stays_short()
+    {
+        var (provider, _) = Build();
+        var huge = string.Concat(Enumerable.Repeat("a/", 200_000)) + "x";
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+
+        var result = await Invoke(provider, $$"""{"path":"{{huge}}"}""");
+
+        // The walk was quadratic in the number of segments (a string rebuilt per segment): 36 s measured.
+        clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(2));
+        var refused = result.Should().BeOfType<ToolResult.Refused>().Which;
+        refused.Reason.Length.Should().BeLessThan(400, "the path is echoed truncated, not whole");
+    }
+
+    [Fact]
+    public async Task A_NUL_in_the_path_is_a_refusal_and_not_a_failure()
+    {
+        var (provider, _) = Build();
+
+        var result = await Invoke(provider, """{"path":"a\u0000b"}""");
+
+        result.Should().BeOfType<ToolResult.Refused>();
+    }
+
+    [Fact]
+    public async Task A_rooted_link_target_without_a_drive_resolves_on_the_links_own_volume()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("a target such as \\sub (rooted, no drive) exists only on Windows");
+        }
+
+        var (provider, root) = Build();
+        var volumeRoot = Path.GetPathRoot(root)!;
+        var inRoot = Path.DirectorySeparatorChar + Path.GetRelativePath(volumeRoot, Path.Combine(root, "sub"));
+        await File.WriteAllTextAsync(Path.Combine(root, "sub", "real.txt"), "real", TestContext.Current.CancellationToken);
+        DirectoryLinks.CreateOrSkip(Path.Combine(root, "alias"), inRoot);
+        DirectoryLinks.CreateOrSkip(Path.Combine(root, "drive"), "C:sub");
+
+        // `\x` means the root of the link's OWN drive, never the process's current drive; `C:x` is
+        // relative to a per-drive working directory and is refused outright.
+        (await Invoke(provider, """{"path":"alias/real.txt"}""")).Should().BeOfType<ToolResult.Ok>();
+        (await Invoke(provider, """{"path":"drive/real.txt"}""")).Should().BeOfType<ToolResult.Refused>();
+    }
+
     /// <summary>Creating a symlink on Windows needs Developer Mode or elevation. A run without either
     /// SKIPS these tests loudly rather than passing them vacuously — an escape test that never created
     /// its link proves nothing about the guard.</summary>
