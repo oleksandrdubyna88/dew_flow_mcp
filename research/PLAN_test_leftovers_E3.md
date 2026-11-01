@@ -223,6 +223,14 @@ the four `DarwinNativeTests`, `DarwinLayoutTests`, the macOS owner-record test. 
 (`darwin layout: …` lines). **Not measured anywhere:** X64 and Rosetta (`lstat$INODE64`, `fstat$INODE64` — the code is written from the header; a run on an Intel Mac is the first measurement); a volume that does not take `RENAME_EXCL` (only the outcome function is tested,
 with Darwin's numbers, never a real `ENOTSUP`); macOS before 10.12 (no `renamex_np`); a case-sensitive APFS volume; the janitor script on macOS (its test skips off Linux); whether the plain name `libc` resolves (not used).
 
+*Darwin follow-ups, in the order they were made (appended 2026-11-01).*
+- **1. The macOS job was red on the link budget.** `A_chain_of_links_reads_up_to_the_hop_budget_and_is_refused_one_past_it(hops: 40, reads: True)` failed on `macos-latest` (run 41308605328, head 3ce80ee; 603 tests, 1 failed, 572 passed, 30 skipped):
+  the resolver allowed 40 link expansions, but macOS's kernel limit (`MAXSYMLINKS`) is 32, so the open of a chain of 40 failed with `ELOOP` after the check had passed. The budget is now one function of the OS fact,
+  `SandboxedFileReader.LinkHopBudget(isMacOs)` (32 on macOS, 40 elsewhere; Windows allows 63, so 40 stays the stricter value there), and `MaxLinkHops` is that function applied to the running system. The chain test takes its data from the constant
+  (budget, budget + 1) through `MemberData`, not from a literal. A Linux test checks both values of the function. RED on Linux: that one pure test (1 failed, against a stub that returned 40 for both). RED of the chain itself: macOS only, run 41308605328.
+  The earlier macOS failure `A_link_that_stays_inside_the_root_still_reads` (run 41300554916, before main was merged) is not in run 41308605328: that log lists exactly one failed test (the chain), the run's own totals are 603 / 1 failed, and the realpath
+  fix from main (the root resolved once, `/var` to `/private/var`) is the expected reason. The log prints failed and skipped tests only, so "it passed" is read from "not failed and counted in the 572 that succeeded".
+
 **2026-11-01 (pin moved to release 105d53c).**
 - The `## Tokens` table moved from `common/test-leftovers.md` to `common/test-leftovers-detail.md` when the rule was split into a core and a detail.
   `GuardTokens.RegisteredTokenFindings` reads it by content, as `resolveRule` of the mounted `tools/leftovers-check.mjs` does: the detail when it

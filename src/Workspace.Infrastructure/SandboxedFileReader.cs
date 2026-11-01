@@ -69,11 +69,16 @@ public sealed class SandboxedFileReader : ISandboxedFileReader
     private readonly ILogger<SandboxedFileReader> logger;
     private readonly Func<string, CancellationToken, IAsyncEnumerable<string>> openLines;
 
-    /// <summary>The most link expansions ONE resolution may spend on THIS system (<see cref="LinkHopBudget"/>).</summary>
+    /// <summary>The most link expansions ONE resolution may spend on THIS system (<see cref="LinkHopBudget"/>): the one place the
+    /// number lives. The resolver's budget must not exceed the kernel's, or a chain the resolver accepts fails the later open with
+    /// <c>ELOOP</c>.</summary>
     internal static readonly int MaxLinkHops = LinkHopBudget(OperatingSystem.IsMacOS());
 
-    /// <summary>The budget for a system, from the OS fact alone (so a test on any system checks both values).</summary>
-    internal static int LinkHopBudget(bool isMacOs) => 40;
+    /// <summary>The budget for a system, from the OS fact alone (so a test on any system checks both values). macOS: 32, its kernel's
+    /// <c>MAXSYMLINKS</c> (a chain of 40 fails <c>open(2)</c> with <c>ELOOP</c> there). Elsewhere 40, as the Linux kernel allows
+    /// (<c>ELOOP</c> past 40); Windows allows 63, so 40 is the stricter value and stays. Far more than any real checkout chains, and a
+    /// loop reaches it at once.</summary>
+    internal static int LinkHopBudget(bool isMacOs) => isMacOs ? 32 : 40;
 
     /// <summary>The longest path, in characters, the guard will resolve or accept. Far past any real
     /// path (the kernels stop at 4 KiB to 32 KiB); a request over it is refused, which also bounds the
