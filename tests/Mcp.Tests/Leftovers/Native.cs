@@ -37,6 +37,10 @@ internal static partial class Native
     // one of them gives no identity, and an identity that is guessed could authorise a removal.
     private const uint StatxRequired = 0x1 | 0x2 | 0x8 | 0x40 | 0x80 | 0x100;
 
+    /// <summary>Linux or macOS: the systems with a uid, <c>mkdir(2)</c>, <c>kill(2)</c> and an inode — the ones the POSIX branches serve. What only
+    /// Linux has (<c>statx</c>, <c>/proc</c>, a pid namespace, <c>hidepid</c>) is asked of <see cref="OperatingSystem.IsLinux"/> alone.</summary>
+    internal static bool IsPosix => OperatingSystem.IsLinux() || OperatingSystem.IsMacOS();
+
     private const uint FileTypeDisk = 1; // FILE_TYPE_DISK
     private const uint ErrorFileNotFound = 2, ErrorPathNotFound = 3, ErrorAlreadyExists = 183;
 

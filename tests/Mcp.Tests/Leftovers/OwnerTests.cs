@@ -189,6 +189,20 @@ public sealed partial class OwnerTests
     }
 
     [Fact]
+    public void On_macos_the_record_is_macos_with_no_start_and_no_namespace_and_three_fields()
+    {
+        if (!OperatingSystem.IsMacOS()) Assert.Skip("macOS gives no start without a child process — macOS only");
+
+        var me = Owner.This;
+
+        me.Host.Should().EndWith("@macos");
+        me.Start.Should().BeNull("the start of a process on macOS needs a child per test process, which the rule forbids");
+        me.Ns.Should().BeNull();
+        me.Format().Split(':').Should().HaveCount(3);
+        Owner.Parse(me.Format()).Should().Be(me);
+    }
+
+    [Fact]
     public void On_windows_the_record_has_no_start_and_no_namespace_and_three_fields()
     {
         if (!OperatingSystem.IsWindows()) Assert.Skip("no start where the OS gives none without a child — Windows only");

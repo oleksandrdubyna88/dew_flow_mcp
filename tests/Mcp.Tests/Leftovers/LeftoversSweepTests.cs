@@ -18,13 +18,14 @@ public sealed class LeftoversSweepTests(LeftoversSweepFixture fixture) : IDispos
 
     private static readonly TimeSpan Old = TimeSpan.FromMinutes(11);
 
-    private readonly OwnedScope _owned = new();
+    /// <summary>On macOS every test here stands on the identity read, so the layout self-test must hold first (it fails them all, loudly, when it does not).</summary>
+    private readonly OwnedScope _owned = DarwinLayout.FreshOwnedScope();
 
     public void Dispose() => _owned.Dispose();
 
     private static string Other => OwnerFixtures.Other;
 
-    private static string OsTag => OperatingSystem.IsWindows() ? "windows" : "linux";
+    private static string OsTag => OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux";
 
     private static string OtherTag => OperatingSystem.IsWindows() ? "linux" : "windows";
 

@@ -39,22 +39,24 @@ internal static class DirectoryLinks
     }
 
     /// <summary>How a tool run ended: killed for taking too long, or its exit code; the process id it had.</summary>
-    internal sealed record ToolRun(bool TimedOut, int ExitCode, int Pid);
+    internal sealed record ToolRun(bool TimedOut, int ExitCode, int Pid, string Output = "");
 
     /// <summary>The program <paramref name="exe"/> with each of <paramref name="arguments"/> as ONE argument — no shell, no command line
-    /// assembled by hand. Past <paramref name="timeout"/> the process and everything it started are killed.</summary>
-    internal static ToolRun Run(string exe, IReadOnlyList<string> arguments, TimeSpan timeout)
+    /// assembled by hand, and <paramref name="environment"/> added to the child's environment. Past <paramref name="timeout"/> the process and
+    /// everything it started are killed and reaped.</summary>
+    internal static ToolRun Run(string exe, IReadOnlyList<string> arguments, TimeSpan timeout, IReadOnlyDictionary<string, string>? environment = null)
     {
         var start = new ProcessStartInfo(exe) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
+        foreach (var (name, value) in environment ?? new Dictionary<string, string>()) start.Environment[name] = value;
         using var process = Process.Start(start) ?? throw new InvalidOperationException($"{exe} did not start");
         var pid = process.Id;
-        _ = process.StandardOutput.ReadToEndAsync(); // drained, so a full pipe cannot hold the tool
+        var output = process.StandardOutput.ReadToEndAsync(); // drained, so a full pipe cannot hold the tool
         _ = process.StandardError.ReadToEndAsync();
         if (process.WaitForExit(timeout))
         {
             process.WaitForExit();
-            return new ToolRun(false, process.ExitCode, pid);
+            return new ToolRun(false, process.ExitCode, pid, output.Wait(TimeSpan.FromSeconds(5)) ? output.Result : "");
         }
 
         process.Kill(entireProcessTree: true);

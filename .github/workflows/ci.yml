@@ -133,6 +133,78 @@ jobs:
           # step's result (measured on PR #58, 2026-10-31). Every check above throws on failure, so reaching here is green.
           exit 0
 
+  # The same helper on macOS (Darwin), the third half of tests/Mcp.Tests/Leftovers: its own `lstat` layout, `renamex_np`
+  # with RENAME_EXCL, the FIFO-safe claim read and the `kill` probe call libSystem directly and nothing proves them from
+  # Linux or Windows. `macos-latest` is Arm64, and ONLY Arm64 is measured here: the x86-64 entry points (`lstat$INODE64`)
+  # never run in this repository's CI. The steps run bare — CI has no low-priority wrapper (CLAUDE.md) — and through the
+  # test EXECUTABLE, never `dotnet test`.
+  #
+  # Order: who the runner is; the build; the layout self-test (its values are printed as test warnings; every sweep and audit
+  # test fails loudly if it does not hold); the Leftovers namespace; the whole executable; the audit's teeth.
+  build-test-macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - run: git submodule update --init --depth 1 .claude/rules/shared
+
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: 10.0.x
+
+      # The machine, printed; anything but Arm64 is red with a clear message (the layout was measured on Arm64 only).
+      - name: The runner is Arm64 (uid and system printed)
+        run: |
+          arch="$(uname -m)"
+          echo "uname -m: $arch; uid: $(id -u); gid: $(id -g); $(sw_vers -productName) $(sw_vers -productVersion)"
+          [ "$arch" = "arm64" ] || { echo "this runner is $arch, not arm64: the Darwin layout was measured on Arm64 only, and the x86-64 entry points were never run"; exit 1; }
+
+      - name: Build
+        id: build
+        run: dotnet build dew_flow_mcp.slnx -c Release
+
+      # The runner's architecture as .NET sees it and every value of the self-test (offsets of struct stat checked against getuid,
+      # a known file, a known mtime and stat(1)). The grep proves the values were PRINTED and that the uid read is the shell's.
+      - name: The stat layout self-test
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          set -o pipefail
+          ./tests/Mcp.Tests/bin/Release/net10.0/Mcp.Tests --filter-class "*DarwinLayoutTests" 2>&1 | tee layout.log
+          grep -Eq "darwin layout: arch=Arm64" layout.log || { echo "the self-test did not report ProcessArchitecture Arm64"; exit 1; }
+          grep -Eq "darwin layout: getuid=$(id -u)\$" layout.log || { echo "the self-test did not report the shell's uid $(id -u)"; exit 1; }
+          grep -Eq "darwin layout: file: dev=" layout.log || { echo "the self-test did not print the values it read"; exit 1; }
+
+      - name: Leftovers
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: ./tests/Mcp.Tests/bin/Release/net10.0/Mcp.Tests --filter-namespace "Mcp.Tests.Leftovers"
+
+      - name: Test
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: ./tests/Mcp.Tests/bin/Release/net10.0/Mcp.Tests
+
+      # The same teeth as on Linux, in bash (macOS has bash 3.2 and BSD grep and find; the commands below are the portable subset):
+      # LeftoversSelfTest leaks a folder on purpose when MCP_LEFTOVERS_SELFTEST is set, and this step is green only on a NON-zero exit
+      # that carries the audit's first line, names the folder on its own line under the case's words, and leaves the temp root without it.
+      - name: The audit fails a run that leaves a claimed folder
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          set -o pipefail
+          owner="u$(id -u)"
+          for entry in "1:never disposed:selftest" "failed-dispose:disposed but not removed:selftest-failed"; do
+            IFS=: read -r value words what <<< "$entry"
+            if MCP_LEFTOVERS_SELFTEST="$value" ./tests/Mcp.Tests/bin/Release/net10.0/Mcp.Tests --filter-class "*LeftoversSelfTest" 2>&1 | tee selftest.log; then
+              echo "the end-of-run audit did not fail the run ($value)"; exit 1; fi
+            first=$(grep -E "(^|[[:space:]]:[[:space:]])mcp tests: this run left [0-9]+ folder\(s\) it claimed.*[0-9]+ $words" selftest.log | grep -v "testsToDelete-[uw][0-9]" || true)
+            [ -n "$first" ] || { echo "the run failed, but not with the audit's first line (counts and '$words', no path) ($value)"; exit 1; }
+            grep -Eq "^[[:space:]]+$words: .*/testsToDelete-[uw][0-9]{1,10}-mcp-$what-[A-Za-z0-9]{6}" selftest.log \
+              || { echo "the audit's message does not name the folder on a line of its own under '$words' ($value)"; exit 1; }
+            left=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -iname "teststodelete-${owner}-mcp-$what-*") \
+              || { echo "the temp root could not be listed"; exit 1; }
+            [ -z "$left" ] || { echo "the audit left the folder behind: $left"; exit 1; }
+          done
+
   # The management surface over the wire, against a running host: routing, the group prefix, the
   # status codes, the serialized shape. What the unit tests cannot see is the composition — that the
   # routes are mounted where a client addresses them at all.

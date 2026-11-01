@@ -24,7 +24,8 @@ public sealed class RunnerFactsTests
         Record($"runner facts: os={System.Runtime.InteropServices.RuntimeInformation.OSDescription}, arch={System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}, pid={Environment.ProcessId}");
         if (OperatingSystem.IsWindows()) WindowsFacts();
         else if (OperatingSystem.IsLinux()) LinuxFacts();
-        else Record("runner facts: this platform is not one the leftovers helper supports (macOS is not built)");
+        else if (OperatingSystem.IsMacOS()) MacFacts();
+        else Record("runner facts: this platform is not one the leftovers helper supports (Linux, macOS and Windows are)");
     }
 
     private static void Record(string line) => TestContext.Current.AddWarning(line);
@@ -62,6 +63,14 @@ public sealed class RunnerFactsTests
         child.Length > parent.Length
         && child.StartsWith(parent, StringComparison.OrdinalIgnoreCase)
         && child[parent.Length] == Path.DirectorySeparatorChar;
+
+    [SupportedOSPlatform("macos")]
+    private static void MacFacts()
+    {
+        Record($"runner facts: real uid = {Native.GetUid()}");
+        Record($"runner facts: Liveness.HidepidActive = {Liveness.HidepidActive()} (Linux only; false on macOS by definition)");
+        Record("runner facts: no start and no pid namespace are read on macOS (no /proc, and a child per test process is forbidden)");
+    }
 
     private static void LinuxFacts()
     {
