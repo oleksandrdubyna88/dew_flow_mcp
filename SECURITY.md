@@ -26,7 +26,8 @@ Worth stating plainly, because the deployment shape decides most of the answer:
   own segments in front of the rest, so the directories INSIDE a target are resolved as well. `.` is
   skipped and `..` goes to the parent of the path resolved so far, never above the filesystem root.
   Once a segment does not exist, nothing below it does: the rest is appended as written, and a `..`
-  in that rest is REFUSED (the kernel answers "not found" for `missing/..`). One budget of 40 link
+  in that rest is REFUSED (the kernel answers "not found" for `missing/..`, and "not a directory"
+  for `file/..`, which is refused as well). One budget of 40 link
   expansions covers the whole resolution (plain directories cost nothing, so deep paths are fine; a
   link loop reaches the budget at once). A path with a NUL, or longer than 32 KiB, is refused before
   any walking. Over the budget, over the length cap, or any error while resolving, the read is
@@ -55,7 +56,7 @@ Worth stating plainly, because the deployment shape decides most of the answer:
   popped textually and the segments after it were never checked for links, so `a` to
   `nonexistent/../evil` (with `evil` linked to a file outside the root) and `a2` to `zz/..` read
   the outside file. The kernel answers "not found" there, so the resolver now refuses a `..` after a
-  missing segment. The same review closed a slow path (a 200,000-segment request took 36 s), a NUL in
+  missing segment, or after an existing file. The same review closed a slow path (a 200,000-segment request took 36 s), a NUL in
   the request (a tool failure, now a refusal) and a Windows link target `\x` that was read against
   the process's drive instead of the link's.
 - **There are no editing tools here.** The public surface reads. That is a product boundary and also a

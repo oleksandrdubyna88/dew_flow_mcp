@@ -45,7 +45,8 @@ public sealed record SandboxedFileReaderOptions
 /// A segment that does not exist ends the walking: the rest is appended in one join and the caller's
 /// existence check answers it — except that a <c>..</c> in that rest is refused, because the kernel
 /// answers "not found" for <c>missing/..</c> and a textual pop would skip the link checks (found in
-/// review on 2026-11-01). A NUL in the request, or a path over <see cref="MaxPathLength"/>, is
+/// review on 2026-11-01). A <c>..</c> directly after an existing FILE is refused for the same reason
+/// ("not a directory"). A NUL in the request, or a path over <see cref="MaxPathLength"/>, is
 /// refused before any walking, and a rooted link target restarts from its own root (on Windows a
 /// target without a drive keeps the link's volume, and <c>C:x</c> is refused). The root is resolved by the same resolver, and the final path must equal the real
 /// root or start with it plus a separator.</para>
@@ -142,9 +143,28 @@ public sealed class SandboxedFileReader : ISandboxedFileReader
     }
 
     /// <summary>The requested path as a message or a log line may repeat it: whole when short, else its
-    /// first characters and an ellipsis. The caller chooses the path, so it may be megabytes.</summary>
-    private static string Echo(string path) =>
-        path.Length <= EchoLength ? path : path[..EchoLength] + "…";
+    /// first characters and an ellipsis. The caller chooses the path, so it may be megabytes.
+    /// <para>Control characters (a NUL, a newline) are written as escapes, so a hostile path cannot
+    /// forge a log line or smuggle a NUL into a message.</para></summary>
+    private static string Echo(string path)
+    {
+        var shown = path.Length <= EchoLength ? path : path[..EchoLength];
+        var text = new StringBuilder(shown.Length);
+        foreach (var c in shown)
+        {
+            text.Append(c switch
+            {
+                '\0' => "\\0",
+                '\n' => "\\n",
+                '\r' => "\\r",
+                '\t' => "\\t",
+                _ when char.IsControl(c) => $"\\u{(int)c:x4}",
+                _ => c.ToString(),
+            });
+        }
+
+        return path.Length <= EchoLength ? text.ToString() : text + "…";
+    }
 
     /// <summary>The reason this window is nonsense, or empty when it is legal.
     /// <para>Only NEGATIVES are refused. A huge count is not nonsense — "everything from line 2" is
@@ -195,7 +215,7 @@ public sealed class SandboxedFileReader : ISandboxedFileReader
 
         logger.LogInformation(
             "Capped a read of {RequestedPath} at lines {StartLine}-{EndLine} of {TotalLines}: {Reason}",
-            request.Path, capped.StartLine, capped.EndLine, capped.TotalLines, capped.Truncation.Reason);
+            Echo(request.Path), capped.StartLine, capped.EndLine, capped.TotalLines, capped.Truncation.Reason);
     }
 
     /// <summary>A cap that cannot bound anything stops the host at composition, where one message is
@@ -352,6 +372,7 @@ public sealed class SandboxedFileReader : ISandboxedFileReader
             var pending = new Stack<string>();
             PushSegments(pending, absolutePath[fsRoot.Length..]);
             var hops = 0;
+            var afterFile = false; // current is an existing FILE: the kernel answers "not a directory" below it
 
             while (pending.Count > 0)
             {
@@ -363,6 +384,11 @@ public sealed class SandboxedFileReader : ISandboxedFileReader
 
                 if (segment == "..")
                 {
+                    if (afterFile)
+                    {
+                        return false;
+                    }
+
                     current = Path.GetDirectoryName(current) ?? fsRoot;
                     continue;
                 }
@@ -382,9 +408,11 @@ public sealed class SandboxedFileReader : ISandboxedFileReader
                         return TryAppendMissing(current, pending, out real);
                     }
 
+                    afterFile = info is FileInfo;
                     continue;
                 }
 
+                afterFile = false;
                 if (++hops > MaxLinkHops)
                 {
                     return false;
