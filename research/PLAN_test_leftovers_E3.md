@@ -230,6 +230,9 @@ with Darwin's numbers, never a real `ENOTSUP`); macOS before 10.12 (no `renamex_
   (budget, budget + 1) through `MemberData`, not from a literal. A Linux test checks both values of the function. RED on Linux: that one pure test (1 failed, against a stub that returned 40 for both). RED of the chain itself: macOS only, run 41308605328.
   The earlier macOS failure `A_link_that_stays_inside_the_root_still_reads` (run 41300554916, before main was merged) is not in run 41308605328: that log lists exactly one failed test (the chain), the run's own totals are 603 / 1 failed, and the realpath
   fix from main (the root resolved once, `/var` to `/private/var`) is the expected reason. The log prints failed and skipped tests only, so "it passed" is read from "not failed and counted in the 572 that succeeded".
+- **5. `Errno.Current` guessed Linux on any system that is not macOS** (a coai gate finding, accepted). It is now `Errno.For(isLinux, isMacOS)` applied to the running system: Linux gets the Linux table, macOS the Darwin one, anything else throws
+  `PlatformNotSupportedException`. The only callers are the POSIX liveness probe (`Liveness.ProbeByKill`) and the Darwin tests, none of which runs on Windows. RED on Linux: `A_system_that_is_neither_Linux_nor_macOS_has_no_table_and_never_gets_the_Linux_one`
+  (1 of 4 `ErrnoTests`, against a stub that answered Linux); `The_current_table_is_the_one_of_the_system_this_runs_on` now states the Windows case as well (it throws).
 
 **2026-11-01 (pin moved to release 105d53c).**
 - The `## Tokens` table moved from `common/test-leftovers.md` to `common/test-leftovers-detail.md` when the rule was split into a core and a detail.
