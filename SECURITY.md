@@ -25,12 +25,19 @@ Worth stating plainly, because the deployment shape decides most of the answer:
   at a time, and when a segment is a link it reads that link's immediate target and puts the target's
   own segments in front of the rest, so the directories INSIDE a target are resolved as well. `.` is
   skipped and `..` goes to the parent of the path resolved so far, never above the filesystem root.
-  One budget of 40 link expansions covers the whole resolution (plain directories cost nothing, so
-  deep paths are fine; a link loop reaches the budget at once). Over the budget, or any error while
-  resolving, the read is REFUSED. The read then opens exactly the resolved path that was checked,
-  not the spelling it was asked with. **Not covered:** a link swapped between the check and the open.
-  The open is by path, with no no-follow flag, so a party who can write inside `--root` while a read
-  runs can race it. Make `--root` a directory only trusted parties can write to.
+  Once a segment does not exist, nothing below it does: the rest is appended as written, and a `..`
+  in that rest is REFUSED (the kernel answers "not found" for `missing/..`). One budget of 40 link
+  expansions covers the whole resolution (plain directories cost nothing, so deep paths are fine; a
+  link loop reaches the budget at once). A path with a NUL, or longer than 32 KiB, is refused before
+  any walking. Over the budget, over the length cap, or any error while resolving, the read is
+  REFUSED. The read then opens exactly the resolved path that was checked, not the spelling it was
+  asked with. **Not covered:** a link swapped between the check and the open. The open is by path,
+  with no no-follow flag, so a party who can write inside `--root` while a read runs can race it.
+  Make `--root` a directory only trusted parties can write to. **Also out of scope:** hard links and
+  bind mounts (a hard link is not a link to the resolver; git cannot create either, and on Linux
+  `fs.protected_hardlinks` limits who may make a hard link to a file they do not own). On
+  case-insensitive filesystems the containment compare is exact-case, so a link target spelled in a
+  different case from the root is refused, not read: a false refusal that fails closed.
   Reads are capped in both lines and bytes so one call cannot pull an unbounded payload. `--root` is
   the security boundary: point it at the workspace you mean, never at a home directory or a drive root.
 - **Past defects in this guard (dated, so the claim is not read as always true).**
@@ -44,6 +51,13 @@ Worth stating plainly, because the deployment shape decides most of the answer:
   (for example `/var` to `/private/var` on macOS). The single root-down resolver above fixed both, and
   the escape tests (`WorkspaceToolTests`) now cover chained links, relative links, loops, the budget
   and a deep path.
+  Also 2026-11-01, found in review of that fix before it shipped: a `..` after a MISSING segment was
+  popped textually and the segments after it were never checked for links, so `a` to
+  `nonexistent/../evil` (with `evil` linked to a file outside the root) and `a2` to `zz/..` read
+  the outside file. The kernel answers "not found" there, so the resolver now refuses a `..` after a
+  missing segment. The same review closed a slow path (a 200,000-segment request took 36 s), a NUL in
+  the request (a tool failure, now a refusal) and a Windows link target `\x` that was read against
+  the process's drive instead of the link's.
 - **There are no editing tools here.** The public surface reads. That is a product boundary and also a
   security property, and it is asserted by a test.
 - **Telemetry is opt-in.** Without `--spool <path>` nothing is written. When it is on, call arguments are

@@ -74,7 +74,8 @@ flowchart TD
   pushed in front of the rest — so the directories inside a target are resolved too (until 2026-11-01
   only the target's final spelling was kept, and `alias` to `<root>/l2/secret.txt` with `l2` pointing
   outside read straight out). One budget of 40 link expansions covers the whole walk; over it, or on
-  any resolution error, the read is refused. The result is compared against the root resolved the same
+  any resolution error, the read is refused. A `..` after a missing segment is refused too (the kernel
+  answers "not found"; found in review 2026-11-01), as is a NUL or a path over 32 KiB. The result is compared against the root resolved the same
   way, and the file opened is that resolved path. Links that stay inside the root still read — the
   refusal is about where the target lives, not about links as such. A link swapped between the check
   and the open is outside the guard (open by path, no no-follow).

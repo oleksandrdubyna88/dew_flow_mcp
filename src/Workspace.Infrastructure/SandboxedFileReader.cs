@@ -42,8 +42,12 @@ public sealed record SandboxedFileReaderOptions
 /// check and read straight out of the root. One cumulative budget of <see cref="MaxLinkHops"/> link
 /// expansions covers the whole resolution (plain segments cost nothing, so a deep path is free and a
 /// link loop ends fast); over budget, or any error while resolving, REFUSES — the guard fails closed.
-/// A segment that does not exist ends the walking: the rest is appended and the caller's existence
-/// check answers it. The root is resolved by the same resolver, and the final path must equal the real
+/// A segment that does not exist ends the walking: the rest is appended in one join and the caller's
+/// existence check answers it — except that a <c>..</c> in that rest is refused, because the kernel
+/// answers "not found" for <c>missing/..</c> and a textual pop would skip the link checks (found in
+/// review on 2026-11-01). A NUL in the request, or a path over <see cref="MaxPathLength"/>, is
+/// refused before any walking, and a rooted link target restarts from its own root (on Windows a
+/// target without a drive keeps the link's volume, and <c>C:x</c> is refused). The root is resolved by the same resolver, and the final path must equal the real
 /// root or start with it plus a separator.</para>
 /// <para>What is OPENED is exactly the path that was checked: the fully resolved path, never the
 /// spelling that led to it. RACE MODEL: this guard checks and then opens by path, with no no-follow
@@ -67,6 +71,14 @@ public sealed class SandboxedFileReader : ISandboxedFileReader
     /// <summary>The most link expansions ONE resolution may spend. Forty, as the Linux kernel allows
     /// (<c>ELOOP</c> past 40): far more than any real checkout chains, and a loop reaches it at once.</summary>
     internal const int MaxLinkHops = 40;
+
+    /// <summary>The longest path, in characters, the guard will resolve or accept. Far past any real
+    /// path (the kernels stop at 4 KiB to 32 KiB); a request over it is refused, which also bounds the
+    /// work one call can ask for.</summary>
+    internal const int MaxPathLength = 32 * 1024;
+
+    /// <summary>How much of a requested path a refusal message or a log line repeats.</summary>
+    private const int EchoLength = 200;
 
     /// <summary>The root with its own links resolved, computed once. The candidate's REAL path is
     /// compared against this rather than the configured spelling — a root reached through a link
@@ -106,8 +118,8 @@ public sealed class SandboxedFileReader : ISandboxedFileReader
     {
         if (!TryResolveInsideRoot(request.Path, out var fullPath))
         {
-            logger.LogWarning("Refused a read outside the workspace root: {RequestedPath}", request.Path);
-            return new FileReadOutcome.Refused($"Path '{request.Path}' is outside the workspace.");
+            logger.LogWarning("Refused a read outside the workspace root: {RequestedPath}", Echo(request.Path));
+            return new FileReadOutcome.Refused($"Path '{Echo(request.Path)}' is outside the workspace.");
         }
 
         // The client's numbers are checked BEFORE any arithmetic touches them. They arrive straight
@@ -117,17 +129,22 @@ public sealed class SandboxedFileReader : ISandboxedFileReader
         var illegal = OutOfRange(request);
         if (illegal.Length > 0)
         {
-            logger.LogWarning("Refused a read with an out-of-range window for {RequestedPath}: {Reason}", request.Path, illegal);
+            logger.LogWarning("Refused a read with an out-of-range window for {RequestedPath}: {Reason}", Echo(request.Path), illegal);
             return new FileReadOutcome.Refused(illegal);
         }
 
         if (!File.Exists(fullPath))
         {
-            return new FileReadOutcome.Refused($"File '{request.Path}' does not exist.");
+            return new FileReadOutcome.Refused($"File '{Echo(request.Path)}' does not exist.");
         }
 
         return await WindowAsync(fullPath, request, cancellationToken);
     }
+
+    /// <summary>The requested path as a message or a log line may repeat it: whole when short, else its
+    /// first characters and an ellipsis. The caller chooses the path, so it may be megabytes.</summary>
+    private static string Echo(string path) =>
+        path.Length <= EchoLength ? path : path[..EchoLength] + "…";
 
     /// <summary>The reason this window is nonsense, or empty when it is legal.
     /// <para>Only NEGATIVES are refused. A huge count is not nonsense — "everything from line 2" is
@@ -272,12 +289,23 @@ public sealed class SandboxedFileReader : ISandboxedFileReader
     private bool TryResolveInsideRoot(string relativePath, out string fullPath)
     {
         fullPath = string.Empty;
-        if (Path.IsPathRooted(relativePath))
+        // A NUL, or a path past the cap, is nonsense and refused here: GetFullPath would THROW on the
+        // NUL (a tool failure, where the guard working is a refusal), and the length bounds the work.
+        if (relativePath.Contains('\0') || relativePath.Length > MaxPathLength || Path.IsPathRooted(relativePath))
         {
             return false;
         }
 
-        var candidate = Path.GetFullPath(Path.Combine(root.FullPath, relativePath));
+        string candidate;
+        try
+        {
+            candidate = Path.GetFullPath(Path.Combine(root.FullPath, relativePath));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or IOException)
+        {
+            return false; // a spelling the platform cannot parse is refused, never thrown
+        }
+
         if (!candidate.StartsWith(root.FullPath + Path.DirectorySeparatorChar, StringComparison.Ordinal))
         {
             return false;
@@ -324,7 +352,6 @@ public sealed class SandboxedFileReader : ISandboxedFileReader
             var pending = new Stack<string>();
             PushSegments(pending, absolutePath[fsRoot.Length..]);
             var hops = 0;
-            var missing = false;
 
             while (pending.Count > 0)
             {
@@ -341,16 +368,20 @@ public sealed class SandboxedFileReader : ISandboxedFileReader
                 }
 
                 current = Path.Join(current, segment);
-                if (missing)
+                if (current.Length > MaxPathLength)
                 {
-                    continue; // nothing on disk below an absent entry; appended, and the caller's existence check answers
+                    return false;
                 }
 
                 FileSystemInfo info = Directory.Exists(current) ? new DirectoryInfo(current) : new FileInfo(current);
                 var target = info.LinkTarget;
                 if (target is null)
                 {
-                    missing = !info.Exists;
+                    if (!info.Exists)
+                    {
+                        return TryAppendMissing(current, pending, out real);
+                    }
+
                     continue;
                 }
 
@@ -361,7 +392,12 @@ public sealed class SandboxedFileReader : ISandboxedFileReader
 
                 if (Path.IsPathRooted(target))
                 {
-                    fsRoot = Path.GetFullPath(Path.GetPathRoot(target)!);
+                    if (!TryRootOf(target, current, out var targetRoot))
+                    {
+                        return false;
+                    }
+
+                    fsRoot = targetRoot;
                     current = fsRoot;
                     PushSegments(pending, target[Path.GetPathRoot(target)!.Length..]);
                 }
@@ -379,6 +415,71 @@ public sealed class SandboxedFileReader : ISandboxedFileReader
         {
             return false; // fails closed: a path that cannot be resolved is a path that is not read
         }
+    }
+
+    /// <summary>The entry at <paramref name="current"/> does not exist, so nothing below it does: the
+    /// remaining segments are appended in ONE join and the caller's existence check answers. A
+    /// <c>..</c> among them is refused — the kernel answers "not found" for <c>missing/..</c>, and
+    /// popping the missing segment textually would land somewhere the disk never led (and past the
+    /// link checks). The single join also keeps a path of many segments linear, not quadratic.</summary>
+    private static bool TryAppendMissing(string current, Stack<string> pending, out string real)
+    {
+        real = string.Empty;
+        var rest = new List<string>(pending.Count);
+        long length = current.Length;
+        foreach (var segment in pending) // the stack enumerates from the top: path order
+        {
+            if (segment == "..")
+            {
+                return false;
+            }
+
+            if (segment != ".")
+            {
+                rest.Add(segment);
+                length += segment.Length + 1;
+            }
+        }
+
+        if (length > MaxPathLength)
+        {
+            return false;
+        }
+
+        real = Path.TrimEndingDirectorySeparator(
+            rest.Count == 0 ? current : Path.Join(current, string.Join(Path.DirectorySeparatorChar, rest)));
+        return true;
+    }
+
+    /// <summary>The root a rooted link target restarts from. An absolute target brings its own. On
+    /// Windows a target <c>\x</c> (rooted, no drive) means the root of the LINK'S volume — not the
+    /// process's current drive — and a drive-relative target <c>C:x</c> depends on a per-drive working
+    /// directory, so it is refused outright.</summary>
+    private static bool TryRootOf(string target, string linkPath, out string targetRoot)
+    {
+        targetRoot = string.Empty;
+        var root = Path.GetPathRoot(target);
+        if (string.IsNullOrEmpty(root))
+        {
+            return false;
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            if (root.Length == 2 && root[1] == ':')
+            {
+                return false;
+            }
+
+            if (root.Length == 1)
+            {
+                targetRoot = Path.GetPathRoot(linkPath) ?? string.Empty;
+                return targetRoot.Length > 0;
+            }
+        }
+
+        targetRoot = root;
+        return true;
     }
 
     /// <summary>The segments of <paramref name="path"/> pushed so the FIRST ends up on top.</summary>
