@@ -223,6 +223,12 @@ the four `DarwinNativeTests`, `DarwinLayoutTests`, the macOS owner-record test. 
 (`darwin layout: …` lines). **Not measured anywhere:** X64 and Rosetta (`lstat$INODE64`, `fstat$INODE64` — the code is written from the header; a run on an Intel Mac is the first measurement); a volume that does not take `RENAME_EXCL` (only the outcome function is tested,
 with Darwin's numbers, never a real `ENOTSUP`); macOS before 10.12 (no `renamex_np`); a case-sensitive APFS volume; the janitor script on macOS (its test skips off Linux); whether the plain name `libc` resolves (not used).
 
+**2026-11-01 (pin moved to release 105d53c).**
+- The `## Tokens` table moved from `common/test-leftovers.md` to `common/test-leftovers-detail.md` when the rule was split into a core and a detail.
+  `GuardTokens.RegisteredTokenFindings` reads it by content, as `resolveRule` of the mounted `tools/leftovers-check.mjs` does: the detail when it
+  exists AND has a `## Tokens` section, else the core when it has one (a mount from before the split), else ONE finding naming both files. Every
+  message names the file actually read; a candidate that cannot be read is ONE finding naming the file and the error. A contract test runs the mounted `resolveRule` on the same synthetic mounts: it picks by existence, so the two differ only where the detail exists without a table (the guard names the core). Boundary: the same change lands in `dew_flow_sidecar_rust` PR #66, which has its own guard; the two guards share no code.
+
 ## The contract this document encodes
 
 The released rule: `dew_flow_conventions · common/test-leftovers.md` at the `release` tip **`115bbf8`** (promoted
@@ -1074,8 +1080,8 @@ unless stated (on Linux the namespace must be this reader's or the verdict is `u
   by a GFM table whose header is exactly `| token | family | repository |`; the token must be the first cell (backticks
   stripped) of exactly one row; no token twice; the row's `repository` cell must equal `identity` (trimmed,
   case-insensitive), and an empty `identity` is a finding (fail closed). The real check reads
-  `<root>/.claude/rules/shared/common/test-leftovers.md` with `OwnedToken.RepoToken` and `OwnedToken.RepoRow`; **a
-  missing file is a finding** (an uninitialised submodule registers nothing — run `git submodule update --init .claude/rules/shared`).
+  `<root>/.claude/rules/shared/common/test-leftovers.md` with `OwnedToken.RepoToken` and `OwnedToken.RepoRow` (since 2026-11-01 the file that
+  holds the table, found by content — see *Deviations*); **a missing file is a finding** (an uninitialised submodule registers nothing — run `git submodule update --init .claude/rules/shared`).
   **One constant** (`R:63-65`; `G:731-732`): over every tracked `.cs` (`src/` and `tests/`), `.mjs`, `.js`, `.cjs`,
   `.sh`, `.ps1`, `.py` file, a non-comment line matching `\bRepoToken\b\s*(?::\s*\w+\s*)?=\s*["']([^"'\n]*)["']` must
   occur exactly once — in `tests/Mcp.Tests/Leftovers/OwnedToken.cs` — and its value must be `token`; a second

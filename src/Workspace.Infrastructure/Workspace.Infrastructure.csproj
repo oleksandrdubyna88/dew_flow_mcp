@@ -12,4 +12,10 @@
     <ProjectReference Include="..\Workspace.Application\Workspace.Application.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The reader's open seam and its resolver are internal: the suite proves the opened path is the
+         checked one, and that the hop budget binds, without widening the public surface. -->
+    <InternalsVisibleTo Include="Mcp.Tests" />
+  </ItemGroup>
+
 </Project>

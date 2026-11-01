@@ -15,6 +15,8 @@ public sealed class RecordingLogger<T> : ILogger<T>
 
     public IReadOnlyList<string> Warnings => Messages(LogLevel.Warning);
 
+    public IReadOnlyList<string> Infos => Messages(LogLevel.Information);
+
     /// <summary>The exception types that reached the log — the half of a report a message string does
     /// not carry.</summary>
     public IReadOnlyList<string> ErrorTypes
