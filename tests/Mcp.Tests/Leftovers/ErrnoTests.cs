@@ -19,9 +19,25 @@ public sealed class ErrnoTests
     }
 
     [Fact]
+    public void The_table_is_chosen_by_the_system_Linux_to_Linux_macOS_to_Darwin()
+    {
+        Errno.For(isLinux: true, isMacOS: false).Should().Be(ErrnoTable.Linux);
+        Errno.For(isLinux: false, isMacOS: true).Should().Be(ErrnoTable.Darwin);
+    }
+
+    [Fact]
+    public void A_system_that_is_neither_Linux_nor_macOS_has_no_table_and_never_gets_the_Linux_one()
+    {
+        var act = () => Errno.For(isLinux: false, isMacOS: false);
+
+        act.Should().Throw<PlatformNotSupportedException>();
+    }
+
+    [Fact]
     public void The_current_table_is_the_one_of_the_system_this_runs_on()
     {
         if (OperatingSystem.IsMacOS()) Errno.Current.Should().Be(ErrnoTable.Darwin);
-        else Errno.Current.Should().Be(ErrnoTable.Linux);
+        else if (OperatingSystem.IsLinux()) Errno.Current.Should().Be(ErrnoTable.Linux);
+        else new Func<ErrnoTable>(() => Errno.Current).Should().Throw<PlatformNotSupportedException>(); // Windows: no errno table
     }
 }

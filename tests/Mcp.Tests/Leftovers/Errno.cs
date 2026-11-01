@@ -19,5 +19,9 @@ internal static class Errno
 
     internal static ErrnoTable Darwin => ErrnoTable.Darwin;
 
-    internal static ErrnoTable Current => OperatingSystem.IsMacOS() ? ErrnoTable.Darwin : ErrnoTable.Linux;
+    internal static ErrnoTable Current => For(OperatingSystem.IsLinux(), OperatingSystem.IsMacOS());
+
+    /// <summary>The table for the OS facts, pure so a test on any system checks every case. Linux gets the Linux table, macOS the Darwin one,
+    /// anything else (Windows has no errno here) throws: the Linux numbers are never a guess for a system that is neither.</summary>
+    internal static ErrnoTable For(bool isLinux, bool isMacOS) => isMacOS ? ErrnoTable.Darwin : ErrnoTable.Linux;
 }
