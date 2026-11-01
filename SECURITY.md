@@ -29,8 +29,9 @@ Worth stating plainly, because the deployment shape decides most of the answer:
   in that rest is REFUSED (the kernel answers "not found" for `missing/..`, and "not a directory"
   for `file/..`, which is refused as well). One budget of 40 link
   expansions covers the whole resolution (plain directories cost nothing, so deep paths are fine; a
-  link loop reaches the budget at once). A path with a NUL, or longer than 32 KiB, is refused before
-  any walking. Over the budget, over the length cap, or any error while resolving, the read is
+  link loop reaches the budget at once). A missing, empty or null path, a path with a NUL, or one
+  longer than 32 KiB, is refused before any walking (the reader refuses a null or empty path itself,
+  not only the tool provider in front of it). Over the budget, over the length cap, or any error while resolving, the read is
   REFUSED. The read then opens exactly the resolved path that was checked, not the spelling it was
   asked with. **Not covered:** a link swapped between the check and the open. The open is by path,
   with no no-follow flag, so a party who can write inside `--root` while a read runs can race it.
