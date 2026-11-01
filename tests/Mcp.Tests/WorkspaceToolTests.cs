@@ -341,6 +341,66 @@ public sealed class WorkspaceToolTests : IDisposable
             .Which.Content.Should().Contain("real");
     }
 
+    [Theory]
+    [InlineData("alias", "l2", "alias/secret.txt")]
+    [InlineData("alias2", "l2/secret.txt", "alias2")]
+    [InlineData("alias3", "l2/deeper", "alias3/secret2.txt")]
+    public async Task Refuses_a_link_that_reaches_the_outside_through_a_second_link_inside_the_root(
+        string alias, string aliasTarget, string path)
+    {
+        var (provider, root) = Build();
+        var outside = _owned.Dir("outside");
+        Directory.CreateDirectory(Path.Combine(outside, "deeper"));
+        await File.WriteAllTextAsync(Path.Combine(outside, "secret.txt"), "secret", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(outside, "deeper", "secret2.txt"), "secret2", TestContext.Current.CancellationToken);
+        DirectoryLinks.CreateOrSkip(Path.Combine(root, "l2"), outside);
+
+        // The alias is a link whose TARGET is spelled through another link of the root. The target's own
+        // directories were never resolved, so the spelling `<root>/l2/...` passed the prefix check while
+        // the read followed `l2` out of the root. Three shapes: a directory link to the second link, a
+        // file link through it, and a directory link to a folder beneath it.
+        var target = Path.Combine(root, aliasTarget.Replace('/', Path.DirectorySeparatorChar));
+        if (aliasTarget.EndsWith(".txt", StringComparison.Ordinal))
+        {
+            CreateLinkOrSkip(() => File.CreateSymbolicLink(Path.Combine(root, alias), target));
+        }
+        else
+        {
+            DirectoryLinks.CreateOrSkip(Path.Combine(root, alias), target);
+        }
+
+        var result = await Invoke(provider, $$"""{"path":"{{path}}"}""");
+
+        // Said first so a breach reads as what it is: the secret came back.
+        (result as ToolResult.Ok)?.Content.Should().NotContain("secret", "the read followed a link out of the root");
+        result.Should().BeOfType<ToolResult.Refused>()
+            .Which.Reason.Should().Contain("outside the workspace");
+    }
+
+    [Fact]
+    public async Task A_link_spelled_through_a_link_in_the_root_own_path_still_reads()
+    {
+        var scratch = _owned.Dir("scratch");
+        var realDir = Path.Combine(scratch, "realDir");
+        Directory.CreateDirectory(realDir);
+        var viaLink = Path.Combine(scratch, "viaLink");
+        DirectoryLinks.CreateOrSkip(viaLink, realDir);
+        var root = Path.Combine(viaLink, "root");
+        Directory.CreateDirectory(Path.Combine(root, "sub"));
+        await File.WriteAllTextAsync(Path.Combine(root, "sub", "real.txt"), "real", TestContext.Current.CancellationToken);
+        DirectoryLinks.CreateOrSkip(Path.Combine(root, "alias"), Path.Combine(viaLink, "root", "sub"));
+        var provider = ProviderAt(root);
+
+        // The machine where this was measured (macOS CI, /var -> /private/var) spells every temp path
+        // through a link. The alias target is spelled through the root's own link; resolving only the
+        // alias left that spelling unresolved and the prefix check against the real root refused a read
+        // that stays inside the root.
+        var result = await Invoke(provider, """{"path":"alias/real.txt"}""");
+
+        result.Should().BeOfType<ToolResult.Ok>()
+            .Which.Content.Should().Contain("real");
+    }
+
     /// <summary>Creating a symlink on Windows needs Developer Mode or elevation. A run without either
     /// SKIPS these tests loudly rather than passing them vacuously — an escape test that never created
     /// its link proves nothing about the guard.</summary>
@@ -388,8 +448,10 @@ public sealed class WorkspaceToolTests : IDisposable
         var home = _owned.Dir("workspace");
         var root = Path.Combine(home, "root");
         Directory.CreateDirectory(Path.Combine(root, "sub"));
-        var reader = new SandboxedFileReader(
-            new WorkspaceRoot(root), caps ?? new SandboxedFileReaderOptions(), NullLogger<SandboxedFileReader>.Instance);
-        return (new WorkspaceToolProvider(reader), root);
+        return (ProviderAt(root, caps), root);
     }
+
+    private static WorkspaceToolProvider ProviderAt(string root, SandboxedFileReaderOptions? caps = null) =>
+        new(new SandboxedFileReader(
+            new WorkspaceRoot(root), caps ?? new SandboxedFileReaderOptions(), NullLogger<SandboxedFileReader>.Instance));
 }
