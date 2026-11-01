@@ -35,6 +35,10 @@ internal static partial class Native
     /// generation and spare words up to 144.</summary>
     internal const int DarwinStatSize = 144;
 
+    // The byte offset of each field the parser reads, as listed above: one name per number, so the layout is read in one place.
+    private const int StDevAt = 0, StModeAt = 4, StNlinkAt = 6, StInoAt = 8, StUidAt = 16, StGidAt = 20, StRdevAt = 24;
+    private const int StAtimeAt = 32, StMtimeAt = 48, StCtimeAt = 64, StBirthtimeAt = 80, StSizeAt = 96;
+
     private const int RenameExcl = 0x4;
 
     // open(2) on Darwin: O_NONBLOCK 0x4, O_NOFOLLOW 0x100, O_CLOEXEC 0x01000000 (Linux has other numbers for all three); O_RDONLY is 0.
@@ -45,21 +49,21 @@ internal static partial class Native
     internal static DarwinStat ParseDarwinStat(ReadOnlySpan<byte> buffer)
     {
         if (buffer.Length < DarwinStatSize) throw new InvalidOperationException($"stat answered {buffer.Length} bytes, fewer than the {DarwinStatSize} this reads");
-        var inode = BinaryPrimitives.ReadUInt64LittleEndian(buffer[8..]);
+        var inode = BinaryPrimitives.ReadUInt64LittleEndian(buffer[StInoAt..]);
         if (inode == 0) throw new InvalidOperationException("stat gave inode 0: the layout does not hold, or the file system gave no identity");
         return new DarwinStat(
-            Dev: BinaryPrimitives.ReadInt32LittleEndian(buffer),
-            Mode: BinaryPrimitives.ReadUInt16LittleEndian(buffer[4..]),
-            Nlink: BinaryPrimitives.ReadUInt16LittleEndian(buffer[6..]),
+            Dev: BinaryPrimitives.ReadInt32LittleEndian(buffer[StDevAt..]),
+            Mode: BinaryPrimitives.ReadUInt16LittleEndian(buffer[StModeAt..]),
+            Nlink: BinaryPrimitives.ReadUInt16LittleEndian(buffer[StNlinkAt..]),
             Ino: inode,
-            Uid: BinaryPrimitives.ReadUInt32LittleEndian(buffer[16..]),
-            Gid: BinaryPrimitives.ReadUInt32LittleEndian(buffer[20..]),
-            Rdev: BinaryPrimitives.ReadInt32LittleEndian(buffer[24..]),
-            Atime: DarwinTime(buffer[32..]),
-            Mtime: DarwinTime(buffer[48..]),
-            Ctime: DarwinTime(buffer[64..]),
-            Birthtime: DarwinTime(buffer[80..]),
-            Size: BinaryPrimitives.ReadInt64LittleEndian(buffer[96..]));
+            Uid: BinaryPrimitives.ReadUInt32LittleEndian(buffer[StUidAt..]),
+            Gid: BinaryPrimitives.ReadUInt32LittleEndian(buffer[StGidAt..]),
+            Rdev: BinaryPrimitives.ReadInt32LittleEndian(buffer[StRdevAt..]),
+            Atime: DarwinTime(buffer[StAtimeAt..]),
+            Mtime: DarwinTime(buffer[StMtimeAt..]),
+            Ctime: DarwinTime(buffer[StCtimeAt..]),
+            Birthtime: DarwinTime(buffer[StBirthtimeAt..]),
+            Size: BinaryPrimitives.ReadInt64LittleEndian(buffer[StSizeAt..]));
     }
 
     /// <summary>The entry ITSELF (<c>lstat</c>, a link never followed) with every field read; null when it is not there; an exception for anything else.</summary>
