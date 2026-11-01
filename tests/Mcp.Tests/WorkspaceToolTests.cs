@@ -446,9 +446,25 @@ public sealed class WorkspaceToolTests : IDisposable
         clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(10));
     }
 
+    /// <summary>The budget of the system this runs on, and one past it: the chain test reads the constant, never a literal.</summary>
+    public static TheoryData<int, bool> ChainsAroundTheBudget => new()
+    {
+        { SandboxedFileReader.MaxLinkHops, true },
+        { SandboxedFileReader.MaxLinkHops + 1, false },
+    };
+
+    [Fact]
+    public void The_link_budget_is_the_kernels_limit_on_macOS_32_and_40_elsewhere()
+    {
+        // macOS's MAXSYMLINKS is 32: a chain of 40 fails open(2) with ELOOP there, so the resolver must refuse it first.
+        // Windows allows 63 and Linux 40, so 40 (the stricter one for Windows) stays everywhere else.
+        SandboxedFileReader.LinkHopBudget(isMacOs: true).Should().Be(32);
+        SandboxedFileReader.LinkHopBudget(isMacOs: false).Should().Be(40);
+        SandboxedFileReader.MaxLinkHops.Should().Be(SandboxedFileReader.LinkHopBudget(OperatingSystem.IsMacOS()));
+    }
+
     [Theory]
-    [InlineData(SandboxedFileReader.MaxLinkHops, true)]
-    [InlineData(SandboxedFileReader.MaxLinkHops + 1, false)]
+    [MemberData(nameof(ChainsAroundTheBudget))]
     public async Task A_chain_of_links_reads_up_to_the_hop_budget_and_is_refused_one_past_it(int hops, bool reads)
     {
         var (provider, root) = Build();

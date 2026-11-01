@@ -69,9 +69,11 @@ public sealed class SandboxedFileReader : ISandboxedFileReader
     private readonly ILogger<SandboxedFileReader> logger;
     private readonly Func<string, CancellationToken, IAsyncEnumerable<string>> openLines;
 
-    /// <summary>The most link expansions ONE resolution may spend. Forty, as the Linux kernel allows
-    /// (<c>ELOOP</c> past 40): far more than any real checkout chains, and a loop reaches it at once.</summary>
-    internal const int MaxLinkHops = 40;
+    /// <summary>The most link expansions ONE resolution may spend on THIS system (<see cref="LinkHopBudget"/>).</summary>
+    internal static readonly int MaxLinkHops = LinkHopBudget(OperatingSystem.IsMacOS());
+
+    /// <summary>The budget for a system, from the OS fact alone (so a test on any system checks both values).</summary>
+    internal static int LinkHopBudget(bool isMacOs) => 40;
 
     /// <summary>The longest path, in characters, the guard will resolve or accept. Far past any real
     /// path (the kernels stop at 4 KiB to 32 KiB); a request over it is refused, which also bounds the
