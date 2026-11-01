@@ -4,12 +4,16 @@ using System.Text.RegularExpressions;
 namespace Mcp.Tests.Leftovers;
 
 /// <summary>The guard's <c>token</c> class (rule §1, §2): this repository's token must be a row of the rule's <c>## Tokens</c> table
-/// (the row's <c>repository</c> column naming THIS repository), of the token grammar and not of the owner grammar, and the
+/// (read from the rule file that holds it, found by content — see <see cref="RegisteredTokenFindings"/>; the row's <c>repository</c> column naming THIS repository), of the token grammar and not of the owner grammar, and the
 /// <c>RepoToken</c> constant must be written once, in the token file.</summary>
 internal static class GuardTokens
 {
     internal const string TokenFile = "tests/Mcp.Tests/Leftovers/OwnedToken.cs";
-    internal const string RulePath = "common/test-leftovers.md";
+    /// <summary>The rule file that holds the <c>## Tokens</c> table since the split of 2026-11-01 (release 105d53c).</summary>
+    internal const string DetailRule = "common/test-leftovers-detail.md";
+
+    /// <summary>The rule core; it holds the table on a mount from before the split.</summary>
+    internal const string CoreRule = "common/test-leftovers.md";
 
     private static readonly string[] ExpectedHeader = ["token", "family", "repository"];
     private static readonly string[] ConstantExtensions = [".cs", ".mjs", ".js", ".cjs", ".sh", ".ps1", ".py"];
@@ -35,37 +39,37 @@ internal static class GuardTokens
     /// <summary>Findings (class <c>token</c>) when <paramref name="token"/> is not a row of the rule's <c>## Tokens</c> table, is of the
     /// owner grammar, or is another repository's row — <paramref name="identity"/> is the <c>repository</c> column of ITS row. Fails
     /// closed: a rule with no table registers nothing, and an empty identity proves nothing.</summary>
-    internal static IReadOnlyList<Finding> TokenFindings(string ruleText, string token, string identity) =>
-        (ShapeProblem(token) ?? TableProblem(ParseTokenTable(ruleText), token, identity)) is { } problem ? At(problem) : [];
+    internal static IReadOnlyList<Finding> TokenFindings(string ruleText, string token, string identity, string rule) =>
+        (ShapeProblem(token, rule) ?? TableProblem(ParseTokenTable(ruleText), token, identity, rule)) is { } problem ? At(problem, rule) : [];
 
-    private static List<Finding> At(Problem problem) => [new Finding(RulePath, Math.Max(problem.Line, 1), "token", problem.Text)];
+    private static List<Finding> At(Problem problem, string rule) => [new Finding(rule, Math.Max(problem.Line, 1), "token", problem.Text)];
 
-    private static Problem? ShapeProblem(string token)
+    private static Problem? ShapeProblem(string token, string rule)
     {
-        if (!TokenShape.IsMatch(token)) return new Problem(1, $"the token `{token}` is not [a-z0-9]{{2,12}} ({RulePath})");
-        return OwnerGrammar.IsMatch(token) ? new Problem(1, $"the token `{token}` matches the owner grammar of {RulePath} §1 — no repository may be named like an owner") : null;
+        if (!TokenShape.IsMatch(token)) return new Problem(1, $"the token `{token}` is not [a-z0-9]{{2,12}} ({rule})");
+        return OwnerGrammar.IsMatch(token) ? new Problem(1, $"the token `{token}` matches the owner grammar of {rule} §1 — no repository may be named like an owner") : null;
     }
 
-    private static Problem? TableProblem(TokenTable table, string token, string identity) =>
-        HeadingProblem(table, token) ?? RowProblem(table, token, identity);
+    private static Problem? TableProblem(TokenTable table, string token, string identity, string rule) =>
+        HeadingProblem(table, token, rule) ?? RowProblem(table, token, identity, rule);
 
-    private static Problem? HeadingProblem(TokenTable table, string token) =>
-        table.Heading == 0 ? new Problem(1, $"{RulePath} has no `## Tokens` section — the token `{token}` is not registered")
-        : table.Header is null ? new Problem(table.Heading, $"{RulePath} has no table under `## Tokens` — the token `{token}` is not registered")
+    private static Problem? HeadingProblem(TokenTable table, string token, string rule) =>
+        table.Heading == 0 ? new Problem(1, $"{rule} has no `## Tokens` section — the token `{token}` is not registered")
+        : table.Header is null ? new Problem(table.Heading, $"{rule} has no table under `## Tokens` — the token `{token}` is not registered")
         : IsExpectedHeader(table.Header) ? null
-        : new Problem(table.Heading, $"the `## Tokens` table of {RulePath} is not `| token | family | repository |` — the token `{token}` is not registered");
+        : new Problem(table.Heading, $"the `## Tokens` table of {rule} is not `| token | family | repository |` — the token `{token}` is not registered");
 
     private static bool IsExpectedHeader(string[] header) =>
         header.Length == ExpectedHeader.Length && ExpectedHeader.Select((name, i) => header[i].Equals(name, StringComparison.OrdinalIgnoreCase)).All(ok => ok);
 
-    private static Problem? RowProblem(TokenTable table, string token, string identity)
+    private static Problem? RowProblem(TokenTable table, string token, string identity, string rule)
     {
         var rows = table.Rows.Where(r => r.Token == token).ToList();
-        if (rows.Count == 0) return new Problem(table.Heading, $"the token `{token}` is not a row of the `## Tokens` table of {RulePath}");
-        return rows.Count > 1 ? new Problem(rows[1].Line, $"the token `{token}` is listed twice in {RulePath}") : IdentityProblem(rows[0], token, identity);
+        if (rows.Count == 0) return new Problem(table.Heading, $"the token `{token}` is not a row of the `## Tokens` table of {rule}");
+        return rows.Count > 1 ? new Problem(rows[1].Line, $"the token `{token}` is listed twice in {rule}") : IdentityProblem(rows[0], token, identity, rule);
     }
 
-    private static Problem? IdentityProblem(TokenRow row, string token, string identity)
+    private static Problem? IdentityProblem(TokenRow row, string token, string identity, string rule)
     {
         if (identity.Trim().Length == 0)
         {
@@ -74,18 +78,52 @@ internal static class GuardTokens
 
         return row.Repository.Trim().Equals(identity.Trim(), StringComparison.OrdinalIgnoreCase)
             ? null
-            : new Problem(row.Line, $"the token `{token}` belongs to `{row.Repository}` in {RulePath}, not to this repository (`{identity}`)");
+            : new Problem(row.Line, $"the token `{token}` belongs to `{row.Repository}` in {rule}, not to this repository (`{identity}`)");
     }
 
-    /// <summary><see cref="TokenFindings"/> over the mounted rule, <c>.claude/rules/shared/common/test-leftovers.md</c> under
-    /// <paramref name="repoRoot"/>. A missing file is a finding: an uninitialised submodule registers nothing.</summary>
+    private sealed record Candidate(string Name, string? Text, string? Error);
+
+    private sealed record Resolution(Candidate? Chosen, Finding? Failure);
+
+    /// <summary><see cref="TokenFindings"/> over the rule file of the mount that holds the table, found by content (the reference is
+    /// <c>resolveRule</c> of the mounted <c>tools/leftovers-check.mjs</c>, which picks by existence; the two differ only where the detail
+    /// exists without a table): <c>common/test-leftovers-detail.md</c> when it exists AND has a <c>## Tokens</c> section, else
+    /// <c>common/test-leftovers.md</c> when it has one (a mount from before the split). Fails closed with ONE finding when neither has
+    /// it — <see cref="DetailRule"/> is the canonical anchor of that finding (the file the table belongs in); the message names both files —
+    /// and with ONE finding naming the file and the error when a candidate cannot be read (never an exception). Candidates are read in
+    /// order and the first that holds the table ends the search, so a core that is not read cannot fail the guard. Every message names the
+    /// file actually read.</summary>
     internal static IReadOnlyList<Finding> RegisteredTokenFindings(string repoRoot, string token, string identity)
     {
-        var rule = Path.Combine(repoRoot, ".claude", "rules", "shared", "common", "test-leftovers.md");
-        return File.Exists(rule)
-            ? TokenFindings(File.ReadAllText(rule), token, identity)
-            : [new Finding(RulePath, 1, "token", $"{RulePath} is not mounted at {rule} — an uninitialised submodule registers nothing; run `git submodule update --init .claude/rules/shared`")];
+        var mount = Path.Combine(repoRoot, ".claude", "rules", "shared");
+        var resolved = Resolve(mount, token, [DetailRule, CoreRule]);
+        return resolved.Failure is { } failure ? [failure] : TokenFindings(resolved.Chosen!.Text!, token, identity, resolved.Chosen.Name);
     }
+
+    private static Resolution Resolve(string mount, string token, string[] names) =>
+        names.Length == 0 ? new Resolution(null, NeitherFinding(mount, token)) : Step(mount, token, names, Read(mount, names[0]));
+
+    private static Resolution Step(string mount, string token, string[] names, Candidate candidate) =>
+        candidate.Error is not null ? new Resolution(null, new Finding(candidate.Name, 1, "token", $"{candidate.Name} under {mount} could not be read ({candidate.Error}) — the token `{token}` is not registered"))
+        : candidate.Text is not null && GuardText.SplitLines(candidate.Text).Any(l => TokensHeading.IsMatch(l)) ? new Resolution(candidate, null)
+        : Resolve(mount, token, names[1..]);
+
+    /// <summary>The text of the rule file <paramref name="name"/> of the mount; null text when the file does not exist; an error text when it cannot be read.</summary>
+    private static Candidate Read(string mount, string name)
+    {
+        var file = Path.Combine(mount, name);
+        try
+        {
+            return new Candidate(name, File.Exists(file) ? File.ReadAllText(file) : null, null);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new Candidate(name, null, $"{ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private static Finding NeitherFinding(string mount, string token) =>
+        new(DetailRule, 1, "token", $"neither {DetailRule} (the canonical home of the table, so this finding is anchored on it) nor {CoreRule} under {mount} has a `## Tokens` section — the token `{token}` is not registered; an uninitialised submodule registers nothing, run `git submodule update --init .claude/rules/shared`");
 
     /// <summary>The ONE constant (rule §2): over every <c>.cs</c>, <c>.mjs</c>, <c>.js</c>, <c>.cjs</c>, <c>.sh</c>, <c>.ps1</c> and
     /// <c>.py</c> file of the tree (the folders the scan never enters excepted), a non-comment line that declares <c>RepoToken</c> must
