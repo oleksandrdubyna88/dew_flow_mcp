@@ -233,6 +233,9 @@ with Darwin's numbers, never a real `ENOTSUP`); macOS before 10.12 (no `renamex_
 - **5. `Errno.Current` guessed Linux on any system that is not macOS** (a coai gate finding, accepted). It is now `Errno.For(isLinux, isMacOS)` applied to the running system: Linux gets the Linux table, macOS the Darwin one, anything else throws
   `PlatformNotSupportedException`. The only callers are the POSIX liveness probe (`Liveness.ProbeByKill`) and the Darwin tests, none of which runs on Windows. RED on Linux: `A_system_that_is_neither_Linux_nor_macOS_has_no_table_and_never_gets_the_Linux_one`
   (1 of 4 `ErrnoTests`, against a stub that answered Linux); `The_current_table_is_the_one_of_the_system_this_runs_on` now states the Windows case as well (it throws).
+- **4. The FIFO child test could pass for the wrong reason.** `DarwinFifoChild` asserted only that the read returned null, but `DarwinReadVerifiedRegular` also returns null when `open` fails for any reason (ENOENT, for one). Before the read the child now `lstat`s the
+  claim and asserts that it is there and is a FIFO (`(Mode & 0xF000) == 0x1000`, as `DarwinStat.IsFifo`). The bit test is pure and runs on Linux: RED there was `A_fifo_is_told_by_the_type_bits_of_the_mode_and_by_nothing_else` (1 of 7 cases, against a stub
+  that answered false). The child's own assertion runs on macOS only, so that RED is macOS-only and not observed here.
 
 **2026-11-01 (pin moved to release 105d53c).**
 - The `## Tokens` table moved from `common/test-leftovers.md` to `common/test-leftovers-detail.md` when the rule was split into a core and a detail.

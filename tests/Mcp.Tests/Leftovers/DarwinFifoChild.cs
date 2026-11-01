@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.Versioning;
 using FluentAssertions;
 using Xunit;
 
@@ -13,6 +14,7 @@ public sealed class DarwinFifoChild
     internal const string Variable = "MCP_DARWIN_FIFO_CHILD";
 
     [Fact]
+    [SupportedOSPlatform("macos")]
     public void Reads_a_claim_that_is_now_a_fifo_and_is_refused_without_waiting()
     {
         var spec = Environment.GetEnvironmentVariable(Variable);
@@ -22,6 +24,12 @@ public sealed class DarwinFifoChild
         var judged = new Identity(
             ulong.Parse(parts[1], CultureInfo.InvariantCulture), UInt128.Parse(parts[2], CultureInfo.InvariantCulture),
             IsDirectory: false, IsLink: false, IsRegular: true, Uid: null, default, default);
+
+        // The read answers null for a refused FIFO AND for an open that failed for any reason (a missing path, ENOENT): so the entry is
+        // shown to be a FIFO first, or a null would pass for the wrong reason.
+        var entry = Native.DarwinLstat(parts[0]);
+        entry.Should().NotBeNull($"the claim {parts[0]} must be there to be read");
+        entry!.Value.IsFifo.Should().BeTrue($"the claim must be a FIFO before the read (mode 0x{entry.Value.Mode:x4})");
 
         var bytes = Native.ReadVerifiedRegular(parts[0], judged, 513);
 

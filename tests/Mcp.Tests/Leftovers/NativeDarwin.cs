@@ -12,7 +12,7 @@ internal readonly record struct DarwinStat(
     DateTimeOffset Atime, DateTimeOffset Mtime, DateTimeOffset Ctime, DateTimeOffset Birthtime, long Size)
 {
     /// <summary>The entry is a named pipe (<c>S_ISFIFO</c>).</summary>
-    internal bool IsFifo => false;
+    internal bool IsFifo => (Mode & 0xF000) == 0x1000;
 }
 
 /// <summary>The macOS (Darwin) half of <see cref="Native"/>: <c>lstat</c> and <c>fstat</c> for the identity, an exclusive <c>mkdir</c>, an exclusive
