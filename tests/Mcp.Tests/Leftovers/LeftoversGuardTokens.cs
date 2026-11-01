@@ -39,7 +39,7 @@ internal static class GuardTokens
     /// <summary>Findings (class <c>token</c>) when <paramref name="token"/> is not a row of the rule's <c>## Tokens</c> table, is of the
     /// owner grammar, or is another repository's row — <paramref name="identity"/> is the <c>repository</c> column of ITS row. Fails
     /// closed: a rule with no table registers nothing, and an empty identity proves nothing.</summary>
-    internal static IReadOnlyList<Finding> TokenFindings(string ruleText, string token, string identity, string rule = DetailRule) =>
+    internal static IReadOnlyList<Finding> TokenFindings(string ruleText, string token, string identity, string rule) =>
         (ShapeProblem(token, rule) ?? TableProblem(ParseTokenTable(ruleText), token, identity, rule)) is { } problem ? At(problem, rule) : [];
 
     private static List<Finding> At(Problem problem, string rule) => [new Finding(rule, Math.Max(problem.Line, 1), "token", problem.Text)];
@@ -81,26 +81,49 @@ internal static class GuardTokens
             : new Problem(row.Line, $"the token `{token}` belongs to `{row.Repository}` in {rule}, not to this repository (`{identity}`)");
     }
 
+    private sealed record Candidate(string Name, string? Text, string? Error);
+
+    private sealed record Resolution(Candidate? Chosen, Finding? Failure);
+
     /// <summary><see cref="TokenFindings"/> over the rule file of the mount that holds the table, found by content (the reference is
-    /// <c>resolveRule</c> of the mounted <c>tools/leftovers-check.mjs</c>): <c>common/test-leftovers-detail.md</c> when it exists AND has a
-    /// <c>## Tokens</c> section, else <c>common/test-leftovers.md</c> when it has one (a mount from before the split), else ONE finding
-    /// naming both files — fails closed, an uninitialised submodule registers nothing. Every message names the file read.</summary>
+    /// <c>resolveRule</c> of the mounted <c>tools/leftovers-check.mjs</c>, which picks by existence; the two differ only where the detail
+    /// exists without a table): <c>common/test-leftovers-detail.md</c> when it exists AND has a <c>## Tokens</c> section, else
+    /// <c>common/test-leftovers.md</c> when it has one (a mount from before the split). Fails closed with ONE finding when neither has
+    /// it — <see cref="DetailRule"/> is the canonical anchor of that finding (the file the table belongs in); the message names both files —
+    /// and with ONE finding naming the file and the error when a candidate cannot be read (never an exception). Candidates are read in
+    /// order and the first that holds the table ends the search, so a core that is not read cannot fail the guard. Every message names the
+    /// file actually read.</summary>
     internal static IReadOnlyList<Finding> RegisteredTokenFindings(string repoRoot, string token, string identity)
     {
         var mount = Path.Combine(repoRoot, ".claude", "rules", "shared");
-        var rule = new[] { DetailRule, CoreRule }.Select(name => (Name: name, Text: ReadWithTokens(mount, name))).FirstOrDefault(r => r.Text is not null);
-        return rule.Text is null
-            ? [new Finding(DetailRule, 1, "token", $"neither {DetailRule} nor {CoreRule} under {mount} has a `## Tokens` section — the token `{token}` is not registered; an uninitialised submodule registers nothing, run `git submodule update --init .claude/rules/shared`")]
-            : TokenFindings(rule.Text, token, identity, rule.Name);
+        var resolved = Resolve(mount, token, [DetailRule, CoreRule]);
+        return resolved.Failure is { } failure ? [failure] : TokenFindings(resolved.Chosen!.Text!, token, identity, resolved.Chosen.Name);
     }
 
-    /// <summary>The text of the rule file <paramref name="name"/> of the mount when the file exists and has a <c>## Tokens</c> heading; else null.</summary>
-    private static string? ReadWithTokens(string mount, string name)
+    private static Resolution Resolve(string mount, string token, string[] names) =>
+        names.Length == 0 ? new Resolution(null, NeitherFinding(mount, token)) : Step(mount, token, names, Read(mount, names[0]));
+
+    private static Resolution Step(string mount, string token, string[] names, Candidate candidate) =>
+        candidate.Error is not null ? new Resolution(null, new Finding(candidate.Name, 1, "token", $"{candidate.Name} under {mount} could not be read ({candidate.Error}) — the token `{token}` is not registered"))
+        : candidate.Text is not null && GuardText.SplitLines(candidate.Text).Any(l => TokensHeading.IsMatch(l)) ? new Resolution(candidate, null)
+        : Resolve(mount, token, names[1..]);
+
+    /// <summary>The text of the rule file <paramref name="name"/> of the mount; null text when the file does not exist; an error text when it cannot be read.</summary>
+    private static Candidate Read(string mount, string name)
     {
         var file = Path.Combine(mount, name);
-        var text = File.Exists(file) ? File.ReadAllText(file) : null;
-        return text is not null && GuardText.SplitLines(text).Any(l => TokensHeading.IsMatch(l)) ? text : null;
+        try
+        {
+            return new Candidate(name, File.Exists(file) ? File.ReadAllText(file) : null, null);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new Candidate(name, null, $"{ex.GetType().Name}: {ex.Message}");
+        }
     }
+
+    private static Finding NeitherFinding(string mount, string token) =>
+        new(DetailRule, 1, "token", $"neither {DetailRule} (the canonical home of the table, so this finding is anchored on it) nor {CoreRule} under {mount} has a `## Tokens` section — the token `{token}` is not registered; an uninitialised submodule registers nothing, run `git submodule update --init .claude/rules/shared`");
 
     /// <summary>The ONE constant (rule §2): over every <c>.cs</c>, <c>.mjs</c>, <c>.js</c>, <c>.cjs</c>, <c>.sh</c>, <c>.ps1</c> and
     /// <c>.py</c> file of the tree (the folders the scan never enters excepted), a non-comment line that declares <c>RepoToken</c> must

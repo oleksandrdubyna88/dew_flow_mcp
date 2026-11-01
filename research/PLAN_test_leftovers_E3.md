@@ -186,7 +186,7 @@ asserted through the two `WindowsOwnership` fixtures, never from the runner's ow
 - The `## Tokens` table moved from `common/test-leftovers.md` to `common/test-leftovers-detail.md` when the rule was split into a core and a detail.
   `GuardTokens.RegisteredTokenFindings` reads it by content, as `resolveRule` of the mounted `tools/leftovers-check.mjs` does: the detail when it
   exists AND has a `## Tokens` section, else the core when it has one (a mount from before the split), else ONE finding naming both files. Every
-  message names the file actually read. Boundary: the same change lands in `dew_flow_sidecar_rust` PR #66, which has its own guard; the two guards share no code.
+  message names the file actually read; a candidate that cannot be read is ONE finding naming the file and the error. A contract test runs the mounted `resolveRule` on the same synthetic mounts: it picks by existence, so the two differ only where the detail exists without a table (the guard names the core). Boundary: the same change lands in `dew_flow_sidecar_rust` PR #66, which has its own guard; the two guards share no code.
 
 ## The contract this document encodes
 

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using FluentAssertions;
 using Xunit;
 
@@ -402,28 +403,28 @@ public sealed class LeftoversGuardTests : IDisposable
     [InlineData("w1")]
     public void A_token_that_is_not_registered_or_not_of_the_shape_is_one_finding(string token)
     {
-        LeftoversGuard.TokenFindings(Rule(McpRow), token, "the MCP server").Should().ContainSingle().Which.Class.Should().Be("token");
+        LeftoversGuard.TokenFindings(Rule(McpRow), token, "the MCP server", DetailName).Should().ContainSingle().Which.Class.Should().Be("token");
     }
 
     [Fact]
     public void The_registered_token_of_this_repository_is_clean()
     {
-        LeftoversGuard.TokenFindings(Rule(McpRow), "mcp", "the MCP server").Should().BeEmpty();
-        LeftoversGuard.TokenFindings(Rule(McpRow), "mcp", "THE MCP SERVER ").Should().BeEmpty("the identity is trimmed and case-insensitive");
+        LeftoversGuard.TokenFindings(Rule(McpRow), "mcp", "the MCP server", DetailName).Should().BeEmpty();
+        LeftoversGuard.TokenFindings(Rule(McpRow), "mcp", "THE MCP SERVER ", DetailName).Should().BeEmpty("the identity is trimmed and case-insensitive");
     }
 
     [Fact]
     public void A_rule_without_a_tokens_table_registers_nothing()
     {
-        LeftoversGuard.TokenFindings("# rule\n\nno table here\n", "mcp", "the MCP server").Should().ContainSingle();
-        LeftoversGuard.TokenFindings(Rule(McpRow, "| token | family |\n|---|---|\n"), "mcp", "the MCP server").Should().ContainSingle();
-        LeftoversGuard.TokenFindings("## Tokens\n\nprose only\n", "mcp", "the MCP server").Should().ContainSingle();
+        LeftoversGuard.TokenFindings("# rule\n\nno table here\n", "mcp", "the MCP server", DetailName).Should().ContainSingle();
+        LeftoversGuard.TokenFindings(Rule(McpRow, "| token | family |\n|---|---|\n"), "mcp", "the MCP server", DetailName).Should().ContainSingle();
+        LeftoversGuard.TokenFindings("## Tokens\n\nprose only\n", "mcp", "the MCP server", DetailName).Should().ContainSingle();
     }
 
     [Fact]
     public void A_token_listed_twice_is_one_finding()
     {
-        LeftoversGuard.TokenFindings(Rule(McpRow + "\n" + McpRow), "mcp", "the MCP server").Should().ContainSingle().Which.Text.Should().Contain("listed twice");
+        LeftoversGuard.TokenFindings(Rule(McpRow + "\n" + McpRow), "mcp", "the MCP server", DetailName).Should().ContainSingle().Which.Text.Should().Contain("listed twice");
     }
 
     [Fact]
@@ -431,7 +432,7 @@ public sealed class LeftoversGuardTests : IDisposable
     {
         var rule = Rule("| `other` | dew_flow | the mcp thing |");
 
-        LeftoversGuard.TokenFindings(rule, "mcp", "the MCP server").Should().ContainSingle();
+        LeftoversGuard.TokenFindings(rule, "mcp", "the MCP server", DetailName).Should().ContainSingle();
     }
 
     [Fact]
@@ -439,7 +440,7 @@ public sealed class LeftoversGuardTests : IDisposable
     {
         var rule = Rule("| `mcp` | dew_flow | the embedding sidecar |");
 
-        var finding = LeftoversGuard.TokenFindings(rule, "mcp", "the MCP server").Should().ContainSingle().Subject;
+        var finding = LeftoversGuard.TokenFindings(rule, "mcp", "the MCP server", DetailName).Should().ContainSingle().Subject;
 
         finding.Text.Should().Contain("the embedding sidecar").And.Contain("the MCP server");
     }
@@ -447,8 +448,8 @@ public sealed class LeftoversGuardTests : IDisposable
     [Fact]
     public void An_empty_identity_fails_closed()
     {
-        LeftoversGuard.TokenFindings(Rule(McpRow), "mcp", "").Should().ContainSingle();
-        LeftoversGuard.TokenFindings(Rule(McpRow), "mcp", "   ").Should().ContainSingle();
+        LeftoversGuard.TokenFindings(Rule(McpRow), "mcp", "", DetailName).Should().ContainSingle();
+        LeftoversGuard.TokenFindings(Rule(McpRow), "mcp", "   ", DetailName).Should().ContainSingle();
     }
 
     [Fact]
@@ -529,6 +530,92 @@ public sealed class LeftoversGuardTests : IDisposable
         var found = LeftoversGuard.RegisteredTokenFindings(root, "mcp", "the MCP server");
 
         found.Should().ContainSingle().Which.Text.Should().Contain(DetailName).And.Contain(CoreName);
+    }
+
+    // The shared selector (`resolveRule` of the mounted tools/leftovers-check.mjs) picks by EXISTENCE, the detail first; the guard picks by
+    // CONTENT. They agree on every mount but one: the detail PRESENT WITHOUT a `## Tokens` section and the core WITH one — the shared tool
+    // names the detail, the guard names the core (the file that holds the table). That case is asserted as a difference, on purpose.
+    // A mount with no rule file at all makes the shared tool fall back to the files beside the tool — outside the fixture ("outside").
+    [Theory]
+    [InlineData("split", DetailName, DetailName)]
+    [InlineData("presplit", CoreName, CoreName)]
+    [InlineData("both", DetailName, DetailName)]
+    [InlineData("detail-without-table", DetailName, CoreName)]
+    [InlineData("neither", DetailName, "finding")]
+    [InlineData("no-files", "outside", "finding")]
+    public void The_guards_choice_is_the_mounted_selectors_except_where_the_guard_reads_by_content(string kind, string shared, string guard)
+    {
+        var root = kind switch
+        {
+            "split" => MountWith("c-split", (CoreName, "# core\n"), (DetailName, Rule(McpRow))),
+            "presplit" => MountWith("c-presplit", (CoreName, Rule(McpRow))),
+            "both" => MountWith("c-both", (CoreName, Rule(McpRow)), (DetailName, Rule(McpRow))),
+            "detail-without-table" => MountWith("c-dnt", (DetailName, "# detail\n"), (CoreName, Rule(McpRow))),
+            "neither" => MountWith("c-neither", (CoreName, "# core\n"), (DetailName, "# detail\n")),
+            _ => _owned.Dir("c-nofiles"),
+        };
+        var mount = Path.Combine(root, ".claude", "rules", "shared");
+
+        var picked = MountedSelectorPick(mount);
+        var found = LeftoversGuard.RegisteredTokenFindings(root, "mcp", "nobody").Should().ContainSingle().Subject;
+        var chosen = found.Text.Contains("neither", StringComparison.Ordinal) ? "finding" : found.File;
+
+        picked.Should().Be(shared, "the mounted resolveRule's answer for this mount");
+        chosen.Should().Be(guard);
+        if (kind == "detail-without-table") chosen.Should().NotBe(picked, "this is the one deliberate difference: by content, not by existence");
+        else if (guard != "finding") chosen.Should().Be(picked);
+    }
+
+    /// <summary>The mounted <c>resolveRule(mount)</c> through <c>node</c>: the module URL and the mount travel in <c>process.argv</c>, never in the
+    /// program text. Returns the rule name under the mount, or "outside" when it fell back to the files beside the tool. node missing, a
+    /// non-zero exit: the test FAILS with the reason.</summary>
+    private static string MountedSelectorPick(string mount)
+    {
+        const string program = """
+            const [module, repo] = process.argv.slice(1);
+            const { resolveRule } = await import(module);
+            console.log(resolveRule(repo) ?? "");
+            """;
+        var module = new Uri(Path.GetFullPath(Path.Combine(RepositoryRoot.Path, ".claude/rules/shared/tools/leftovers-check.mjs"))).AbsoluteUri;
+        var start = new ProcessStartInfo("node") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
+        foreach (var argument in new[] { "--input-type=module", "-e", program, "--", module, mount }) start.ArgumentList.Add(argument);
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("node did not start");
+        var output = process.StandardOutput.ReadToEndAsync();
+        var errors = process.StandardError.ReadToEndAsync();
+        process.WaitForExit(TimeSpan.FromMinutes(2)).Should().BeTrue("node must answer in two minutes");
+        process.WaitForExit();
+        process.ExitCode.Should().Be(0, "node said: " + errors.GetAwaiter().GetResult());
+        var picked = output.GetAwaiter().GetResult().Trim().Replace('\\', '/');
+        var prefix = mount.Replace('\\', '/').TrimEnd('/') + "/";
+        return picked.StartsWith(prefix, StringComparison.Ordinal) ? picked[prefix.Length..] : "outside";
+    }
+
+    [Theory]
+    [InlineData(DetailName)]
+    [InlineData(CoreName)]
+    public void An_unreadable_candidate_is_one_finding_naming_the_file_and_the_error_never_an_exception(string unreadable)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("chmod 000 is POSIX only");
+            return;
+        }
+
+        if (Native.GetUid() == 0) Assert.Skip("root reads a file with mode 000");
+        var other = unreadable == DetailName ? CoreName : DetailName;
+        var root = MountWith("unreadable", (unreadable, Rule(McpRow)), (other, "# no table\n"));
+        var file = Path.Combine(root, ".claude", "rules", "shared", unreadable);
+        File.SetUnixFileMode(file, UnixFileMode.None);
+        try
+        {
+            var found = LeftoversGuard.RegisteredTokenFindings(root, "mcp", "the MCP server");
+
+            found.Should().ContainSingle().Which.Text.Should().Contain(unreadable).And.Contain("UnauthorizedAccessException");
+        }
+        finally
+        {
+            File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
     }
 
     private const string TokenFile = "tests/Mcp.Tests/Leftovers/OwnedToken.cs";
