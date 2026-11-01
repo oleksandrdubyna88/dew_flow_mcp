@@ -245,6 +245,10 @@ with Darwin's numbers, never a real `ENOTSUP`); macOS before 10.12 (no `renamex_
   The layout measurement itself creates its folder inside the `Lazy` that `Require` reads, and a `Require` there would re-enter the `Lazy` and throw: it passes a no-op requirement (`OwnedDir.Create(..., requireLayout: static () => { })`), which the folder keeps for its own teardown.
   The requirement is an argument everywhere, so the gates run on Linux with one that throws (`LayoutGateTests`). RED on Linux: 7 of 8 (a sweep and an audit ran, a folder was made and removed, the requirement was asked 0 times); the eighth, the audit with a holding layout, is the companion.
   Off macOS `Require` is a no-op, so Linux and Windows do not change. **Not measured here:** the real layout failing on a Mac, and the measurement's own folder under the no-op requirement (the macOS job runs `DarwinLayoutTests`).
+- **6. The macOS job was red on the budget again, at 32.** `A_chain_of_links_reads_up_to_the_hop_budget_and_is_refused_one_past_it(hops: 32, reads: True)` failed on `macos-latest` (run 41309807128, head bb886ba; 621 tests, 1 failed, 590 passed, 30 skipped).
+  Item 1's reading was incomplete: the root WAS resolved once, but only for the containment compare; every request was still walked from `/` through the root's spelling, so `/var` → `/private/var` spent one hop of the request's
+  budget and a chain of exactly the budget cost 33. A request is now walked from the real root (`Path.Join(realRoot, <the part below the root>)`), so only links below the root spend it. The same shows on Linux with a root spelled
+  through a link (40 + 1): RED on Linux `A_chain_of_the_full_budget_reads_when_the_root_itself_is_spelled_through_a_link` (1 failed), GREEN with the fix (whole suite 622, 0 failed, 602 passed, 20 skipped), RED again with the fix stashed. SECURITY.md and the reader's class doc say it.
 
 **2026-11-01 (pin moved to release 105d53c).**
 - The `## Tokens` table moved from `common/test-leftovers.md` to `common/test-leftovers-detail.md` when the rule was split into a core and a detail.

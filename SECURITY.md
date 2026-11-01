@@ -29,7 +29,9 @@ Worth stating plainly, because the deployment shape decides most of the answer:
   in that rest is REFUSED (the kernel answers "not found" for `missing/..`, and "not a directory"
   for `file/..`, which is refused as well). One budget of link
   expansions covers the whole resolution: 40, or 32 on macOS, whose kernel stops a chain there with `ELOOP` (a resolver that allowed
-  more would accept a chain that the later open then fails; Windows allows 63, so 40 stays the stricter value there). Plain directories
+  more would accept a chain that the later open then fails; Windows allows 63, so 40 stays the stricter value there). The root's
+  own links (macOS's `/var` → `/private/var`) are resolved once, when the reader starts, and a request is walked from that real
+  root, so only links below the root spend the budget. Plain directories
   cost nothing, so deep paths are fine, and a
   link loop reaches the budget at once. A missing, empty or null path, a path with a NUL, or one
   longer than 32 KiB, is refused before any walking (the reader refuses a null or empty path itself,
