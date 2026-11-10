@@ -25,7 +25,7 @@ internal sealed record SourceFile(string Relative, string Absolute, SourceKind K
 /// <summary>Which files of a repository the guard reads, and which kind each is.</summary>
 internal static class GuardFiles
 {
-    private static readonly string[] NeverEntered = ["bin", "obj", "node_modules", ".git", ".claude", ".http-artifacts", "logs"];
+    private static readonly string[] NeverEntered = ["bin", "obj", "node_modules", ".git", ".claude", ".agents", ".http-artifacts", "logs"];
     private static readonly string[] ScriptExtensions = [".sh", ".ps1", ".py"];
     private static readonly string[] JavaScriptExtensions = [".mjs", ".js", ".cjs"];
     private static readonly string[] ScriptFolders = [".github/scripts/", "http/"];

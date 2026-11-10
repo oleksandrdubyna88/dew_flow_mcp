@@ -1,7 +1,7 @@
 # `http/` — the management surface's contract suite
 
 One folder per route group, per
-[`.claude/rules/shared/common/http-contracts.md`](../.claude/rules/shared/common/http-contracts.md).
+[`.agents/conventions/common/http-contracts.md`](../.agents/conventions/common/http-contracts.md).
 
 | Folder | Routes |
 |---|---|
@@ -18,7 +18,7 @@ to it is. Inventing `.http` files for it would produce a folder of nothing.
 npm ci --prefix http                                    # once per machine
 
 ASPNETCORE_URLS=http://127.0.0.1:5211 dotnet run --project src/Mcp.Host &
-node .claude/rules/shared/tools/http-run.mjs --env local --target http://127.0.0.1:5211
+node .agents/conventions/tools/http-run.mjs --env local --target http://127.0.0.1:5211
 ```
 
 The host needs no configuration for this: the management surface is anonymous, carries no secret and

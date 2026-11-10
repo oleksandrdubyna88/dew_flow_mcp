@@ -14,15 +14,15 @@ collected by the same user's next run if a run was killed, and kept so by a guar
 
 - **`tests/Mcp.Tests`** — xUnit v3 on Microsoft Testing Platform, one executable. **Never `dotnet test`** (there is no VSTest
   host; it aborts). Locally, lowered and capped:
-  `node .claude/rules/shared/tools/low-priority.mjs dotnet build dew_flow_mcp.slnx -c Debug -m:4`, then
-  `node .claude/rules/shared/tools/low-priority.mjs ./tests/Mcp.Tests/bin/Debug/net10.0/Mcp.Tests` (add
+  `node .agents/conventions/tools/low-priority.mjs dotnet build dew_flow_mcp.slnx -c Debug -m:4`, then
+  `node .agents/conventions/tools/low-priority.mjs ./tests/Mcp.Tests/bin/Debug/net10.0/Mcp.Tests` (add
   `--filter-namespace "Mcp.Tests.Leftovers"`, `--filter-class`, `--filter-method`). CI runs the Release build of the same
   executable on Linux (`build-test`), on Windows (`build-test-windows`, the whole executable) and on macOS (`build-test-macos`, `macos-latest`, Arm64: the layout self-test, the
   `Mcp.Tests.Leftovers` namespace, then the whole executable, bare — no low-priority wrapper on CI).
 - **`tests/Mcp.Tests/Leftovers/`** — the helper and everything that keeps it honest (below).
 - **`http/`** — the httpyac contract suite against a running host, run by the `contract` job (not by this executable).
 - **The janitor**, by hand on a machine that stopped running these tests:
-  `bash .claude/rules/shared/tools/janitor.sh --token mcp --dry-run` (Git for Windows' bash on Windows, never WSL's, which
+  `bash .agents/conventions/tools/janitor.sh --token mcp --dry-run` (Git for Windows' bash on Windows, never WSL's, which
   sees neither the Windows temp root nor Windows pids; forced dry-run there). `would run:` lines on stdout; exit 0 clean,
   3 something skipped, 1 a failed listing, 2 usage. `JANITOR_MIN_AGE_MINUTES` sets the age window.
 
@@ -119,7 +119,7 @@ public sealed class ExampleTests : IDisposable
 
 ## External dependencies
 
-The mounted conventions (`.claude/rules/shared`, a git submodule — **fetched by every CI job that runs these tests**; a
+The mounted conventions (`.agents/conventions`, a git submodule — **fetched by every CI job that runs these tests**; a
 missing mount FAILS the tests that read it, it is not a clean setup): the rule text and its `## Tokens` table (the guard reads the table from the rule file that holds it, found by content: `common/test-leftovers-detail.md`
 since release 105d53c, else `common/test-leftovers.md` on a mount from before the split, else one finding naming both; `dew_flow_sidecar_rust`
 has its own guard and takes the same change in its PR #66), the owner
