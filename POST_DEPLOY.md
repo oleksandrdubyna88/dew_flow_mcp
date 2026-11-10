@@ -1,6 +1,6 @@
 # Post-deploy checks — dew_flow_mcp
 
-Per [`.claude/rules/shared/common/post-deploy-checks.md`](.claude/rules/shared/common/post-deploy-checks.md).
+Per [`.agents/conventions/common/post-deploy-checks.md`](.agents/conventions/common/post-deploy-checks.md).
 
 This server is not deployed to anything: it is **installed and run** — as an HTTP/SSE endpoint a
 runtime connects to, or as a subprocess a runtime spawns. So "prod" here is the process an operator
@@ -29,7 +29,7 @@ dotnet run --project src/Mcp.Host -- --print-surface
 export EXPECTED_COMMIT=$(git rev-parse --short HEAD)
 export EXPECTED_TOOLS_HASH=<toolsHash from the line above>
 
-node .claude/rules/shared/tools/post-deploy-check.mjs --target http://127.0.0.1:5211
+node .agents/conventions/tools/post-deploy-check.mjs --target http://127.0.0.1:5211
 ```
 
 Without them item 2 compares against a value that cannot occur and item 3 against `undefined`, so

@@ -156,7 +156,7 @@ a consumer compares the string it was given rather than re-deriving it.
 ### Nothing unattended fails silently
 
 The mission is 24/7 operation, so the rules from
-[`.claude/rules/shared/common/reliability.md`](../.claude/rules/shared/common/reliability.md) are
+[`.agents/conventions/common/reliability.md`](../.agents/conventions/common/reliability.md) are
 structural here: every wait has a ceiling (above), a detached task ends in a catch-all that LOGS (the
 spool writer), client numbers are range-checked before arithmetic (the read window), and `/health`
 computes from live state so a component that died at 03:00 is visible to whatever polls at 03:05.
@@ -242,7 +242,7 @@ an executable, never through `dotnet test` (xUnit v3 on Microsoft Testing Platfo
 
 Local runs follow the shared rule `common.local-cpu-budget` (2026-10-11): at most 8 test threads, set in
 `tests/Mcp.Tests/xunit.runner.json` and copied to the output, and lowered CPU priority through
-`.claude/rules/shared/tools/low-priority.mjs`. CI is exempt and unchanged. `LocalCpuBudgetTests` checks four things:
+`.agents/conventions/tools/low-priority.mjs`. CI is exempt and unchanged. `LocalCpuBudgetTests` checks four things:
 
 - the config and its Content item;
 - the copy the running suite actually read;
@@ -257,11 +257,31 @@ killed run's folders under two keys only — scope and a `gone` owner — older 
 audit in the same fixture's `DisposeAsync` makes a run that leaves a folder it claimed a red run (the CI step "The audit fails
 a run that leaves a claimed folder" runs `LeftoversSelfTest` under `MCP_LEFTOVERS_SELFTEST` and asserts exactly that); a guard
 test over `tests/`, `src/`, the scripts and the workflows is red on each of the rule's eight classes, on a token that is not
-this repository's registered row, and on a scan of nothing. Every CI job fetches the `.claude/rules/shared` submodule
+this repository's registered row, and on a scan of nothing. Every CI job fetches the `.agents/conventions` submodule
 (the tests read the mounted rule), and `build-test-windows` runs the same executable on Windows. The host-wide janitor,
-`bash .claude/rules/shared/tools/janitor.sh --token mcp --dry-run`, is run by hand on a machine that stopped running these
+`bash .agents/conventions/tools/janitor.sh --token mcp --dry-run`, is run by hand on a machine that stopped running these
 tests (Git for Windows' bash on Windows, never WSL's; forced dry-run there; `would run:` on stdout; exit 0 clean, 3 something
 skipped, 1 a failed listing, 2 usage). Detail: [module_tests.md](module_tests.md).
+
+### Agent instructions (the shared rules and the Claude adapter)
+
+The family's shared rules are the `dew_flow_conventions` submodule at `.agents/conventions`, pinned at its
+`release`. They are read through its resolver (`.agents/conventions/tools/rules.mjs`), as `AGENTS.md` and
+`.agents/conventions/ENTRY.md` say. This repository's own instructions are `.agents/PROJECT.md`, and the root
+`CLAUDE.md` is only `@AGENTS.md`. The mount moved there from `.claude/rules/shared` on 2026-11-10 (story 3.M of the
+conventions rollout plan).
+
+Claude Code gets its rules through the **adapter** in `.claude/`: five hook files, byte-identical to the release's
+`settings/hooks`, registered in `.claude/settings.json`, whose permissions are the family template's.
+- `load-instructions.mjs` (SessionStart) puts the resolver's every-task rules into the session, or says
+  INCOMPLETE, with the restore commands, when the mount is missing.
+- `ensure-user-guard.mjs` (SessionStart) installs the user-level subagent-model guard into `~/.claude`.
+- `build-flags.mjs` (PreToolUse on Bash/PowerShell) refuses a .NET build without `-m:4`.
+- `subagent-model.mjs` (PreToolUse on Agent/Task) refuses a subagent launch without a model alias.
+
+The hooks are the conventions repository's code, and its own tests cover them. CI's plans job runs `adapter-check`,
+which fails when a copy drifts or a registration is missing, and `pin-check`, which fails when the pin lags `release`.
+A pin bump recopies the hooks.
 
 ### Public presentation
 

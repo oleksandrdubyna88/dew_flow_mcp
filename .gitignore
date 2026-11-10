@@ -59,7 +59,7 @@ CodeCoverage/
 TestResult.xml
 nunit-*.xml
 
-# Host logs: a folder per day, a file per run (.claude/rules/shared/common/logging-serilog.md)
+# Host logs: a folder per day, a file per run (.agents/conventions/common/logging-serilog.md)
 logs/
 
 # Node dependencies of the .http contract suite, and what a run of it produces. The suite and its

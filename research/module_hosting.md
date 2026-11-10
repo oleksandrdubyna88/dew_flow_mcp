@@ -140,9 +140,9 @@ Three properties of the log sweep worth knowing:
 Startup, not a timer: it is cheap, idempotent, and a host that never restarts is not producing new files
 either. Pinned by `LogRetentionTests`.
 
-`logs/` is git-ignored. The rule lives at `.claude/rules/shared/common/logging-serilog.md` — **one shared
+`logs/` is git-ignored. The rule lives at `.agents/conventions/common/logging-serilog.md` — **one shared
 copy, not a mirror**: since 2026-08-16 every `dew_flow_*` repository mounts `dew_flow_conventions` as a
-submodule at `.claude/rules/shared/`, which is what ended the era of fixing the same timestamp bug in three
+submodule at `.agents/conventions/`, which is what ended the era of fixing the same timestamp bug in three
 places.
 
 ## Health

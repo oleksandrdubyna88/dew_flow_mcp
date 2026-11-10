@@ -6,7 +6,7 @@ using Xunit;
 namespace Mcp.Tests;
 
 /// <summary>Local test runs take at most 8 threads and run at lowered CPU priority — the family rule
-/// <c>common.local-cpu-budget</c> (<c>.claude/rules/shared/common/local-cpu-budget.md</c>). Measured
+/// <c>common.local-cpu-budget</c> (<c>.agents/conventions/common/local-cpu-budget.md</c>). Measured
 /// 2026-10-10 on a 24-thread workstation running several agent sessions: a runner left at its default
 /// takes one worker per CPU and holds the machine at 100 % while everything else lags.
 ///

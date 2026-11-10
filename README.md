@@ -93,13 +93,30 @@ A duplicate tool name throws at startup, naming both providers, rather than sile
 ## Build and test
 
 ```bash
-node .claude/rules/shared/tools/low-priority.mjs dotnet build dew_flow_mcp.slnx -m:4
-node .claude/rules/shared/tools/low-priority.mjs ./tests/Mcp.Tests/bin/Debug/net10.0/Mcp.Tests.exe
+node .agents/conventions/tools/low-priority.mjs dotnet build dew_flow_mcp.slnx -m:4
+node .agents/conventions/tools/low-priority.mjs ./tests/Mcp.Tests/bin/Debug/net10.0/Mcp.Tests.exe
 ```
 
 Local runs take at most 8 test threads (`tests/Mcp.Tests/xunit.runner.json`, copied to the output) and run at
 lowered CPU priority through the shared rules' `low-priority.mjs` (BelowNormal on Windows, nice 19 elsewhere;
-nothing is lowered under `CI`). Run `git submodule update --init` first, so `.claude/rules/shared` exists.
+nothing is lowered under `CI`). Run `git submodule update --init` first, so `.agents/conventions` exists,
+then `npm ci --ignore-scripts --prefix .agents/conventions` for the resolver's packages.
+
+**A clone from before 2026-11-10.** The shared rules moved from `.claude/rules/shared` to `.agents/conventions`.
+A pull does not remove the old folder, and the resolver then refuses the non-empty `.claude/rules` (instruction
+loading stays INCOMPLETE). Once, after the pull: check that the old copy holds no local change (the first command
+must print nothing), and move anything else you keep under `.claude/rules` to `.agents/rules` (the resolver reads
+local rules only there). Then remove the old folder and set up the new path. `git submodule deinit` does not
+work here: after the pull git no longer knows the old path.
+
+```bash
+git -C .claude/rules/shared status --porcelain   # must print nothing; save anything it lists first
+ls -A .claude/rules                              # must print only: shared — move anything else to .agents/rules first
+rm -rf .claude/rules
+git submodule sync
+git submodule update --init .agents/conventions
+npm ci --ignore-scripts --prefix .agents/conventions
+```
 
 Tests are **xUnit v3 on Microsoft Testing Platform**: there is no VSTest testhost, so `dotnet test` aborts
 with a `testhost.deps.json` error — a tooling mismatch, not a test failure. Run the executable. Filters are
@@ -107,7 +124,7 @@ MTP syntax: `--filter-class`, `--filter-method`, `--filter-namespace`.
 
 Tests never make a temp folder by hand: a scratch folder comes from `OwnedScope.Dir("what")` (`tests/Mcp.Tests/Leftovers`), is named
 `testsToDelete-<owner>-mcp-<what>-<id>`, and a run that leaves one fails. After a killed run, `bash
-.claude/rules/shared/tools/janitor.sh --token mcp --dry-run` lists what is left (see [research/module_tests.md](research/module_tests.md)).
+.agents/conventions/tools/janitor.sh --token mcp --dry-run` lists what is left (see [research/module_tests.md](research/module_tests.md)).
 
 ## Documentation
 
