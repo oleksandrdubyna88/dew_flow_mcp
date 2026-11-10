@@ -105,7 +105,9 @@ then `npm ci --ignore-scripts --prefix .agents/conventions` for the resolver's p
 **A clone from before 2026-11-10.** The shared rules moved from `.claude/rules/shared` to `.agents/conventions`.
 A pull does not remove the old folder, and the resolver then refuses the non-empty `.claude/rules` (instruction
 loading stays INCOMPLETE). Once, after the pull: check that the old copy holds no local change (the first command
-must print nothing), then remove it and set up the new path.
+must print nothing), and move anything else you keep under `.claude/rules` to `.agents/rules` (the resolver reads
+local rules only there). Then remove the old folder and set up the new path. `git submodule deinit` does not
+work here: after the pull git no longer knows the old path.
 
 ```bash
 git -C .claude/rules/shared status --porcelain   # must print nothing; save anything it lists first

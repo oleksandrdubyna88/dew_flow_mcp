@@ -263,6 +263,26 @@ this repository's registered row, and on a scan of nothing. Every CI job fetches
 tests (Git for Windows' bash on Windows, never WSL's; forced dry-run there; `would run:` on stdout; exit 0 clean, 3 something
 skipped, 1 a failed listing, 2 usage). Detail: [module_tests.md](module_tests.md).
 
+### Agent instructions (the shared rules and the Claude adapter)
+
+The family's shared rules are the `dew_flow_conventions` submodule at `.agents/conventions`, pinned at its
+`release`. They are read through its resolver (`.agents/conventions/tools/rules.mjs`), as `AGENTS.md` and
+`.agents/conventions/ENTRY.md` say. This repository's own instructions are `.agents/PROJECT.md`, and the root
+`CLAUDE.md` is only `@AGENTS.md`. The mount moved there from `.claude/rules/shared` on 2026-11-10 (story 3.M of the
+conventions rollout plan).
+
+Claude Code gets its rules through the **adapter** in `.claude/`: five hook files, byte-identical to the release's
+`settings/hooks`, registered in `.claude/settings.json`, whose permissions are the family template's.
+- `load-instructions.mjs` (SessionStart) puts the resolver's every-task rules into the session, or says
+  INCOMPLETE, with the restore commands, when the mount is missing.
+- `ensure-user-guard.mjs` (SessionStart) installs the user-level subagent-model guard into `~/.claude`.
+- `build-flags.mjs` (PreToolUse on Bash/PowerShell) refuses a .NET build without `-m:4`.
+- `subagent-model.mjs` (PreToolUse on Agent/Task) refuses a subagent launch without a model alias.
+
+The hooks are the conventions repository's code, and its own tests cover them. CI's plans job runs `adapter-check`,
+which fails when a copy drifts or a registration is missing, and `pin-check`, which fails when the pin lags `release`.
+A pin bump recopies the hooks.
+
 ### Public presentation
 
 This repository is public, and since 2026-08-17 that is a stated position rather than a visibility flag.
