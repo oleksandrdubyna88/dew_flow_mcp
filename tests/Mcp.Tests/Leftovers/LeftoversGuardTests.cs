@@ -26,6 +26,24 @@ public sealed class LeftoversGuardTests : IDisposable
         var d = new TheoryData<string, string, string, string>();
         void Add(string id, string file, string text, string expected) => d.Add(Fx(id), file, Fx(text), expected);
 
+        RawTempAndWorktreeRows(Add);
+        DockerAndReaperRows(Add);
+        ExemptionRows(Add);
+        CommentRows(Add);
+        LegacyNameRows(Add);
+        OwnerBlindWordRows(Add);
+        FoldedLiteralRows(Add);
+        ScriptRows(Add);
+
+        // The marker and shared-store scenarios live in one table, GuardScenarios, which the differential test against the mounted Node guard reads too.
+        foreach (var scenario in GuardScenarios.All) d.Add(scenario.Id, scenario.File, scenario.Text, scenario.Expected);
+
+        return d;
+    }
+
+    /// <summary>raw-temp and raw-worktree.</summary>
+    private static void RawTempAndWorktreeRows(Action<string, string, string, string> Add)
+    {
         // raw-temp
         Add("cs create-temp-subdirectory", "tests/X/A.cs", "var d = Directory.Create§TempSubdirectory(\"x\");", "raw-temp");
         Add("cs get-temp-path without a call", "tests/X/A.cs", "var f = Path.GetTemp§Path;", "raw-temp");
@@ -48,7 +66,11 @@ public sealed class LeftoversGuardTests : IDisposable
         // raw-worktree
         Add("cs work§tree add", "tests/X/A.cs", "Run(\"git\", \"work§tree\", \"add\", dir);", "raw-worktree");
         Add("sh git work§tree add", "a.sh", "git work§tree add x", "raw-worktree");
+    }
 
+    /// <summary>docker-run, docker-name, ryuk-off.</summary>
+    private static void DockerAndReaperRows(Action<string, string, string, string> Add)
+    {
         // docker-run and docker-name
         Add("docker r§un without --rm", ".github/workflows/w.yml", "      - run: docker r§un -d img", "docker-run");
         Add("docker r§un --rm owner-form name", ".github/workflows/w.yml", $"      - run: docker r§un --rm --na§me {P}-u1000-mcp-x-abc123 img", "");
@@ -67,17 +89,13 @@ public sealed class LeftoversGuardTests : IDisposable
         Add("COMPOSE_PROJECT§_NAME", ".github/workflows/w.yml", "        COMPOSE_PROJECT§_NAME: cache", "docker-name");
         Add("docker bu§ild -t", "a.sh", "docker bu§ild -t cache .", "docker-name");
 
-        // shared-store, ryuk-off
-        Add("TRUN§CATE TABLE", ".github/workflows/w.yml", "      - run: psql -c \"TRUN§CATE TABLE users\"", "shared-store");
-        Add("DR§OP DATABASE", "a.sh", "psql -c 'DR§OP DATABASE shop'", "shared-store");
-        Add("DR§OP TABLE of an owner-form name", "a.sh", $"psql -c 'DR§OP TABLE {P}-u1000-mcp-t-abc123'", "");
-        Add("FLUSH§ALL", "a.sh", "redis-cli FLUSH§ALL", "shared-store");
-        Add("deleteMany all", ".github/scripts/a.mjs", "await coll.delete§Many({});", "shared-store");
-        Add("the prose word truncated", "tests/X/A.cs", "var s = \"the output was truncated\";", "");
-        Add("a commented truncate", "tests/X/A.cs", "// TRUN§CATE TABLE users", "");
         Add("ryuk off", ".github/workflows/w.yml", "        TESTCONTAINERS_RYUK_DISABLED: \"true\"", "ryuk-off");
         Add("ryuk on", ".github/workflows/w.yml", "        TESTCONTAINERS_RYUK_DISABLED: \"false\"", "");
+    }
 
+    /// <summary>The exemption marker of the class kinds.</summary>
+    private static void ExemptionRows(Action<string, string, string, string> Add)
+    {
         // exemptions
         Add("exempt raw-temp", "tests/X/A.cs", $"// {Marker} raw-temp — the one place a test learns the temp root\nvar t = Path.GetTemp§Path();", "");
         Add("exempt raw-temp on the same line", "tests/X/A.cs", $"var t = Path.GetTemp§Path(); // {Marker} raw-temp — the one place a test learns the temp root", "");
@@ -93,7 +111,11 @@ public sealed class LeftoversGuardTests : IDisposable
         Add("exempt shared-store without a lock", "a.sh", $"-- {Marker} shared-store — pg:5432 users; reuse intentional\npsql -c 'TRUN§CATE TABLE users'", "exemption,shared-store");
         Add("ryuk-off under another class's exemption", ".github/workflows/w.yml", $"        # {Marker} shared-store — pg:5432 users; reuse intentional; lock: pg_advisory_lock(42)\n        TESTCONTAINERS_RYUK_DISABLED: \"true\"", "ryuk-off");
         Add("ryuk-off under its own exemption", ".github/workflows/w.yml", $"        # {Marker} ryuk-off — the reaper is slow on this runner\n        TESTCONTAINERS_RYUK_DISABLED: \"true\"", "exemption,ryuk-off");
+    }
 
+    /// <summary>A comment is not read.</summary>
+    private static void CommentRows(Action<string, string, string, string> Add)
+    {
         // comments
         Add("a commented-out raw-temp", "tests/X/A.cs", "// Directory.Create§TempSubdirectory(\"x\")", "");
         Add("a doc-commented raw-temp", "tests/X/A.cs", "/// Directory.Create§TempSubdirectory(\"x\")", "");
@@ -108,7 +130,11 @@ public sealed class LeftoversGuardTests : IDisposable
         Add("a slash-star inside a line comment opens nothing", "tests/X/A.cs", "// see /* here\nvar t = Path.GetTemp§Path();", "raw-temp");
         Add("a block comment in mjs", ".github/scripts/a.mjs", "/* os.tmp§dir() */", "");
         Add("a template string holding a slash-star in mjs", ".github/scripts/a.mjs", "const g = `src/**/*.cs`; const d = os.tmp§dir();", "raw-temp");
+    }
 
+    /// <summary>legacy-name, owner-blind in .cs (decision 3).</summary>
+    private static void LegacyNameRows(Action<string, string, string, string> Add)
+    {
         // legacy-name, owner-blind in .cs (decision 3)
         Add("legacy literal", "tests/X/A.cs", $"var n = \"{P}-mcp-x-abc123\";", "legacy-name,owner-blind");
         Add("legacy literal exempted", "tests/X/A.cs", $"// {Marker} legacy-name — a fixture of the form before the owner\nvar n = \"{P}-mcp-x-abc123\";", "owner-blind");
@@ -131,7 +157,11 @@ public sealed class LeftoversGuardTests : IDisposable
         Add("a commented reference to Owned.Prefix", "tests/X/A.cs", "// var p = Owned.Prefix + what;", "");
         Add("a reference to Owned.NameBase is how a test builds a name", "tests/X/A.cs", "var p = Owned.NameBase + what;", "");
         Add("src is read for the literal classes only", "src/Y/Y.cs", "var d = Directory.Create§TempSubdirectory(\"x\");", "");
+    }
 
+    /// <summary>owner-blind in .cs: the word itself, whatever follows it.</summary>
+    private static void OwnerBlindWordRows(Action<string, string, string, string> Add)
+    {
         // owner-blind in .cs: the word itself, whatever follows it (a glob, a class, a pattern, a bare word)
         Add("a directory listing by the bare word and a star", "tests/X/A.cs", $"foreach (var d in Directory.GetDirectories(Owned.TempRoot(), \"{P}*\")) Directory.Delete(d, true);", "owner-blind,raw-temp");
         Add("a pattern over the bare word with a question mark", "tests/X/A.cs", $"var hits = Directory.GetDirectories(root, \"{P}?\");", "owner-blind");
@@ -145,7 +175,11 @@ public sealed class LeftoversGuardTests : IDisposable
         Add("the owner environment variable in a call", "tests/X/A.cs", "var v = Environment.GetEnvironmentVariable(\"TESTSTODELETE_RUN\");", "");
         Add("a lower-case environment name is not the variable", "tests/X/A.cs", $"var v = \"{Lower}_run\";", "legacy-name,owner-blind");
         Add("the bare word in a script is the classifier's, not the C# rule's", "a.sh", $"echo {P}", "");
+    }
 
+    /// <summary>The guard reads a literal the way the compiler does; Owned.TempRoot outside the helper.</summary>
+    private static void FoldedLiteralRows(Action<string, string, string, string> Add)
+    {
         // the guard reads a literal the way the compiler does: a word cannot be hidden by how it is spelled
         var head = P[..7];
         var tail = P[7..];
@@ -180,7 +214,11 @@ public sealed class LeftoversGuardTests : IDisposable
         Add("Owned.TempRoot in the helper's folder", "tests/Mcp.Tests/Leftovers/X.cs", "var root = Owned.TempRoot();", "");
         Add("a read-only use of Owned.TempRoot, exempted with a reason", "tests/X/A.cs", $"// {Marker} raw-temp — a read-only use, nothing is made there\nvar root = Owned.TempRoot();", "");
         Add("a commented Owned.TempRoot", "tests/X/A.cs", "// var root = Owned.TempRoot();", "");
+    }
 
+    /// <summary>Scripts, judged by the shipped classifier through node.</summary>
+    private static void ScriptRows(Action<string, string, string, string> Add)
+    {
         // scripts, judged by the shipped classifier through node
         Add("sh rm -rf glob", "a.sh", $"rm -rf \"$TMPDIR\"/{P}-*", "owner-blind");
         Add("sh find -name class", "a.sh", $"find /tmp -name '{Lower}[-_]*' -delete", "owner-blind");
@@ -198,9 +236,8 @@ public sealed class LeftoversGuardTests : IDisposable
         Add("workflow run block", ".github/workflows/w.yml", $"      - run: rm -rf /tmp/{P}-*", "owner-blind");
         Add("a name, not a pattern", "a.sh", $"echo \"{P}-u1000-mcp-x-abc123\"", "");
         Add("a script comment is not read", "a.sh", $"# rm -rf /tmp/{P}-*", "");
-
-        return d;
     }
+
 
     [Theory]
     [MemberData(nameof(BreakIt))]
@@ -212,6 +249,62 @@ public sealed class LeftoversGuardTests : IDisposable
 
         report.FilesScanned.Should().Be(1, id);
         Classes(report).Should().Be(expected, $"{id}: {Show(report)}");
+    }
+
+    [Theory]
+    [InlineData("the per-test databases live and die with", "must name what it lives and dies with")]
+    [InlineData("the per-test databases lives and dies with the", "must name what it lives and dies with")]
+    [InlineData("the per-test databases are removed by the PostgresFixture", "must name what it lives and dies with")]
+    [InlineData("todo", "carries no reason")]
+    [InlineData("", "carries no reason")]
+    public void A_container_scoped_marker_that_is_refused_says_what_is_missing_not_that_its_kind_is_unknown(string reason, string sentence)
+    {
+        var root = Tree(("tests/X/A.cs", $"// {Marker} container-scoped — {reason}\nvar a = 1;"));
+
+        var finding = LeftoversGuard.Scan(root, RepositoryRoot.Path).Findings.Should().ContainSingle().Subject;
+
+        finding.Class.Should().Be("exemption");
+        finding.Line.Should().Be(1);
+        finding.Text.Should().Contain("`container-scoped`").And.Contain(sentence).And.NotContain("unknown class");
+    }
+
+    [Fact]
+    public void A_kind_that_only_looks_like_container_scoped_is_still_an_unknown_class()
+    {
+        var root = Tree(("tests/X/A.cs", $"// {Marker} container-scope — the per-test databases live and die with the PostgresFixture\nvar a = 1;"));
+
+        LeftoversGuard.Scan(root, RepositoryRoot.Path).Findings.Should().ContainSingle().Which.Text.Should().Contain("unknown class `container-scope`");
+    }
+
+    [Fact]
+    public void A_teardown_the_marker_clears_is_still_reported_when_a_reset_stands_beside_it_and_names_the_reset()
+    {
+        var root = Tree(("a.sh", $"# {Marker} container-scoped — the per-test databases live and die with the PostgresFixture container\npsql -c 'DR§OP DATABASE a; TRUN§CATE TABLE users'\n"));
+
+        var finding = LeftoversGuard.Scan(root, RepositoryRoot.Path).Findings.Should().ContainSingle().Subject;
+
+        finding.Class.Should().Be("shared-store");
+        finding.Text.Should().Contain(Fx("TRUN§CATE")).And.NotContain(Fx("DR§OP"), "the first hit that is not a teardown is what is reported");
+    }
+
+    [Fact]
+    public void A_second_flush_is_reported_when_the_first_is_the_teardown()
+    {
+        var root = Tree(("a.sh", $"# {Marker} container-scoped — the per-test databases live and die with the PostgresFixture container\nredis-cli FLUSH§DB; redis-cli FLUSH§ALL\n"));
+
+        var finding = LeftoversGuard.Scan(root, RepositoryRoot.Path).Findings.Should().ContainSingle().Subject;
+
+        finding.Class.Should().Be("shared-store");
+        finding.Text.Should().Be("`" + Fx("FLUSH§ALL") + "`");
+    }
+
+    [Fact]
+    public void The_refusal_of_a_container_scoped_marker_without_an_owner_has_the_node_guards_sentence()
+    {
+        var root = Tree(("tests/X/A.cs", $"// {Marker} container-scoped — the per-test databases live and die with\nvar a = 1;"));
+
+        LeftoversGuard.Scan(root, RepositoryRoot.Path).Findings.Should().ContainSingle().Which.Text.Should().Be(
+            "the exemption of `container-scoped` must name what it lives and dies with: `lives and dies with` or `live and die with`, then an optional article and an owner of two characters or more that is not an article and does not start with an article followed by punctuation (`the PostgresFixture container`, not `the-fixture`)");
     }
 
     [Fact]
@@ -578,17 +671,101 @@ public sealed class LeftoversGuardTests : IDisposable
             console.log(resolveRule(repo) ?? "");
             """;
         var module = new Uri(Path.GetFullPath(Path.Combine(RepositoryRoot.Path, ".agents/conventions/tools/leftovers-check.mjs"))).AbsoluteUri;
-        var start = new ProcessStartInfo("node") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
-        foreach (var argument in new[] { "--input-type=module", "-e", program, "--", module, mount }) start.ArgumentList.Add(argument);
-        using var process = Process.Start(start) ?? throw new InvalidOperationException("node did not start");
-        var output = process.StandardOutput.ReadToEndAsync();
-        var errors = process.StandardError.ReadToEndAsync();
-        process.WaitForExit(TimeSpan.FromMinutes(2)).Should().BeTrue("node must answer in two minutes");
-        process.WaitForExit();
-        process.ExitCode.Should().Be(0, "node said: " + errors.GetAwaiter().GetResult());
-        var picked = output.GetAwaiter().GetResult().Trim().Replace('\\', '/');
+        var picked = RunNode(program, [module, mount], TimeSpan.FromMinutes(2)).Trim().Replace('\\', '/');
         var prefix = mount.Replace('\\', '/').TrimEnd('/') + "/";
         return picked.StartsWith(prefix, StringComparison.Ordinal) ? picked[prefix.Length..] : "outside";
+    }
+
+    /// <summary><c>node --input-type=module -e &lt;program&gt; -- &lt;arguments&gt;</c>: its standard output. The test FAILS when node does not answer within
+    /// <paramref name="timeout"/> or exits non-zero. <paramref name="timedOut"/> is called with the process id when the wait ran out, before the
+    /// assertion fails (a test seam: it is how a test learns the child was still running).</summary>
+    internal static string RunNode(string program, string[] arguments, TimeSpan timeout, Action<int>? timedOut = null, string? input = null)
+    {
+        using var process = Process.Start(NodeStart(program, arguments, input is not null)) ?? throw new InvalidOperationException("node did not start");
+        try
+        {
+            return Answer(process, timeout, timedOut, input);
+        }
+        finally
+        {
+            EndIfRunning(process); // a node that never answered fails the assertion above and must not outlive it
+        }
+    }
+
+    private static string Answer(Process process, TimeSpan timeout, Action<int>? timedOut, string? input)
+    {
+        var output = process.StandardOutput.ReadToEndAsync();
+        var errors = process.StandardError.ReadToEndAsync();
+        Feed(process, input);
+        var answered = process.WaitForExit(timeout);
+        if (!answered) timedOut?.Invoke(process.Id);
+        answered.Should().BeTrue("node must answer in " + timeout);
+        process.WaitForExit();
+        process.ExitCode.Should().Be(0, "node said: " + errors.GetAwaiter().GetResult());
+        return output.GetAwaiter().GetResult();
+    }
+
+    /// <summary>The child and everything it started, ended and reaped; nothing when it already exited.</summary>
+    private static void EndIfRunning(Process process)
+    {
+        if (process.HasExited) return;
+        process.Kill(entireProcessTree: true);
+        process.WaitForExit();
+    }
+
+    /// <summary>The program's standard input, written and closed (nothing to write: closed, so a program that reads it ends).</summary>
+    private static void Feed(Process process, string? input)
+    {
+        if (input is null) return;
+        process.StandardInput.Write(input);
+        process.StandardInput.Close();
+    }
+
+    private static ProcessStartInfo NodeStart(string program, string[] arguments, bool withInput)
+    {
+        var start = new ProcessStartInfo("node") { RedirectStandardInput = withInput, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
+        foreach (var argument in new[] { "--input-type=module", "-e", program, "--" }.Concat(arguments)) start.ArgumentList.Add(argument);
+        return start;
+    }
+
+    [Fact]
+    public void A_node_that_does_not_answer_in_time_fails_the_assertion_and_is_not_left_running()
+    {
+        // setInterval keeps a live event-loop handle: an unresolved promise alone lets node exit, and this child must HANG.
+        var pid = 0;
+        ProbeState? atTimeout = null;
+        var hang = () => RunNode("setInterval(() => {}, 1000);", [], TimeSpan.FromSeconds(2), id =>
+        {
+            pid = id;
+            atTimeout = Liveness.ProbeProcess(id).State;
+        });
+        try
+        {
+            hang.Should().Throw<Xunit.Sdk.XunitException>("a node that never answers fails the assertion");
+
+            pid.Should().NotBe(0, "the timeout path was reached");
+            atTimeout.Should().Be(ProbeState.Live, "the child was still running when the timeout came — this test hung it on purpose");
+            Liveness.ProbeProcess(pid).State.Should().Be(ProbeState.Dead, "the child is not left running after the assertion failed");
+        }
+        finally
+        {
+            KillIfRunning(pid); // the test itself leaves nothing, whatever the helper did
+        }
+    }
+
+    private static void KillIfRunning(int pid)
+    {
+        if (pid == 0) return;
+        try
+        {
+            using var left = Process.GetProcessById(pid);
+            left.Kill(entireProcessTree: true);
+            left.WaitForExit();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            // Not there any more: the case this test hopes for.
+        }
     }
 
     [Theory]

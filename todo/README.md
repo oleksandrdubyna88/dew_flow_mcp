@@ -14,6 +14,7 @@ Definition of Done.
 | plan | status | scope |
 |---|---|---|
 | [PLAN_mcp_product.md](PLAN_mcp_product.md) | **Phase 3 shipped 2026-08-17**; inversion and both transports built and parity-tested; the tool set is one placeholder | What remains: the three tool families and HTTP auth. Public-repository hygiene is **done** — LICENSE, NOTICE, THIRD-PARTY-NOTICES, README, VERSIONING, CONTRIBUTING, SECURITY, and an explicit `<Version>`; taken first because the repository was already public with no licence, which is "all rights reserved" by silence. Usage metering shipped earlier (see below). Of the rest, the `rt_` family is unblocked and lives here; `rag_`/`graf_` are gated on `dew_flow_rag_qln` supplying `IToolProvider` implementations, which it does not yet |
+| [PLAN_F42_template_container_scoped.md](PLAN_F42_template_container_scoped.md) | **epoch 1 open, 2026-11-16 (plan gate proceed); built on the branch, before its code gate.** F42: the C# template accepts the `container-scoped` marker as the Node guard does after F41, and benchmark's notes N1–N5 on copied template files are reproduced, then fixed or recorded | `tests/Mcp.Tests/Leftovers/`, `tests/Mcp.Tests/DirectoryLinks.cs` |
 
 ## Promoted
 

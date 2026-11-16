@@ -89,6 +89,237 @@ public sealed class LeftoversAuditTests : IDisposable
     }
 
 
+    // ---- N5 (benchmark's E6.S2): a temp root that exists but cannot be reached must never read as "nothing claimed" ----------------
+
+    [Fact]
+    public void A_temp_root_that_exists_but_cannot_be_listed_is_not_a_clean_audit()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip(WindowsReason);
+            return;
+        }
+
+        if (Environment.IsPrivilegedProcess) Assert.Skip(PrivilegedReason);
+        var tmp = _owned.Dir("audit-unlistable-tmp");
+        Plant(tmp, Owned.NameFor("claimed"), Owner.This);
+        File.SetUnixFileMode(tmp, UnixFileMode.None);
+        try
+        {
+            var discover = () => LeftoversAudit.ClaimedBy(tmp, Owner.This, Mine, NoEnv);
+
+            discover.Should().Throw<LeftoversAuditException>("the root cannot be read, so nothing can be said about what this run left in it")
+                .Which.Message.Should().Contain(tmp).And.Contain("UnauthorizedAccessException");
+        }
+        finally
+        {
+            File.SetUnixFileMode(tmp, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    [Fact]
+    public void A_temp_root_beneath_a_parent_that_cannot_be_traversed_is_not_a_missing_one()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip(WindowsReason);
+            return;
+        }
+
+        if (Environment.IsPrivilegedProcess) Assert.Skip(PrivilegedReason);
+        var parent = _owned.Dir("audit-untraversable-parent");
+        var tmp = Path.Combine(parent, "root");
+        Directory.CreateDirectory(tmp);
+        var claimed = Plant(tmp, Owned.NameFor("claimed"), Owner.This);
+        File.SetUnixFileMode(parent, UnixFileMode.None);
+        try
+        {
+            var discover = () => LeftoversAudit.ClaimedBy(tmp, Owner.This, Mine, NoEnv);
+
+            discover.Should().Throw<LeftoversAuditException>("a root nobody can reach is not a root that is not there").Which.Message.Should().Contain(tmp);
+        }
+        finally
+        {
+            File.SetUnixFileMode(parent, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        Directory.Exists(claimed).Should().BeTrue("with the mode back the claimed folder is where it was: nothing here removed it");
+    }
+
+    [Fact]
+    public void A_temp_root_that_is_a_link_to_a_folder_beneath_a_parent_that_cannot_be_traversed_is_not_a_missing_one()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip(WindowsReason);
+            return;
+        }
+
+        if (Environment.IsPrivilegedProcess) Assert.Skip(PrivilegedReason);
+        var parent = _owned.Dir("audit-link-untrav-parent");
+        var target = Path.Combine(parent, "root");
+        Directory.CreateDirectory(target);
+        var linkParent = _owned.Dir("audit-link-holder");
+        var link = Path.Combine(linkParent, "root-link");
+        Directory.CreateSymbolicLink(link, target);
+        File.SetUnixFileMode(parent, UnixFileMode.None);
+        try
+        {
+            var discover = () => LeftoversAudit.ClaimedBy(link, Owner.This, Mine, NoEnv);
+
+            discover.Should().Throw<LeftoversAuditException>("the link's final target is unreachable, which is not the same as missing").Which.Message.Should().Contain(link);
+        }
+        finally
+        {
+            File.SetUnixFileMode(parent, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    [Fact]
+    public void A_temp_root_that_is_a_link_to_nothing_is_missing()
+    {
+        if (OperatingSystem.IsWindows()) Assert.Skip(WindowsReason);
+        var holder = _owned.Dir("audit-dangling-holder");
+        var link = Path.Combine(holder, "root-link");
+        Directory.CreateSymbolicLink(link, Path.Combine(holder, "no-such-target"));
+
+        LeftoversAudit.ClaimedBy(link, Owner.This, Mine, NoEnv).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void A_temp_root_whose_path_runs_through_a_file_is_missing_not_unreachable()
+    {
+        if (OperatingSystem.IsWindows()) Assert.Skip(WindowsReason);
+        var folder = _owned.Dir("audit-notdir");
+        var file = Path.Combine(folder, "a-file");
+        File.WriteAllText(file, "x");
+
+        LeftoversAudit.ClaimedBy(Path.Combine(file, "root"), Owner.This, Mine, NoEnv).Should().BeEmpty("ENOTDIR says no such root");
+    }
+
+    [Fact]
+    public void A_process_that_writes_the_runs_record_does_not_touch_the_root_at_all()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip(WindowsReason);
+            return;
+        }
+
+        if (Environment.IsPrivilegedProcess) Assert.Skip(PrivilegedReason);
+        var parent = _owned.Dir("audit-runrec-untrav");
+        var tmp = Path.Combine(parent, "root");
+        Directory.CreateDirectory(tmp);
+        using var sibling = LiveProcess.Start();
+        string? Env(string name) => name == "TESTSTODELETE_RUN" ? sibling.Record().Format() : null;
+        File.SetUnixFileMode(parent, UnixFileMode.None);
+        try
+        {
+            var discover = () => LeftoversAudit.ClaimedBy(tmp, Owner.This, Mine, Env);
+
+            discover.Should().NotThrow("its folders are in the registry; the root is not its to read").Subject.Should().BeEmpty();
+        }
+        finally
+        {
+            File.SetUnixFileMode(parent, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    [Fact]
+    public void An_audit_that_cannot_read_the_root_still_reports_what_the_registry_holds()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip(WindowsReason);
+            return;
+        }
+
+        if (Environment.IsPrivilegedProcess) Assert.Skip(PrivilegedReason);
+        var parent = _owned.Dir("audit-registry-untrav");
+        var tmp = Path.Combine(parent, "root");
+        Directory.CreateDirectory(tmp);
+        var leaked = OwnedDir.Create("leaked", _owned.Dir("audit-registry-holder"));
+        File.SetUnixFileMode(parent, UnixFileMode.None);
+        try
+        {
+            var run = () => LeftoversAudit.Run(tmp, Owner.This, [leaked], Mine, NoEnv);
+
+            var error = run.Should().Throw<LeftoversAuditException>().Which;
+            error.NeverDisposed.Should().Equal([leaked.Path]); // the undisposed folder is still named
+            error.Message.Should().StartWith("mcp tests: this run left 1 folder(s) it claimed — 1 never disposed").And.Contain(tmp);
+        }
+        finally
+        {
+            File.SetUnixFileMode(parent, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            leaked.Dispose();
+        }
+    }
+
+    [Fact]
+    public void The_root_is_listed_lazily_so_entries_before_a_failure_are_judged_and_the_failure_names_the_root()
+    {
+        var tmp = _owned.Dir("audit-lazy-tmp");
+        var me = Owner.This;
+        var first = Plant(tmp, Owned.NameFor("lazy-a"), me);
+        var second = Plant(tmp, Owned.NameFor("lazy-b"), me);
+        var judged = 0;
+        IEnumerable<FileSystemInfo> Listing(string root)
+        {
+            yield return new DirectoryInfo(first);
+            yield return new DirectoryInfo(second);
+            throw new IOException("the listing broke halfway");
+        }
+
+        var discover = () => LeftoversAudit.Discover(tmp, me, _ => { judged++; return true; }, NoEnv, listing: Listing);
+
+        discover.Should().Throw<LeftoversAuditException>().Which.Message.Should().Contain(tmp).And.Contain("the listing broke halfway");
+        judged.Should().BeGreaterThan(0, "the entries listed before the failure were already being judged: the listing is not read to the end first");
+    }
+
+    [Fact]
+    public void A_link_that_does_not_resolve_to_another_path_is_an_audit_error_not_a_recursion()
+    {
+        var holder = _owned.Dir("audit-selflink-holder");
+        var target = Path.Combine(holder, "target");
+        Directory.CreateDirectory(target);
+        var link = Path.Combine(holder, "link");
+        DirectoryLinks.CreateOrSkip(link, target);
+
+        var sameAgain = () => LeftoversAudit.RootExists(link, finalTarget: l => l);
+        var nothing = () => LeftoversAudit.RootExists(link, finalTarget: _ => null);
+
+        sameAgain.Should().Throw<LeftoversAuditException>().Which.Message.Should().Contain(link).And.Contain("does not resolve to another path");
+        nothing.Should().Throw<LeftoversAuditException>().Which.Message.Should().Contain(link).And.Contain("does not resolve to another path");
+    }
+
+    [Fact]
+    public void Two_links_that_resolve_to_each_other_stop_at_a_bounded_depth_with_an_audit_error()
+    {
+        var holder = _owned.Dir("audit-linkloop-holder");
+        var one = Path.Combine(holder, "one");
+        var two = Path.Combine(holder, "two");
+        Directory.CreateDirectory(Path.Combine(holder, "t1"));
+        Directory.CreateDirectory(Path.Combine(holder, "t2"));
+        DirectoryLinks.CreateOrSkip(one, Path.Combine(holder, "t1"));
+        DirectoryLinks.CreateOrSkip(two, Path.Combine(holder, "t2"));
+
+        var loop = () => LeftoversAudit.RootExists(one, finalTarget: l => l == one ? two : one);
+
+        loop.Should().Throw<LeftoversAuditException>().Which.Message.Should().Contain(one).And.Contain("links in a row");
+    }
+
+    [Fact]
+    public void A_temp_root_that_is_not_there_is_an_audit_with_nothing_to_find()
+    {
+        var parent = _owned.Dir("audit-missing-parent");
+
+        LeftoversAudit.ClaimedBy(Path.Combine(parent, "no-such-root"), Owner.This, Mine, NoEnv).Should().BeEmpty();
+    }
+
+    // The permission tests need a mode that stops this process: POSIX, and not root (root reads through mode 000).
+    private const string WindowsReason = "chmod 000 is POSIX only; Windows decides by ACLs";
+    private const string PrivilegedReason = "a privileged process reads through mode 000";
+
     // ---- A: a sibling child of the same run -----------------------------------------------------------------------------
 
     [Fact]
