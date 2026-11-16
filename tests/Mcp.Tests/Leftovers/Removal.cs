@@ -51,7 +51,7 @@ internal static class Removal
     private static void RemoveFolder(string dir, Action<string> warn)
     {
         UnlinkTopLevelLinks(dir);
-        if (OperatingSystem.IsWindows() && false) ClearReadOnlyBelow(dir, warn); // .NET's recursive delete refuses a read-only file there
+        if (OperatingSystem.IsWindows()) ClearReadOnlyBelow(dir, warn); // .NET's recursive delete refuses a read-only file there
         Directory.Delete(dir, recursive: true);
     }
 
