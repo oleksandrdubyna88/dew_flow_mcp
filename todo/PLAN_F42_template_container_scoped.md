@@ -1,11 +1,15 @@
 # PLAN — F42: the C# template accepts the `container-scoped` marker, and its notes N1–N5 are reproduced
 
-> Status: **plan, 2026-11-16, before its plan gate.** Branch `fix/f42-template-container-scoped` from `main` `07a0f5b`.
+> Status: **epoch 1 open, 2026-11-16: approved by the plan gate (`53616e7e`, `proceed`, four findings accepted and folded in); building.** Branch `fix/f42-template-container-scoped` from `main` `07a0f5b`.
 > Parent: `dew_flow_conventions · todo/PLAN_test_leftovers_rollout.md` § *Epoch 9* items 2 and 4.2, rows F42-a, F42-b,
 > F42-c; the follow-up F42 in `dew_flow_conventions · todo/PLAN_test_leftovers_merged_core_followups.md`; its Node half is
 > `dew_flow_conventions · todo/PLAN_F41_container_scoped.md` (F41, approved by its plan gate on 2026-11-16). One PR, over
 > this repository's PR cap by the owner's word of 2026-11-16. The copies follow it: benchmark re-syncs its adapted copy to
 > this PR's merge commit (row F42-c), and rag_qln's E7.S3 copies from it.
+
+## Plan changes
+
+> Epoch 1 · approved 2026-11-16 · by reviewers · state: open
 
 ## Goal
 
@@ -52,18 +56,24 @@ fixed if they reproduce and apply, or recorded with the run that did not reprodu
    level; inside, the walk does not enter one). The test makes a claimed folder holding `git init` with one commit and
    removes it on `windows-latest`.
 4. **N2:** the test makes the child write more stderr than a pipe holds (over 64 KiB) and asserts `Run` returns within
-   its timeout. If it does, N2 is recorded as not reproducing at `07a0f5b`; the unawaited reads on the kill path are
-   awaited (bounded) only if a test shows a leak.
+   its timeout WITH the child exited on its own (`TimedOut` false, exit code 0) and its stdout read whole — returning
+   because the timeout killed a blocked child is not "not reproducing" (the plan gate, round 1). If so, N2 is recorded
+   as not reproducing at `07a0f5b`; the unawaited reads on the kill path are awaited (bounded) only if a test shows a
+   leak.
 5. **N3:** quoting for `cmd` is not attempted (its quoting rules are not a list one can trust); the skip with its reason
    stays and is recorded as the bounded behaviour, unless a test shows a path WITHOUT a blocked character that `mklink`
    still mis-parses (a space: the test uses a link path with a space).
 6. **N4:** the child is killed (whole tree) on the timeout path before the assertion fails, in a `try`/`finally`. The test
-   is a seam: the program text is made to hang (`await new Promise(() => {})`) under a short timeout given to a test-only
-   overload, and the test asserts the process is gone after the failure.
+   is a seam: the program text is made to hang with a live event-loop handle (`setInterval(() => {}, 1000)`; an unresolved
+   promise alone lets node exit) under a short timeout given to a test-only overload; the test first asserts the child
+   was still running when the timeout came, then that it is gone after the failure (the plan gate, round 1).
 7. **N5:** the test makes a temp root that exists and is unreadable (`chmod 000`, on Linux and macOS, not as root) with a
-   claimed folder inside; `Discover` must not answer "nothing claimed" — it throws `LeftoversAuditException` naming the
-   root and the error (the audit's own exception type), so the audit is red. On Windows the test skips with its reason
-   (ACLs, not modes).
+   claimed folder inside, AND a root that exists beneath a parent the process cannot traverse (the parent `chmod 000`),
+   where `Directory.Exists` answers false. In both, `Discover` must not answer "nothing claimed": a root that is
+   missing is told apart from one that cannot be reached (the parent's entry is read with the native `lstat` the template
+   already uses; a permission error is not "missing"), and the audit throws `LeftoversAuditException` naming the root
+   and the error, so it is red (the plan gate, round 1). The test skips, with its reason, on Windows (ACLs, not modes)
+   and when the process is privileged (`Environment.IsPrivilegedProcess`: root reads through `chmod 000`).
 8. **Builds here** use `-p:AppHostRuntimeIdentifier=linux-x64`, `-m:4` and `nice -n 19`; no Docker on this machine. The
    tests that need Docker are not part of this plan.
 
