@@ -1,6 +1,6 @@
 # PLAN — F42: the C# template accepts the `container-scoped` marker, and its notes N1–N5 are reproduced
 
-> Status: **epoch 1 open, 2026-11-16: approved by the plan gate (`53616e7e`, `proceed`, four findings accepted and folded in); building.** Branch `fix/f42-template-container-scoped` from `main` `07a0f5b`.
+> Status: **epoch 1 open, 2026-11-16: approved by the plan gate (`53616e7e`, `proceed`, four findings accepted and folded in); built on the branch, before its code gate.** Branch `fix/f42-template-container-scoped` from `main` `07a0f5b`.
 > Parent: `dew_flow_conventions · todo/PLAN_test_leftovers_rollout.md` § *Epoch 9* items 2 and 4.2, rows F42-a, F42-b,
 > F42-c; the follow-up F42 in `dew_flow_conventions · todo/PLAN_test_leftovers_merged_core_followups.md`; its Node half is
 > `dew_flow_conventions · todo/PLAN_F41_container_scoped.md` (F41, approved by its plan gate on 2026-11-16). One PR, over
@@ -101,6 +101,22 @@ The notes — one test each as decisions 3–7 say, RED first where it reproduce
 
 The whole suite: `Mcp.Tests` on Linux here (the Docker-dependent tests excepted, named), and all three hosted legs green
 on the PR.
+
+## Reproductions (2026-11-16)
+
+Machine: Linux (WSL2), no Docker, no Windows. Build: `nice -n 19 dotnet build tests/Mcp.Tests -c Release -m:4 -p:AppHostRuntimeIdentifier=linux-x64` (CI builds
+`Release`); runs: `nice -n 19 ./tests/Mcp.Tests/bin/Release/net10.0/Mcp.Tests --filter-method "<name>"`. Each test was written and run BEFORE any fix.
+
+| Note | Run before any fix | Verdict |
+|---|---|---|
+| N1 read-only files, Windows | **not run here** (Windows only; the git variant ran on Linux and passed: Linux deletes read-only files). The read-only-attribute test is skipped here ("a read-only attribute blocks a delete on Windows only"). | **Unproven until the `windows-latest` leg runs it.** No product code changed. If that leg is red, decision 3's fix applies and the test is its RED. |
+| N2 stderr not drained | `--filter-method "*A_tool_that_writes_more*"` → `total: 1, succeeded: 1` (200,000 bytes to stderr and to stdout; `TimedOut` false, exit 0, 200,000 `y` read). Mutation: the `_ = process.StandardError.ReadToEndAsync();` line removed → `failed … (1m 00s 458ms) Expected boolean to be False because the child must exit by itself, not be killed while blocked on a full pipe, but found True.` (restored). | **Does not reproduce** at `07a0f5b`: `Run` starts both reads before the wait. The test stays as a pin and has teeth (the mutation). The unawaited reads on the kill path: no test showed a leak; nothing changed. |
+| N3 `mklink /J` and a space | Windows only: skipped here ("mklink /J is Windows only"). | **Not run here.** The block list and its skip stay (decision 5); the Windows leg runs the space case. |
+| N4 hanging `node` | `--filter-method "*A_node_that_does_not_answer*"` → `failed (2s 436ms) Expected Liveness.ProbeProcess(pid).State to be ProbeState.Dead {value: 1} because the child is not left running after the assertion failed, but found ProbeState.Live {value: 0}.` (the child was Live at the timeout; the test's own `finally` then killed it). | **Reproduces.** Fixed: `RunNode` ends and reaps the child tree in a `finally`. GREEN: `total: 1, succeeded: 1`. With only that kill neutralised: the same `found ProbeState.Live` failure. |
+| N5 unreachable temp root | `--filter-method "*A_temp_root*"` → `total: 4, failed: 1, succeeded: 3`: `A_temp_root_beneath_a_parent_that_cannot_be_traversed_is_not_a_missing_one` failed with `Expected a <LeftoversAuditException> to be thrown because a root nobody can reach is not a root that is not there, but no exception was thrown.` The same-suite case of a root that exists but cannot be listed (`chmod 000`) PASSED before any fix: `Directory.Exists` is true there and the listing throws `UnauthorizedAccessException` naming the path, so the audit is red. | **Half reproduces.** The untraversable parent reads as "missing" and the audit passes: fixed (`RootExists` reads the entry with the native `lstat`; a permission error throws `LeftoversAuditException` naming root and error; a link to nothing is still missing). The unlistable root is kept as a pin (it was never silent). GREEN: `total: 4, succeeded: 4`. With `Directory.Exists` put back: the same RED. |
+
+Decision 7 said the audit must throw `LeftoversAuditException` "in both" cases; in the second (unlistable root) it throws the framework's
+`UnauthorizedAccessException` instead, which is red and names the path, so it was not wrapped.
 
 ## What this does not do
 
