@@ -94,6 +94,51 @@ public sealed class LeftoversGuardTests : IDisposable
         Add("ryuk-off under another class's exemption", ".github/workflows/w.yml", $"        # {Marker} shared-store — pg:5432 users; reuse intentional; lock: pg_advisory_lock(42)\n        TESTCONTAINERS_RYUK_DISABLED: \"true\"", "ryuk-off");
         Add("ryuk-off under its own exemption", ".github/workflows/w.yml", $"        # {Marker} ryuk-off — the reaper is slow on this runner\n        TESTCONTAINERS_RYUK_DISABLED: \"true\"", "exemption,ryuk-off");
 
+        // container-scoped (rule §6 (b); F41 in the Node guard, F42 here): a declaration that clears ONE class, shared-store, and only for
+        // the container's own teardown (DROP DATABASE, DROP SCHEMA, FLUSHDB). Scenario ids are the plan's: P1-P7 clean, N1-N19 red.
+        const string Owner = "the per-test databases live and die with the PostgresFixture container";
+        string Scoped(string reason) => $"{Marker} container-scoped — {reason}";
+        Add("F42 P1 the marker alone, singular", "tests/X/A.cs", $"// {Scoped("the cache lives and dies with the PostgresFixture fixture")}\nvar a = 1;", "");
+        Add("F42 P2 the marker alone, plural", "tests/X/A.cs", $"// {Scoped(Owner)}\nvar a = 1;", "");
+        Add("F42 P1 an owner with no article", "tests/X/A.cs", $"// {Scoped("the data lives and dies with PostgresFixture")}\nvar a = 1;", "");
+        Add("F42 P1 every article is read", "tests/X/A.cs", $"// {Scoped("the data lives and dies with an Orders fixture")}\n// {Scoped("the copy lives and dies with this fixture")}\n// {Scoped("the data live and die with that container")}\n// {Scoped("the volume lives and dies with its job")}\nvar a = 1;", "");
+        Add("F42 P1 the spelling is read in any case", "tests/X/A.cs", $"// {Scoped("The Data Lives And Dies With The Fixture")}\nvar a = 1;", "");
+        Add("F42 P3 over DR§OP DATABASE, in a shell script", "a.sh", $"# {Scoped(Owner)}\npsql -c 'DR§OP DATABASE bench_case'", "");
+        Add("F42 P3 over DR§OP DATABASE, in a C# file", "tests/X/A.cs", $"// {Scoped(Owner)}\nawait Run(\"DR§OP DATABASE bench_case\");", "");
+        Add("F42 P3 over DR§OP DATABASE, in a node script", ".github/scripts/a.mjs", $"// {Scoped(Owner)}\nawait q('DR§OP DATABASE bench_case');", "");
+        Add("F42 P3 without the marker the same line is still shared-store", "tests/X/A.cs", "await Run(\"DR§OP DATABASE bench_case\");", "shared-store");
+        Add("F42 P4 over DR§OP SCHEMA", "a.sh", $"# {Scoped(Owner)}\npsql -c 'DR§OP SCHEMA IF EXISTS bench_case'", "");
+        Add("F42 P5 over FLUSH§DB", "a.sh", $"# {Scoped(Owner)}\nredis-cli FLUSH§DB", "");
+        Add("F42 P6 on the same line as the DR§OP DATABASE", "tests/X/A.cs", $"await Run(\"DR§OP DATABASE bench_case\"); // {Scoped(Owner)}", "");
+        Add("F42 P7 DR§OP DATABASE of any name is clean under the marker: the guard reads a spelling, not whose database it is", "a.sh", $"# {Scoped(Owner)}\npsql -c 'DR§OP DATABASE production_db'", "");
+        Add("F42 N1 no owner after the spelling", "tests/X/A.cs", $"// {Scoped("the per-test databases live and die with")}\nvar a = 1;", "exemption");
+        Add("F42 N2 a placeholder reason", "tests/X/A.cs", $"// {Scoped("todo")}\nvar a = 1;", "exemption");
+        Add("F42 N3 no reason", "tests/X/A.cs", $"// {Marker} container-scoped\nvar a = 1;", "exemption");
+        Add("F42 N4 neither spelling", "tests/X/A.cs", $"// {Scoped("the per-test databases are removed by the PostgresFixture")}\nvar a = 1;", "exemption");
+        Add("F42 N4 a half spelling", "tests/X/A.cs", $"// {Scoped("the databases die with the PostgresFixture container")}\nvar a = 1;", "exemption");
+        Add("F42 N5 over TRUN§CATE", "a.sh", $"# {Scoped(Owner)}\npsql -c 'TRUN§CATE TABLE users'", "shared-store");
+        Add("F42 N6 over FLUSH§ALL", "a.sh", $"# {Scoped(Owner)}\nredis-cli FLUSH§ALL", "shared-store");
+        Add("F42 N7 over deleteMany of everything", ".github/scripts/a.mjs", $"// {Scoped(Owner)}\nawait users.delete§Many({{}});", "shared-store");
+        Add("F42 N8 over DR§OP TABLE", "a.sh", $"# {Scoped(Owner)}\npsql -c 'DR§OP TABLE users'", "shared-store");
+        Add("F42 N9 two lines above the DR§OP DATABASE", "a.sh", $"# {Scoped(Owner)}\necho between\npsql -c 'DR§OP DATABASE bench_case'", "shared-store");
+        Add("F42 N10 over a container started without the remove flag", "a.sh", $"# {Scoped(Owner)}\ndocker r§un alpine", "docker-run");
+        Add("F42 N11 over a container named outside the owner form", "a.sh", $"# {Scoped(Owner)}\ndocker r§un --rm --na§me web alpine", "docker-name");
+        Add("F42 N12 over the reaper switched off", ".github/workflows/w.yml", $"        # {Scoped(Owner)}\n        TESTCONTAINERS_RYUK_DISABLED: \"true\"", "ryuk-off");
+        Add("F42 N13 over a sweep by the bare prefix", "a.sh", $"# {Scoped(Owner)}\nrm -rf /tmp/{P}-*", "owner-blind");
+        Add("F42 N14 over a raw temp path", ".github/scripts/a.mjs", $"// {Scoped(Owner)}\nconst d = fs.mkd§tempSync('x-');", "raw-temp");
+        Add("F42 N15 the shared-store exemption without a lock is still an exemption finding", "a.sh", $"-- {Marker} shared-store — pg:5432 users; reuse intentional\npsql -c 'TRUN§CATE TABLE users'", "exemption,shared-store");
+        Add("F42 N16 an article and nothing after it", "tests/X/A.cs", $"// {Scoped("the per-test databases lives and dies with the")}\nvar a = 1;", "exemption");
+        Add("F42 N16 an article twice", "tests/X/A.cs", $"// {Scoped("the per-test databases lives and dies with the the")}\nvar a = 1;", "exemption");
+        Add("F42 N16 a one-character word is no owner", "tests/X/A.cs", $"// {Scoped("the per-test databases lives and dies with the X")}\nvar a = 1;", "exemption");
+        Add("F42 N16 the dash of the reason is no owner", "tests/X/A.cs", $"// {Scoped("the per-test databases lives and dies with — the end")}\nvar a = 1;", "exemption");
+        Add("F42 N17 over a git work§tree add", "a.sh", $"# {Scoped(Owner)}\ngit work§tree add x HEAD", "raw-worktree");
+        Add("F42 N18 over a legacy-named literal", "tests/X/A.cs", $"// {Scoped(Owner)}\nvar n = \"{P}-agent-x-1\";", "legacy-name,owner-blind");
+        Add("F42 N19 a teardown and a reset on one line: every hit must be a teardown", "a.sh", $"# {Scoped(Owner)}\npsql -c 'DR§OP DATABASE a; TRUN§CATE TABLE users'", "shared-store");
+        Add("F42 N19 a teardown and a DR§OP TABLE on one line", "a.sh", $"# {Scoped(Owner)}\npsql -c 'DR§OP DATABASE a; DR§OP TABLE users'", "shared-store");
+        Add("F42 N19 FLUSH§DB and FLUSH§ALL on one line", "a.sh", $"# {Scoped(Owner)}\nredis-cli FLUSH§DB; redis-cli FLUSH§ALL", "shared-store");
+        Add("F42 N19 teardowns only on one line", "a.sh", $"# {Scoped(Owner)}\npsql -c 'DR§OP DATABASE a; DR§OP SCHEMA b'; redis-cli FLUSH§DB", "");
+        Add("F42 the shared-store exemption (a) still clears a reset, as before", "a.sh", $"-- {Marker} shared-store — pg:5432 users; reuse intentional; lock: pg_advisory_lock(42)\npsql -c 'TRUN§CATE TABLE users'", "");
+
         // comments
         Add("a commented-out raw-temp", "tests/X/A.cs", "// Directory.Create§TempSubdirectory(\"x\")", "");
         Add("a doc-commented raw-temp", "tests/X/A.cs", "/// Directory.Create§TempSubdirectory(\"x\")", "");
@@ -212,6 +257,42 @@ public sealed class LeftoversGuardTests : IDisposable
 
         report.FilesScanned.Should().Be(1, id);
         Classes(report).Should().Be(expected, $"{id}: {Show(report)}");
+    }
+
+    [Theory]
+    [InlineData("the per-test databases live and die with", "must name what it lives and dies with")]
+    [InlineData("the per-test databases lives and dies with the", "must name what it lives and dies with")]
+    [InlineData("the per-test databases are removed by the PostgresFixture", "must name what it lives and dies with")]
+    [InlineData("todo", "carries no reason")]
+    [InlineData("", "carries no reason")]
+    public void A_container_scoped_marker_that_is_refused_says_what_is_missing_not_that_its_kind_is_unknown(string reason, string sentence)
+    {
+        var root = Tree(("tests/X/A.cs", $"// {Marker} container-scoped — {reason}\nvar a = 1;"));
+
+        var finding = LeftoversGuard.Scan(root, RepositoryRoot.Path).Findings.Should().ContainSingle().Subject;
+
+        finding.Class.Should().Be("exemption");
+        finding.Line.Should().Be(1);
+        finding.Text.Should().Contain("`container-scoped`").And.Contain(sentence).And.NotContain("unknown class");
+    }
+
+    [Fact]
+    public void A_kind_that_only_looks_like_container_scoped_is_still_an_unknown_class()
+    {
+        var root = Tree(("tests/X/A.cs", $"// {Marker} container-scope — the per-test databases live and die with the PostgresFixture\nvar a = 1;"));
+
+        LeftoversGuard.Scan(root, RepositoryRoot.Path).Findings.Should().ContainSingle().Which.Text.Should().Contain("unknown class `container-scope`");
+    }
+
+    [Fact]
+    public void A_teardown_the_marker_clears_is_still_reported_when_a_reset_stands_beside_it_and_names_the_reset()
+    {
+        var root = Tree(("a.sh", $"# {Marker} container-scoped — the per-test databases live and die with the PostgresFixture container\npsql -c 'DR§OP DATABASE a; TRUN§CATE TABLE users'\n"));
+
+        var finding = LeftoversGuard.Scan(root, RepositoryRoot.Path).Findings.Should().ContainSingle().Subject;
+
+        finding.Class.Should().Be("shared-store");
+        finding.Text.Should().Contain(Fx("TRUN§CATE")).And.NotContain(Fx("DR§OP"));
     }
 
     [Fact]
@@ -578,17 +659,92 @@ public sealed class LeftoversGuardTests : IDisposable
             console.log(resolveRule(repo) ?? "");
             """;
         var module = new Uri(Path.GetFullPath(Path.Combine(RepositoryRoot.Path, ".agents/conventions/tools/leftovers-check.mjs"))).AbsoluteUri;
-        var start = new ProcessStartInfo("node") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
-        foreach (var argument in new[] { "--input-type=module", "-e", program, "--", module, mount }) start.ArgumentList.Add(argument);
-        using var process = Process.Start(start) ?? throw new InvalidOperationException("node did not start");
-        var output = process.StandardOutput.ReadToEndAsync();
-        var errors = process.StandardError.ReadToEndAsync();
-        process.WaitForExit(TimeSpan.FromMinutes(2)).Should().BeTrue("node must answer in two minutes");
-        process.WaitForExit();
-        process.ExitCode.Should().Be(0, "node said: " + errors.GetAwaiter().GetResult());
-        var picked = output.GetAwaiter().GetResult().Trim().Replace('\\', '/');
+        var picked = RunNode(program, [module, mount], TimeSpan.FromMinutes(2)).Trim().Replace('\\', '/');
         var prefix = mount.Replace('\\', '/').TrimEnd('/') + "/";
         return picked.StartsWith(prefix, StringComparison.Ordinal) ? picked[prefix.Length..] : "outside";
+    }
+
+    /// <summary><c>node --input-type=module -e &lt;program&gt; -- &lt;arguments&gt;</c>: its standard output. The test FAILS when node does not answer within
+    /// <paramref name="timeout"/> or exits non-zero. <paramref name="timedOut"/> is called with the process id when the wait ran out, before the
+    /// assertion fails (a test seam: it is how a test learns the child was still running).</summary>
+    internal static string RunNode(string program, string[] arguments, TimeSpan timeout, Action<int>? timedOut = null)
+    {
+        using var process = Process.Start(NodeStart(program, arguments)) ?? throw new InvalidOperationException("node did not start");
+        try
+        {
+            return Answer(process, timeout, timedOut);
+        }
+        finally
+        {
+            EndIfRunning(process); // a node that never answered fails the assertion above and must not outlive it
+        }
+    }
+
+    private static string Answer(Process process, TimeSpan timeout, Action<int>? timedOut)
+    {
+        var output = process.StandardOutput.ReadToEndAsync();
+        var errors = process.StandardError.ReadToEndAsync();
+        var answered = process.WaitForExit(timeout);
+        if (!answered) timedOut?.Invoke(process.Id);
+        answered.Should().BeTrue("node must answer in " + timeout);
+        process.WaitForExit();
+        process.ExitCode.Should().Be(0, "node said: " + errors.GetAwaiter().GetResult());
+        return output.GetAwaiter().GetResult();
+    }
+
+    /// <summary>The child and everything it started, ended and reaped; nothing when it already exited.</summary>
+    private static void EndIfRunning(Process process)
+    {
+        if (process.HasExited) return;
+        process.Kill(entireProcessTree: true);
+        process.WaitForExit();
+    }
+
+    private static ProcessStartInfo NodeStart(string program, string[] arguments)
+    {
+        var start = new ProcessStartInfo("node") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
+        foreach (var argument in new[] { "--input-type=module", "-e", program, "--" }.Concat(arguments)) start.ArgumentList.Add(argument);
+        return start;
+    }
+
+    [Fact]
+    public void A_node_that_does_not_answer_in_time_fails_the_assertion_and_is_not_left_running()
+    {
+        // setInterval keeps a live event-loop handle: an unresolved promise alone lets node exit, and this child must HANG.
+        var pid = 0;
+        ProbeState? atTimeout = null;
+        var hang = () => RunNode("setInterval(() => {}, 1000);", [], TimeSpan.FromSeconds(2), id =>
+        {
+            pid = id;
+            atTimeout = Liveness.ProbeProcess(id).State;
+        });
+        try
+        {
+            hang.Should().Throw<Xunit.Sdk.XunitException>("a node that never answers fails the assertion");
+
+            pid.Should().NotBe(0, "the timeout path was reached");
+            atTimeout.Should().Be(ProbeState.Live, "the child was still running when the timeout came — this test hung it on purpose");
+            Liveness.ProbeProcess(pid).State.Should().Be(ProbeState.Dead, "the child is not left running after the assertion failed");
+        }
+        finally
+        {
+            KillIfRunning(pid); // the test itself leaves nothing, whatever the helper did
+        }
+    }
+
+    private static void KillIfRunning(int pid)
+    {
+        if (pid == 0) return;
+        try
+        {
+            using var left = Process.GetProcessById(pid);
+            left.Kill(entireProcessTree: true);
+            left.WaitForExit();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            // Not there any more: the case this test hopes for.
+        }
     }
 
     [Theory]

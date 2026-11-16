@@ -100,6 +100,10 @@ public static class LeftoversGuard
         (Rx("delete" + @"Many\(\s*\{\s*\}\s*\)"), false),
     ];
 
+    /// <summary>The shared-store hits that are a container's own teardown: a database or schema dropped, a logical database flushed. A table
+    /// dropped or truncated, <c>FLUSHALL</c> and a delete-all are resets, not teardowns.</summary>
+    private static readonly Regex ContainerTeardown = Rx(@"^(?:\bDR" + @"OP\s+(?:DATABASE|SCHEMA)|FLUSH" + @"DB)\b");
+
     private static readonly Regex ContainerStart = Rx(@"\bdocker\s+r" + @"un\b");
     private static readonly Regex HasRm = Rx(@"(?<![-\w])--rm\b");
 
@@ -183,27 +187,29 @@ public static class LeftoversGuard
         return found;
     }
 
-    /// <summary>One finding per class that hits the line, unless the class is exempt there (<c>ryuk-off</c> never is).</summary>
+    /// <summary>One finding per class that hits the line, unless the class is exempt there (<c>ryuk-off</c> never is). A <c>container-scoped</c>
+    /// marker (rule §6 (b)) clears only the <c>shared-store</c> hits that are the container's own teardown, so it is handed down to
+    /// <see cref="SharedStoreHits"/> as a fact about the line, and never exempts a class as a whole.</summary>
     private static IEnumerable<Finding> LineFindings(SourceFile source, string line, int number, Dictionary<string, HashSet<int>> exemptions) =>
         GuardText.IsComment(line)
             ? []
-            : LineHits(source, line).GroupBy(h => h.Class).Where(g => g.Key == "ryuk-off" || !GuardExemptions.IsExempt(exemptions, g.Key, number))
+            : LineHits(source, line, GuardExemptions.IsExempt(exemptions, GuardExemptions.ContainerScoped, number)).GroupBy(h => h.Class).Where(g => g.Key == "ryuk-off" || !GuardExemptions.IsExempt(exemptions, g.Key, number))
                 .Select(g => new Finding(source.Relative, number, g.Key, string.Join(", ", g.Select(h => $"`{h.Text}`").Distinct())));
 
-    private static IEnumerable<(string Class, string Text)> LineHits(SourceFile source, string line) =>
-        HitsOutsideSource(source, line).Concat(Tag("legacy-name", LegacyNameHits(line))).Concat(HitsOfCSharp(source, line)).Concat(HitsOfFoldedLiterals(source, line));
+    private static IEnumerable<(string Class, string Text)> LineHits(SourceFile source, string line, bool containerScoped) =>
+        HitsOutsideSource(source, line, containerScoped).Concat(Tag("legacy-name", LegacyNameHits(line))).Concat(HitsOfCSharp(source, line)).Concat(HitsOfFoldedLiterals(source, line));
 
     private static IEnumerable<(string Class, string Text)> Tag(string cls, IEnumerable<string> texts) => texts.Select(text => (cls, text));
 
     /// <summary>The classes that apply to tests, scripts and workflows but not to the code under test.</summary>
-    private static IEnumerable<(string Class, string Text)> HitsOutsideSource(SourceFile source, string line) =>
+    private static IEnumerable<(string Class, string Text)> HitsOutsideSource(SourceFile source, string line, bool containerScoped) =>
         source.Kind == SourceKind.Source
             ? []
             : Tag("raw-temp", RawTempHits(source.Extension, line))
                 .Concat(Tag("raw-worktree", Matches(RawWorktree, line).Take(1)))
                 .Concat(Tag("docker-run", ContainerWithoutRemoveFlag(line)))
                 .Concat(Tag("docker-name", GuardDocker.NameHits(line)))
-                .Concat(Tag("shared-store", SharedStoreHits(line)))
+                .Concat(Tag("shared-store", SharedStoreHits(line, containerScoped)))
                 .Concat(Tag("ryuk-off", RyukOff.IsMatch(line) ? ["the reaper is switched off"] : []));
 
     /// <summary>The classes that only the C# files carry: the bare prefix and the temp root.</summary>
@@ -243,10 +249,13 @@ public static class LeftoversGuard
 
     // ---- shared-store ----------------------------------------------------------------------------------------------------------
 
-    /// <summary>The first shared-store pattern that hits the line (one hit per line, as the shipped guard counts); a named drop or
-    /// truncate of an owner-form name is not one.</summary>
-    private static IEnumerable<string> SharedStoreHits(string line) =>
-        SharedStore.Select(s => (s.Named, Match: s.Pattern.Match(line))).Where(s => IsStoreHit(s.Match, s.Named)).Select(s => s.Match.Value.Trim()).Take(1);
+    /// <summary>The line's first shared-store hit (one reported per line, as the shipped guard counts); a named drop or truncate of an owner-form
+    /// name is not one. Every match of every pattern is a hit, so that a line holding a teardown AND a reset is not cleared by the teardown:
+    /// with <paramref name="containerScoped"/> (a valid <c>container-scoped</c> marker on the line or the one above, rule §6 (b)) the container's
+    /// own teardowns (<see cref="ContainerTeardown"/>) are no hit, every other one still is.</summary>
+    private static IEnumerable<string> SharedStoreHits(string line, bool containerScoped) =>
+        SharedStore.SelectMany(s => s.Pattern.Matches(line).Where(m => IsStoreHit(m, s.Named))).Where(m => !(containerScoped && ContainerTeardown.IsMatch(m.Value)))
+            .Select(m => m.Value.Trim()).Take(1);
 
     private static bool IsStoreHit(Match match, bool named) =>
         match.Success && !(named && OwnerForm.IsMatch(match.Groups[1].Value.TrimStart('"', '\'', '`')));
