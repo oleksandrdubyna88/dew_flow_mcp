@@ -253,11 +253,12 @@ public static class LeftoversGuard
     /// contract as the Node guard's <c>sharedStoreHit</c>); a named drop or truncate of an owner-form name is not one. With
     /// <paramref name="containerScoped"/> (a valid <c>container-scoped</c> marker on the line or the one above, rule §6 (b)) a line whose every
     /// shared-store match is the container's own teardown (<see cref="IsContainerTeardown"/>) has no hit; on any other line that has a hit the one reported is the
-    /// first match that is NOT a teardown (a line with a teardown and a reset names the reset), and a line that has none stays clean.</summary>
+    /// first match that is NOT a teardown, read over ALL matches as the Node guard does (a line with a teardown and a reset names the reset; a marked
+    /// line is verified whole, so a reset that the unmarked first-match reading would miss behind an owner-form name is found).</summary>
     private static IEnumerable<string> SharedStoreHits(string line, bool containerScoped)
     {
         var first = SharedStore.Select(s => (s.Named, Match: s.Pattern.Match(line))).Where(s => IsStoreHit(s.Match, s.Named)).Select(s => s.Match.Value.Trim()).Take(1).ToList();
-        return !containerScoped || first.Count == 0 ? first : IsContainerTeardown(line) ? [] : [.. StoreMatches(line).Where(hit => !ContainerTeardown.IsMatch(hit)).Take(1)];
+        return !containerScoped ? first : IsContainerTeardown(line) ? [] : [.. StoreMatches(line).Where(hit => !ContainerTeardown.IsMatch(hit)).Take(1)];
     }
 
     /// <summary>Every shared-store match on the line, all patterns, all occurrences, the owner-form names left out.</summary>

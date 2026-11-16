@@ -123,8 +123,10 @@ A comment `<prefix>-exempt: <kind> — <reason>` on the line of a finding or the
 - The shared-store finding is the old one: the FIRST match of each pattern, one finding per class per line, as the Node guard's `sharedStoreHit` (a second
   named drop after an owner-form first match is not reported). The marker adds one reading, `IsContainerTeardown`: ALL matches on the line (an owner-form
   name is no match), clear only when every one is `DROP DATABASE`, `DROP SCHEMA` or `FLUSHDB`. On a marked line that is not all teardown, the finding's text is the first
-  match that is NOT a teardown (`DROP DATABASE a; TRUNCATE TABLE users` names the `TRUNCATE`; `FLUSHDB; FLUSHALL` names `FLUSHALL`), and a line the old
-  reading finds clean stays clean.
+  match that is NOT a teardown (`DROP DATABASE a; TRUNCATE TABLE users` names the `TRUNCATE`; `FLUSHDB; FLUSHALL` names `FLUSHALL`). A marked line is read
+  whole, as the Node guard reads it: a reset that the unmarked first-match reading would miss behind an owner-form name (`DROP TABLE <owner-form>; DROP TABLE users`)
+  is found under the marker. The live differential check (`LeftoversGuardDifferentialTests`) compares line and class for every row, and the finding
+  TEXT only for `shared-store` and `exemption`, the two classes whose text is the shared contract; other classes word their findings differently on purpose.
 
 The Node guard's half is `dew_flow_conventions` F41 (`tools/leftovers-check.mjs`); the two are held to the same scenarios (F41's P1–P7 and
 N1–N19; the plan is `todo/PLAN_F42_template_container_scoped.md`).

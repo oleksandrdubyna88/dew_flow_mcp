@@ -83,9 +83,16 @@ public sealed class LeftoversGuardDifferentialTests : IDisposable
 
     private static int Compare(Answer a, Answer b) => a.Line != b.Line ? a.Line.CompareTo(b.Line) : string.CompareOrdinal(a.Class, b.Class);
 
+    /// <summary>The classes whose finding TEXT is part of the shared contract (F41/F42: the marker's refusal sentence and the teardown-or-reset text).
+    /// Every other class is compared by line and class only: its wording predates the contract and differs on purpose (each guard's header).</summary>
+    private static readonly HashSet<string> TextIsContract = new(StringComparer.Ordinal) { "shared-store", "exemption" };
+
+    /// <summary>What is compared of a finding: line and class always, the text only for a class in <see cref="TextIsContract"/>.</summary>
+    private static Answer Compared(Answer a) => TextIsContract.Contains(a.Class) ? a : a with { Text = "" };
+
     /// <summary>The rows on which the two guards differ, each with both answers (the C# guard's is read from a tree of the row's own file).</summary>
     private List<string> Disagreements(List<GuardScenario> rows, List<List<Answer>> node) =>
-        [.. rows.Select((row, i) => (row, ours: CSharpAnswer(row), theirs: node[i])).Where(r => !r.ours.SequenceEqual(r.theirs))
+        [.. rows.Select((row, i) => (row, ours: CSharpAnswer(row), theirs: node[i])).Where(r => !r.ours.Select(Compared).SequenceEqual(r.theirs.Select(Compared)))
             .Select(r => $"{r.row.Id}: C# [{string.Join("; ", r.ours)}] / Node [{string.Join("; ", r.theirs)}]")];
 
     private List<Answer> CSharpAnswer(GuardScenario row)

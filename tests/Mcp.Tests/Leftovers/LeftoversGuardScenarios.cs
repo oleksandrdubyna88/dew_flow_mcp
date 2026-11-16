@@ -73,7 +73,7 @@ internal static class GuardScenarios
         rows.Add("F42 N7 over deleteMany of everything", ".github/scripts/a.mjs", $"// {Scoped(Owner)}\nawait users.delete§Many({{}});", "shared-store");
         rows.Add("F42 N8 over DR§OP TABLE", "a.sh", $"# {Scoped(Owner)}\npsql -c 'DR§OP TABLE users'", "shared-store");
         rows.Add("F42 N9 two lines above the DR§OP DATABASE", "a.sh", $"# {Scoped(Owner)}\necho between\npsql -c 'DR§OP DATABASE bench_case'", "shared-store");
-        rows.AddCSharpOnly("F42 N10 over a container started without the remove flag", "a.sh", $"# {Scoped(Owner)}\ndocker r§un alpine", "docker-run", "both guards find docker-run, but they word it differently: this repository has no container carve-out (rule 5) and the C# guard says so in its header");
+        rows.Add("F42 N10 over a container started without the remove flag", "a.sh", $"# {Scoped(Owner)}\ndocker r§un alpine", "docker-run");
         rows.Add("F42 N11 over a container named outside the owner form", "a.sh", $"# {Scoped(Owner)}\ndocker r§un --rm --na§me web alpine", "docker-name");
         rows.Add("F42 N12 over the reaper switched off", ".github/workflows/w.yml", $"        # {Scoped(Owner)}\n        TESTCONTAINERS_RYUK_DISABLED: \"true\"", "ryuk-off");
         rows.Add("F42 N13 over a sweep by the bare prefix", "a.sh", $"# {Scoped(Owner)}\nrm -rf /t§mp/{P}-*", "owner-blind");
@@ -120,7 +120,7 @@ internal static class GuardScenarios
         rows.Add("F42 an owner-form drop then another drop on one line is clean, as in Node", "a.sh", $"psql -c 'DR§OP TABLE {Lower}_u1000_mcp_x_abc123; DR§OP TABLE users'", "");
         rows.Add("F42 an owner-form truncate then another truncate on one line is clean, as in Node", "a.sh", $"psql -c 'TRUN§CATE TABLE {Lower}_u1000_mcp_x_abc123; TRUN§CATE TABLE users'", "");
         rows.Add("F42 a teardown and a named drop of an owner-form name under the marker is clean: the owner form is no hit", "a.sh", $"# {Scoped(Owner)}\npsql -c 'DR§OP DATABASE bench; DR§OP TABLE {P}-u1-bench-x-1;'", "");
-        rows.Add("F42 the same owner-form drop line under the marker is clean too, as in Node", "a.sh", $"# {Scoped(Owner)}\npsql -c 'DR§OP TABLE {Lower}_u1000_mcp_x_abc123; DR§OP TABLE users'", "");
+        rows.Add("F42 the same owner-form drop line under the marker: the marked line is read whole, so the reset behind the owner-form name is found, as in Node", "a.sh", $"# {Scoped(Owner)}\npsql -c 'DR§OP TABLE {Lower}_u1000_mcp_x_abc123; DR§OP TABLE users'", "shared-store");
         rows.Add("F42 an owner-form drop of a database then another database under the marker is clean, as in Node", "a.sh", $"# {Scoped(Owner)}\npsql -c 'DR§OP DATABASE {Lower}_u1000_mcp_x_abc123; DR§OP DATABASE b'", "");
         rows.Add("F42 the shared-store exemption (a) still clears a reset, as before", "a.sh", $"-- {Marker} shared-store — pg:5432 users; reuse intentional; lock: pg_advisory_lock(42)\npsql -c 'TRUN§CATE TABLE users'", "");
     }
