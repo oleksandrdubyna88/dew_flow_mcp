@@ -256,6 +256,59 @@ public sealed class LeftoversAuditTests : IDisposable
     }
 
     [Fact]
+    public void The_root_is_listed_lazily_so_entries_before_a_failure_are_judged_and_the_failure_names_the_root()
+    {
+        var tmp = _owned.Dir("audit-lazy-tmp");
+        var me = Owner.This;
+        var first = Plant(tmp, Owned.NameFor("lazy-a"), me);
+        var second = Plant(tmp, Owned.NameFor("lazy-b"), me);
+        var judged = 0;
+        IEnumerable<FileSystemInfo> Listing(string root)
+        {
+            yield return new DirectoryInfo(first);
+            yield return new DirectoryInfo(second);
+            throw new IOException("the listing broke halfway");
+        }
+
+        var discover = () => LeftoversAudit.Discover(tmp, me, _ => { judged++; return true; }, NoEnv, listing: Listing);
+
+        discover.Should().Throw<LeftoversAuditException>().Which.Message.Should().Contain(tmp).And.Contain("the listing broke halfway");
+        judged.Should().BeGreaterThan(0, "the entries listed before the failure were already being judged: the listing is not read to the end first");
+    }
+
+    [Fact]
+    public void A_link_that_does_not_resolve_to_another_path_is_an_audit_error_not_a_recursion()
+    {
+        var holder = _owned.Dir("audit-selflink-holder");
+        var target = Path.Combine(holder, "target");
+        Directory.CreateDirectory(target);
+        var link = Path.Combine(holder, "link");
+        DirectoryLinks.CreateOrSkip(link, target);
+
+        var sameAgain = () => LeftoversAudit.RootExists(link, finalTarget: l => l);
+        var nothing = () => LeftoversAudit.RootExists(link, finalTarget: _ => null);
+
+        sameAgain.Should().Throw<LeftoversAuditException>().Which.Message.Should().Contain(link).And.Contain("does not resolve to another path");
+        nothing.Should().Throw<LeftoversAuditException>().Which.Message.Should().Contain(link).And.Contain("does not resolve to another path");
+    }
+
+    [Fact]
+    public void Two_links_that_resolve_to_each_other_stop_at_a_bounded_depth_with_an_audit_error()
+    {
+        var holder = _owned.Dir("audit-linkloop-holder");
+        var one = Path.Combine(holder, "one");
+        var two = Path.Combine(holder, "two");
+        Directory.CreateDirectory(Path.Combine(holder, "t1"));
+        Directory.CreateDirectory(Path.Combine(holder, "t2"));
+        DirectoryLinks.CreateOrSkip(one, Path.Combine(holder, "t1"));
+        DirectoryLinks.CreateOrSkip(two, Path.Combine(holder, "t2"));
+
+        var loop = () => LeftoversAudit.RootExists(one, finalTarget: l => l == one ? two : one);
+
+        loop.Should().Throw<LeftoversAuditException>().Which.Message.Should().Contain(one).And.Contain("links in a row");
+    }
+
+    [Fact]
     public void A_temp_root_that_is_not_there_is_an_audit_with_nothing_to_find()
     {
         var parent = _owned.Dir("audit-missing-parent");

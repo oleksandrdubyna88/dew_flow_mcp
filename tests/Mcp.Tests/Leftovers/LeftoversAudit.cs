@@ -36,14 +36,17 @@ internal static class LeftoversAudit
 
     /// <param name="quarantinedNames">The seam that lists the sibling quarantines of <paramref name="tmp"/> (default <see cref="LeftoversSweep.QuarantinedNames"/>); called once.</param>
     internal static IReadOnlyList<Claimed> Discover(
-        string tmp, Owner owner, Func<string, bool>? mine = null, Func<string, string?>? env = null, Func<string, HashSet<string>>? quarantinedNames = null)
+        string tmp, Owner owner, Func<string, bool>? mine = null, Func<string, string?>? env = null, Func<string, HashSet<string>>? quarantinedNames = null,
+        Func<string, IEnumerable<FileSystemInfo>>? listing = null)
     {
         if (Owner.RunRecord(env, _ => { }) != Owner.This || !RootExists(tmp)) return []; // a process that writes the run's record does not touch the root at all
         var pattern = Owned.Pattern();
-        var (quarantined, entries) = ListRoot(tmp, quarantinedNames);
+        var quarantined = ListQuarantined(tmp, quarantinedNames);
         var found = new List<Claimed>();
-        foreach (var entry in entries)
+        using var entries = (listing ?? Listing)(tmp).GetEnumerator(); // read one entry at a time, inside the error boundary: never the whole root first
+        while (Advance(entries, tmp))
         {
+            var entry = entries.Current;
             if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint) || !pattern.IsMatch(entry.Name)) continue;
             if (Examine(entry, owner, mine, quarantined) is { } claimed) found.Add(claimed);
         }
@@ -57,11 +60,11 @@ internal static class LeftoversAudit
     /// that runs through a file, a link to nothing included) is "missing"; one that cannot be reached is a <see cref="LeftoversAuditException"/>
     /// naming the root and the error. A link is judged by its FINAL target, read the same way (a target beneath a parent that cannot be traversed
     /// is unreachable, not missing).</summary>
-    private static bool RootExists(string tmp)
+    internal static bool RootExists(string tmp, Func<string, string?>? finalTarget = null, int depth = 0)
     {
         try
         {
-            return Native.IdentityOf(tmp) is { } entry && (!entry.IsLink || RootExists(FinalTarget(tmp)));
+            return Native.IdentityOf(tmp) is { } entry && (!entry.IsLink || LinkTargetExists(tmp, finalTarget, depth));
         }
         catch (IOException ex) when (IsNotADirectory(ex))
         {
@@ -77,19 +80,49 @@ internal static class LeftoversAudit
         }
     }
 
-    private static string FinalTarget(string link) => new DirectoryInfo(link).ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? link;
+    /// <summary>A link is judged by its final target, one hop only: a target that is the link's own path, or that is not there to resolve, is an error (the link
+    /// does not lead anywhere else), and a chain of links the resolver keeps handing on stops at <see cref="MaxLinkDepth"/>.</summary>
+    private static bool LinkTargetExists(string link, Func<string, string?>? finalTarget, int depth)
+    {
+        if (depth >= MaxLinkDepth) throw new IOException($"more than {MaxLinkDepth} links in a row");
+        var target = (finalTarget ?? FinalTarget)(link);
+        if (target is null || SamePath(target, link)) throw new IOException("the link does not resolve to another path");
+        return RootExists(target, finalTarget, depth + 1);
+    }
+
+    private const int MaxLinkDepth = 8;
+
+    private static bool SamePath(string a, string b) =>
+        string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+
+    private static string? FinalTarget(string link) => new DirectoryInfo(link).ResolveLinkTarget(returnFinalTarget: true)?.FullName;
 
     /// <summary>ENOTDIR: a component of the path is a file, so there is no such root (the native read's error carries the errno).</summary>
     private static bool IsNotADirectory(IOException error) =>
         !OperatingSystem.IsWindows() && error.InnerException is System.ComponentModel.Win32Exception native && native.NativeErrorCode == Errno.Current.Enotdir;
 
-    /// <summary>The root's listing, read ONCE per audit (the sibling quarantines, then the entries): a root that exists but cannot be listed is a
-    /// <see cref="LeftoversAuditException"/> naming the root and the error, never an empty list.</summary>
-    private static (HashSet<string> Quarantined, List<FileSystemInfo> Entries) ListRoot(string tmp, Func<string, HashSet<string>>? quarantinedNames)
+    private static IEnumerable<FileSystemInfo> Listing(string tmp) => new DirectoryInfo(tmp).EnumerateFileSystemInfos();
+
+    /// <summary>The sibling quarantines of the root, listed ONCE per audit; a root that cannot be listed is a <see cref="LeftoversAuditException"/>.</summary>
+    private static HashSet<string> ListQuarantined(string tmp, Func<string, HashSet<string>>? quarantinedNames)
     {
         try
         {
-            return ((quarantinedNames ?? LeftoversSweep.QuarantinedNames)(tmp), [.. new DirectoryInfo(tmp).EnumerateFileSystemInfos()]);
+            return (quarantinedNames ?? LeftoversSweep.QuarantinedNames)(tmp);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new LeftoversAuditException(tmp, ex);
+        }
+    }
+
+    /// <summary>The next entry of the root's listing. A failure while listing — at the first entry or halfway — is a
+    /// <see cref="LeftoversAuditException"/> naming the root and the error, never an empty or a shortened answer.</summary>
+    private static bool Advance(IEnumerator<FileSystemInfo> entries, string tmp)
+    {
+        try
+        {
+            return entries.MoveNext();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

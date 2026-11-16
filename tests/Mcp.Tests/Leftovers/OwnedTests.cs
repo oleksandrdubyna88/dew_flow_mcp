@@ -80,13 +80,85 @@ public sealed class OwnedTests : IDisposable
         }
 
         DirectoryLinks.CreateOrSkip(Path.Combine(root, "deep", "link"), outside); // a junction on Windows where symlinks need a privilege
-        Removal.ClearReadOnlyBelow(root);
+        Removal.ClearReadOnlyBelow(root, _ => { }, _ => 1);
 
         files.Should().OnlyContain(file => !File.GetAttributes(file).HasFlag(FileAttributes.ReadOnly));
         File.GetAttributes(guarded).Should().HaveFlag(FileAttributes.ReadOnly, "what a link points at is not this folder's to change");
         File.Exists(guarded).Should().BeTrue();
         File.SetAttributes(guarded, FileAttributes.Normal); // so the scope can remove it
         Removal.UnlinkTopLevelLinks(Path.Combine(root, "deep"));
+    }
+
+    [Fact]
+    public void The_read_only_clearing_leaves_a_file_with_another_hard_link_alone_and_names_it()
+    {
+        var root = _owned.Dir("clear-readonly-links");
+        var shared = Path.Combine(root, "shared.txt");
+        var own = Path.Combine(root, "own.txt");
+        var gone = Path.Combine(root, "gone.txt");
+        foreach (var file in new[] { shared, own, gone })
+        {
+            File.WriteAllText(file, "x");
+            File.SetAttributes(file, FileAttributes.ReadOnly);
+        }
+
+        var warnings = new List<string>();
+        Removal.ClearReadOnlyBelow(root, warnings.Add, path => Path.GetFileName(path) switch { "shared.txt" => 2u, "gone.txt" => null, _ => 1u });
+
+        File.GetAttributes(own).Should().NotHaveFlag(FileAttributes.ReadOnly, "one link: the file is only this folder's");
+        File.GetAttributes(shared).Should().HaveFlag(FileAttributes.ReadOnly, "a second link means changing the attribute would change a file outside this folder");
+        File.GetAttributes(gone).Should().HaveFlag(FileAttributes.ReadOnly, "a file that vanished is nothing to change");
+        warnings.Should().ContainSingle().Which.Should().Contain(shared).And.Contain("2 hard links");
+        foreach (var file in new[] { shared, gone }) File.SetAttributes(file, FileAttributes.Normal);
+    }
+
+    [Fact]
+    public void A_real_second_hard_link_is_counted_by_the_native_read_and_keeps_the_file_untouched()
+    {
+        if (OperatingSystem.IsMacOS()) Assert.Skip("the hard-link count is read on Linux and Windows only");
+        var root = _owned.Dir("clear-readonly-real-link");
+        var outside = _owned.Dir("clear-readonly-real-link-outside");
+        var inside = Path.Combine(root, "data.txt");
+        var other = Path.Combine(outside, "alias.txt");
+        File.WriteAllText(inside, "x");
+        var made = OperatingSystem.IsWindows() ? DirectoryLinks.Run("cmd.exe", ["/c", "mklink", "/H", other, inside], DirectoryLinks.ToolTimeout) : DirectoryLinks.Run("ln", [inside, other], DirectoryLinks.ToolTimeout);
+        if (made.TimedOut || made.ExitCode != 0 || !File.Exists(other)) Assert.Skip("cannot make a hard link here");
+        File.SetAttributes(inside, FileAttributes.ReadOnly);
+
+        Native.LinkCountOf(inside).Should().Be(2u);
+        var warnings = new List<string>();
+        Removal.ClearReadOnlyBelow(root, warnings.Add);
+
+        File.GetAttributes(other).Should().HaveFlag(FileAttributes.ReadOnly, "the file outside the folder was not changed through the shared link");
+        warnings.Should().ContainSingle().Which.Should().Contain(inside);
+        File.SetAttributes(inside, FileAttributes.Normal);
+    }
+
+    [Fact]
+    public void A_folder_holding_a_read_only_file_with_another_hard_link_is_kept_and_the_file_is_named()
+    {
+        if (!OperatingSystem.IsWindows()) Assert.Skip("a read-only file stops a delete on Windows only; the hosted Windows leg runs this");
+        var parent = _owned.Dir("hardlink-parent");
+        var outside = _owned.Dir("hardlink-outside");
+        var warnings = new List<string>();
+        var dir = OwnedDir.Create("hardlink", parent, warnings.Add);
+        _owned.Own(dir, dir.Path);
+        var inside = Path.Combine(dir.Path, "data.txt");
+        var other = Path.Combine(outside, "alias.txt");
+        File.WriteAllText(inside, "x");
+        var made = DirectoryLinks.Run("cmd.exe", ["/c", "mklink", "/H", other, inside], DirectoryLinks.ToolTimeout);
+        if (made.TimedOut || made.ExitCode != 0) Assert.Skip("cannot make a hard link here");
+        File.SetAttributes(inside, FileAttributes.ReadOnly);
+
+        dir.Dispose();
+
+        Directory.Exists(dir.Path).Should().BeTrue("the file could not be cleared without changing a file outside the folder, so the folder stays");
+        File.Exists(dir.Path + ".owner").Should().BeTrue("and its claim with it");
+        File.GetAttributes(other).Should().HaveFlag(FileAttributes.ReadOnly, "the other name was never touched");
+        warnings.Should().Contain(w => w.Contains(inside, StringComparison.Ordinal) && w.Contains("hard links", StringComparison.Ordinal));
+        File.SetAttributes(inside, FileAttributes.Normal);
+        dir.Dispose();
+        Directory.Exists(dir.Path).Should().BeFalse("with the attribute cleared by hand the next disposal removes it");
     }
 
     /// <summary>One <c>git</c> step in <paramref name="folder"/>; false (the test returns) when git is not installed, a failed step fails the test.</summary>

@@ -31,6 +31,7 @@ internal static partial class Native
     private const int AtFdcwd = -100, AtSymlinkNofollow = 0x100, AtEmptyPath = 0x1000;
     private const uint RenameNoreplace = 1;
     private const uint StatxBasicStats = 0x7ff;
+    private const uint StatxNlink = 0x4;
 
     // STATX_TYPE | STATX_MODE | STATX_UID | STATX_MTIME | STATX_CTIME | STATX_INO — a file system that answers without
     // one of them gives no identity, and an identity that is guessed could authorise a removal.
@@ -56,6 +57,41 @@ internal static partial class Native
         if (OperatingSystem.IsMacOS()) return DarwinIdentityOf(path);
         if (OperatingSystem.IsWindows()) return WindowsIdentityOf(path);
         throw new PlatformNotSupportedException("the leftovers helper supports Linux, macOS and Windows only");
+    }
+
+    /// <summary>How many hard links the entry ITSELF has (a link is never followed): null when it is not there, an exception for anything unreadable.
+    /// Linux: <c>stx_nlink</c> (u32 at 16; <c>STATX_NLINK</c> is in the basic stats). Windows: <c>NumberOfLinks</c> of <c>FileStandardInfo</c> from the
+    /// handle <see cref="OpenEntry"/> opens. macOS: not read — the removal that needs it (clearing a read-only attribute) runs on Windows only, and a
+    /// caller there that asks gets <see cref="PlatformNotSupportedException"/>, never a guessed 1.</summary>
+    internal static uint? LinkCountOf(string path)
+    {
+        if (OperatingSystem.IsLinux()) return LinuxLinkCountOf(path);
+        if (OperatingSystem.IsWindows()) return WindowsLinkCountOf(path);
+        throw new PlatformNotSupportedException("the hard-link count is read on Linux and Windows only");
+    }
+
+    [SupportedOSPlatform("linux")]
+    private static uint? LinuxLinkCountOf(string path)
+    {
+        Span<byte> buffer = stackalloc byte[256];
+        if (Libc.Statx(AtFdcwd, path, AtSymlinkNofollow, StatxBasicStats, buffer) != 0)
+        {
+            var errno = Marshal.GetLastPInvokeError();
+            return errno == Errno.Linux.Enoent ? null : throw Failure($"statx {path}", errno);
+        }
+
+        if ((BinaryPrimitives.ReadUInt32LittleEndian(buffer) & StatxNlink) == 0) throw new InvalidOperationException($"statx gave no link count for {path}");
+        return BinaryPrimitives.ReadUInt32LittleEndian(buffer[16..]);
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static uint? WindowsLinkCountOf(string path)
+    {
+        using var handle = OpenEntry(path, followLinks: false, out var error);
+        if (handle is null) return error is ErrorFileNotFound or ErrorPathNotFound ? null : throw Failure($"CreateFileW {path}", (int)error);
+        var info = new byte[24]; // FILE_STANDARD_INFO: AllocationSize i64, EndOfFile i64, NumberOfLinks u32, DeletePending, Directory
+        if (!Kernel32.GetFileInformationByHandleEx(handle, 1, info, (uint)info.Length)) throw Failure($"FileStandardInfo {path}", Marshal.GetLastPInvokeError());
+        return BinaryPrimitives.ReadUInt32LittleEndian(info.AsSpan(16));
     }
 
     /// <summary>The kernel's fixed <c>struct statx</c> layout: <c>stx_mask</c> u32 @0, <c>stx_uid</c> u32 @20,

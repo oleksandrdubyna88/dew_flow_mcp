@@ -27,7 +27,8 @@ internal static class Removal
             return false;
         }
 
-        var failure = Retry(() => RemoveEntry(dir));
+        var told = new HashSet<string>(StringComparer.Ordinal); // five tries, one warning per distinct message
+        var failure = Retry(() => RemoveEntry(dir, message => { if (told.Add(message)) warn(message); }));
         if (failure is not null)
         {
             warn($"owned: could not remove {dir} ({failure.GetType().Name}: {failure.Message}) — left for the start-of-run sweep");
@@ -37,37 +38,48 @@ internal static class Removal
         return Claim(dir, warn);
     }
 
-    private static void RemoveEntry(string dir)
+    private static void RemoveEntry(string dir, Action<string> warn)
     {
         var entry = Native.IdentityOf(dir); // an unreadable entry throws: it is not "gone"
         if (entry is null) return;
         if (entry.Value.IsLink) Unlink(dir, entry.Value.IsDirectory);
-        else if (entry.Value.IsDirectory) RemoveFolder(dir);
+        else if (entry.Value.IsDirectory) RemoveFolder(dir, warn);
         else throw new IOException("the entry is not a folder");
         if (Native.IdentityOf(dir) is not null) throw new IOException("the entry is still there");
     }
 
-    private static void RemoveFolder(string dir)
+    private static void RemoveFolder(string dir, Action<string> warn)
     {
         UnlinkTopLevelLinks(dir);
-        if (OperatingSystem.IsWindows()) ClearReadOnlyBelow(dir); // .NET's recursive delete refuses a read-only file there
+        if (OperatingSystem.IsWindows()) ClearReadOnlyBelow(dir, warn); // .NET's recursive delete refuses a read-only file there
         Directory.Delete(dir, recursive: true);
     }
 
     /// <summary>Clear the read-only attribute of every file and folder below <paramref name="dir"/>, and of <paramref name="dir"/> itself — what
     /// a recursive delete on Windows needs (it refuses a read-only file, and git writes its object files read-only). A link or junction is never
     /// entered and never changed: it is neither listed through nor opened, so nothing it points at is touched; the delete that follows removes
-    /// it as a link.</summary>
-    internal static void ClearReadOnlyBelow(string dir)
+    /// it as a link. A FILE with more than one hard link is not changed (the attribute lives on the file, so clearing it here would change a file
+    /// outside the folder being removed): <paramref name="warn"/> names it and its delete then fails, so the folder is kept and reported.
+    /// <paramref name="linkCount"/> is the seam (default <see cref="Native.LinkCountOf"/>): null means the file is gone, nothing to change.</summary>
+    internal static void ClearReadOnlyBelow(string dir, Action<string> warn, Func<string, uint?>? linkCount = null)
     {
         foreach (var entry in new DirectoryInfo(dir).EnumerateFileSystemInfos())
         {
             if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint)) continue;
-            if (entry is DirectoryInfo folder) ClearReadOnlyBelow(folder.FullName); // clears the folder itself last
-            else ClearReadOnly(entry);
+            if (entry is DirectoryInfo folder) ClearReadOnlyBelow(folder.FullName, warn, linkCount); // clears the folder itself last
+            else ClearFile(entry, warn, linkCount ?? Native.LinkCountOf);
         }
 
         ClearReadOnly(new DirectoryInfo(dir));
+    }
+
+    private static void ClearFile(FileSystemInfo file, Action<string> warn, Func<string, uint?> linkCount)
+    {
+        if (!file.Attributes.HasFlag(FileAttributes.ReadOnly)) return;
+        var links = linkCount(file.FullName);
+        if (links is null) return;
+        if (links > 1) warn($"owned: {file.FullName} has {links} hard links, so its read-only attribute is not cleared (that would change a file outside the folder being removed) — the folder is kept");
+        else ClearReadOnly(file);
     }
 
     private static void ClearReadOnly(FileSystemInfo entry)
