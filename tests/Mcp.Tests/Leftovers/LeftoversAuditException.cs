@@ -13,6 +13,16 @@ public sealed class LeftoversAuditException : InvalidOperationException
         ClaimedInTempRoot = claimedInTempRoot;
     }
 
+    /// <summary>The audit could not reach <paramref name="root"/>, so it cannot say what this run left in it: the run is red, not clean. The
+    /// lists are empty; the message names the root and the error.</summary>
+    public LeftoversAuditException(string root, Exception error)
+        : base($"{OwnedToken.RepoToken} tests: the end-of-run audit could not read the temp root {root} ({error.GetType().Name}: {error.Message}) — it cannot say what this run left there; remedy: make the folder (and every parent of it) reachable by this user again, or point TMPDIR at one that is", error)
+    {
+        NeverDisposed = [];
+        DisposedNotRemoved = [];
+        ClaimedInTempRoot = [];
+    }
+
     /// <summary>Folders created through the helper and never disposed.</summary>
     public IReadOnlyList<string> NeverDisposed { get; }
 

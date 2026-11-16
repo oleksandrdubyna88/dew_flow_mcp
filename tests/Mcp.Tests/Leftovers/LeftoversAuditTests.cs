@@ -89,6 +89,75 @@ public sealed class LeftoversAuditTests : IDisposable
     }
 
 
+    // ---- N5 (benchmark's E6.S2): a temp root that exists but cannot be reached must never read as "nothing claimed" ----------------
+
+    [Fact]
+    public void A_temp_root_that_exists_but_cannot_be_listed_is_not_a_clean_audit()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip(WindowsReason);
+            return;
+        }
+
+        if (Environment.IsPrivilegedProcess) Assert.Skip(PrivilegedReason);
+        var tmp = _owned.Dir("audit-unlistable-tmp");
+        Plant(tmp, Owned.NameFor("claimed"), Owner.This);
+        File.SetUnixFileMode(tmp, UnixFileMode.None);
+        try
+        {
+            var discover = () => LeftoversAudit.ClaimedBy(tmp, Owner.This, Mine, NoEnv);
+
+            discover.Should().Throw<Exception>("the root cannot be read, so nothing can be said about what this run left in it")
+                .Which.Message.Should().Contain(tmp);
+        }
+        finally
+        {
+            File.SetUnixFileMode(tmp, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    [Fact]
+    public void A_temp_root_beneath_a_parent_that_cannot_be_traversed_is_not_a_missing_one()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip(WindowsReason);
+            return;
+        }
+
+        if (Environment.IsPrivilegedProcess) Assert.Skip(PrivilegedReason);
+        var parent = _owned.Dir("audit-untraversable-parent");
+        var tmp = Path.Combine(parent, "root");
+        Directory.CreateDirectory(tmp);
+        var claimed = Plant(tmp, Owned.NameFor("claimed"), Owner.This);
+        File.SetUnixFileMode(parent, UnixFileMode.None);
+        try
+        {
+            var discover = () => LeftoversAudit.ClaimedBy(tmp, Owner.This, Mine, NoEnv);
+
+            discover.Should().Throw<LeftoversAuditException>("a root nobody can reach is not a root that is not there").Which.Message.Should().Contain(tmp);
+        }
+        finally
+        {
+            File.SetUnixFileMode(parent, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        Directory.Exists(claimed).Should().BeTrue("with the mode back the claimed folder is where it was: nothing here removed it");
+    }
+
+    [Fact]
+    public void A_temp_root_that_is_not_there_is_an_audit_with_nothing_to_find()
+    {
+        var parent = _owned.Dir("audit-missing-parent");
+
+        LeftoversAudit.ClaimedBy(Path.Combine(parent, "no-such-root"), Owner.This, Mine, NoEnv).Should().BeEmpty();
+    }
+
+    // The permission tests need a mode that stops this process: POSIX, and not root (root reads through mode 000).
+    private const string WindowsReason = "chmod 000 is POSIX only; Windows decides by ACLs";
+    private const string PrivilegedReason = "a privileged process reads through mode 000";
+
     // ---- A: a sibling child of the same run -----------------------------------------------------------------------------
 
     [Fact]

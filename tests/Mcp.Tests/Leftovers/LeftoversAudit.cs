@@ -38,7 +38,7 @@ internal static class LeftoversAudit
     internal static IReadOnlyList<Claimed> Discover(
         string tmp, Owner owner, Func<string, bool>? mine = null, Func<string, string?>? env = null, Func<string, HashSet<string>>? quarantinedNames = null)
     {
-        if (!Directory.Exists(tmp) || Owner.RunRecord(env, _ => { }) != Owner.This) return [];
+        if (!RootExists(tmp) || Owner.RunRecord(env, _ => { }) != Owner.This) return [];
         var pattern = Owned.Pattern();
         var quarantined = (quarantinedNames ?? LeftoversSweep.QuarantinedNames)(tmp); // listed ONCE per audit, not once per orphan claim
         var found = new List<Claimed>();
@@ -49,6 +49,22 @@ internal static class LeftoversAudit
         }
 
         return found;
+    }
+
+    /// <summary>Is there a temp root at all? Read as the entry itself (<see cref="Native.IdentityOf"/>), not with <c>Directory.Exists</c>, which
+    /// says false for an error exactly as it does for an absence: a root beneath a parent this process cannot traverse is not a missing
+    /// root, and an audit that took it for one would pass a run that left a claimed folder in it. Only an entry that is not there (or a link
+    /// to nothing) is "missing"; one that cannot be reached is a <see cref="LeftoversAuditException"/> naming the root and the error.</summary>
+    private static bool RootExists(string tmp)
+    {
+        try
+        {
+            return Native.IdentityOf(tmp) is { } entry && (!entry.IsLink || Directory.Exists(tmp));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            throw new LeftoversAuditException(tmp, ex);
+        }
     }
 
     private static Claimed? Examine(FileSystemInfo entry, Owner owner, Func<string, bool>? mine, HashSet<string> quarantined) =>

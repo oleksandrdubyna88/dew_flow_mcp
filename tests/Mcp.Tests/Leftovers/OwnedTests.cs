@@ -15,6 +15,68 @@ public sealed class OwnedTests : IDisposable
 
     private static string Other => OwnerFixtures.Other;
 
+    // N1 (benchmark's E6.S2): git marks its object files read-only, and on Windows a recursive delete refuses a read-only file.
+    [Fact]
+    public void A_folder_holding_a_git_repository_with_a_commit_is_removed_with_its_claim()
+    {
+        var parent = _owned.Dir("git-parent");
+        var warnings = new List<string>();
+        var dir = OwnedDir.Create("git-repo", parent, warnings.Add);
+        _owned.Own(dir, dir.Path); // disposed by the scope whatever happens below; Dispose is idempotent
+        File.WriteAllText(Path.Combine(dir.Path, "a.txt"), "one\n");
+        foreach (var step in new[] { new[] { "init", "-q" }, ["add", "a.txt"], ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "one"] })
+        {
+            if (!Git(dir.Path, step)) Assert.Skip("git is not installed here");
+        }
+
+        Directory.EnumerateFiles(Path.Combine(dir.Path, ".git", "objects"), "*", SearchOption.AllDirectories).Should().NotBeEmpty("the commit wrote object files");
+
+        dir.Dispose();
+
+        Directory.Exists(dir.Path).Should().BeFalse("the folder is removed with its read-only object files");
+        File.Exists(dir.Path + ".owner").Should().BeFalse("the claim goes with it");
+        warnings.Should().BeEmpty();
+        OwnedDir.Unreclaimed().Select(u => u.Path).Should().NotContain(dir.Path);
+    }
+
+    [Fact]
+    public void A_folder_holding_read_only_files_at_two_depths_is_removed_with_its_claim()
+    {
+        if (!OperatingSystem.IsWindows()) Assert.Skip("a read-only attribute blocks a delete on Windows only; elsewhere the folder's mode decides");
+        var parent = _owned.Dir("readonly-parent");
+        var warnings = new List<string>();
+        var dir = OwnedDir.Create("readonly", parent, warnings.Add);
+        _owned.Own(dir, dir.Path);
+        Directory.CreateDirectory(Path.Combine(dir.Path, "deep", "er"));
+        foreach (var file in new[] { Path.Combine(dir.Path, "top.txt"), Path.Combine(dir.Path, "deep", "er", "leaf.txt") })
+        {
+            File.WriteAllText(file, "x");
+            File.SetAttributes(file, FileAttributes.ReadOnly);
+        }
+
+        dir.Dispose();
+
+        Directory.Exists(dir.Path).Should().BeFalse();
+        File.Exists(dir.Path + ".owner").Should().BeFalse();
+        warnings.Should().BeEmpty();
+    }
+
+    /// <summary>One <c>git</c> step in <paramref name="folder"/>; false (the test returns) when git is not installed, a failed step fails the test.</summary>
+    private static bool Git(string folder, string[] arguments)
+    {
+        try
+        {
+            var run = DirectoryLinks.Run("git", ["-C", folder, .. arguments], DirectoryLinks.ToolTimeout);
+            run.TimedOut.Should().BeFalse("git " + arguments[^1]);
+            run.ExitCode.Should().Be(0, "git " + string.Join(' ', arguments) + ": " + run.Output);
+            return true;
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            return false; // git is not installed here: nothing to prove, and no folder to leave
+        }
+    }
+
     [Fact]
     public void A_name_carries_the_prefix_the_owner_the_token_what_and_six_random_characters()
     {
