@@ -16,11 +16,28 @@ public sealed class LeftoversAuditException : InvalidOperationException
     /// <summary>The audit could not reach <paramref name="root"/>, so it cannot say what this run left in it: the run is red, not clean. The
     /// lists are empty; the message names the root and the error.</summary>
     public LeftoversAuditException(string root, Exception error)
-        : base($"{OwnedToken.RepoToken} tests: the end-of-run audit could not read the temp root {root} ({error.GetType().Name}: {error.Message}) — it cannot say what this run left there; remedy: make the folder (and every parent of it) reachable by this user again, or point TMPDIR at one that is", error)
+        : this(root, error, [], [])
     {
-        NeverDisposed = [];
-        DisposedNotRemoved = [];
+    }
+
+    /// <summary>The same, and what the registry held at that moment: the folders never disposed and disposed but not removed are named first,
+    /// under their groups, as in any other verdict.</summary>
+    public LeftoversAuditException(string root, Exception error, IReadOnlyList<string> neverDisposed, IReadOnlyList<string> disposedNotRemoved)
+        : base(RootMessage(root, error, neverDisposed, disposedNotRemoved), error)
+    {
+        UnreadableRoot = root;
+        NeverDisposed = neverDisposed;
+        DisposedNotRemoved = disposedNotRemoved;
         ClaimedInTempRoot = [];
+    }
+
+    /// <summary>The temp root the audit could not reach, when that is what this failure says.</summary>
+    public string? UnreadableRoot { get; }
+
+    private static string RootMessage(string root, Exception error, IReadOnlyList<string> never, IReadOnlyList<string> failed)
+    {
+        var sentence = $"{OwnedToken.RepoToken} tests: the end-of-run audit could not read the temp root {root} ({error.GetType().Name}: {error.Message}) — it cannot say what this run left there; remedy: make the folder (and every parent of it) reachable by this user again, or point TMPDIR at one that is";
+        return never.Count + failed.Count == 0 ? sentence : MessageFor(never, failed, []) + "\n" + sentence;
     }
 
     /// <summary>Folders created through the helper and never disposed.</summary>

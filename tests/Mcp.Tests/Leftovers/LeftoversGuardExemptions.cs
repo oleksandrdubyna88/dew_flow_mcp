@@ -36,12 +36,25 @@ internal static class GuardExemptions
     private static readonly Regex MarkerBody = Rx(@"^\s*([^\s—]*)\s*(?:—\s*(.*?))?\s*(?:\*/|-->)?\s*\z");
     private static readonly Regex Placeholder = Rx(@"^(?:see above|see below|needed|required|necessary|obvious|todo|tbd|n/?a|because|why|reason|it is needed)\b", RegexOptions.IgnoreCase);
 
+    // Declared BEFORE NamedOwner: static fields start in textual order.
+    private static readonly string Article = "(?:" + string.Join('|', new[] { "the", "a", "an", "its", "this", "that" }.Select(Spelled)) + ")";
+
     /// <summary>What a <c>container-scoped</c> reason names: <c>live and die with</c> or <c>lives and dies with</c>, then an optional article
-    /// (<c>the</c>, <c>a</c>, <c>an</c>, <c>its</c>, <c>this</c>, <c>that</c>) and an owner — a word of at least two characters that is not itself an article.
-    /// "… lives and dies with the" names no owner.</summary>
+    /// (<c>the</c>, <c>a</c>, <c>an</c>, <c>its</c>, <c>this</c>, <c>that</c>) and an owner — a word of at least two characters that is not itself an article
+    /// and does not start with an article followed by punctuation. "… lives and dies with the" names no owner. The Node guard reads the SAME text
+    /// (<c>NAMED_OWNER</c> of <c>tools/leftovers-check.mjs</c>) and neither side leans on its engine's defaults: whitespace is the explicit class
+    /// <c>[\f\n\r\t\v\x85\p{Z}]</c>; a word edge is a lookaround over <see cref="WordChar"/> (U+200C and U+200D count, as .NET's <c>\b</c> counts them);
+    /// and there is NO case-insensitive option — each letter of the spelling and of the articles is an explicit pair (<c>[lL]</c>), because a case fold
+    /// differs by engine (JavaScript's folds U+017F to <c>s</c>, .NET's does not).</summary>
     private static readonly Regex NamedOwner = Rx(
-        @"\b(?:lives\s+and\s+dies|live\s+and\s+die)\s+with\s+(?:(?:the|a|an|its|this|that)\s+)?(?!(?:the|a|an|its|this|that)\b)[\p{L}\p{N}_][\p{L}\p{N}_.-]+",
-        RegexOptions.IgnoreCase);
+        $"(?<!{WordChar})(?:{Spelled("lives")}{Space}+{Spelled("and")}{Space}+{Spelled("dies")}|{Spelled("live")}{Space}+{Spelled("and")}{Space}+{Spelled("die")}){Space}+{Spelled("with")}{Space}+"
+        + $"(?:{Article}{Space}+)?(?!{Article}(?!{WordChar}))[\\p{{L}}\\p{{N}}_][\\p{{L}}\\p{{N}}_.-]+");
+
+    private const string Space = @"[\f\n\r\t\v\x85\p{Z}]";
+    private const string WordChar = @"[\p{L}\p{Mn}\p{Nd}\p{Pc}\u200C\u200D]";
+
+    /// <summary>A word with every letter an explicit upper/lower pair, so that no case-folding option of the engine is involved.</summary>
+    private static string Spelled(string word) => string.Concat(word.Select(c => $"[{c}{char.ToUpperInvariant(c)}]"));
 
     private static Regex Rx(string pattern, RegexOptions options = RegexOptions.None) => new(pattern, options | RegexOptions.CultureInvariant);
 
@@ -83,7 +96,7 @@ internal static class GuardExemptions
         reason.Contains("lock:", StringComparison.Ordinal) ? null : "the exemption of `shared-store` must name its lock (`lock: …`)";
 
     private static string? OwnerProblem(string reason) =>
-        NamedOwner.IsMatch(reason) ? null : "the exemption of `container-scoped` must name what it lives and dies with (`<what> lives and dies with <fixture or job>`)";
+        NamedOwner.IsMatch(reason) ? null : "the exemption of `container-scoped` must name what it lives and dies with: `lives and dies with` or `live and die with`, then an optional article and an owner of two characters or more that is not an article and does not start with an article followed by punctuation (`the PostgresFixture container`, not `the-fixture`)";
 
     private static bool IsReason(string reason) =>
         reason.Length >= 10 && reason.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length >= 3 && !Placeholder.IsMatch(reason);

@@ -38,11 +38,11 @@ internal static class LeftoversAudit
     internal static IReadOnlyList<Claimed> Discover(
         string tmp, Owner owner, Func<string, bool>? mine = null, Func<string, string?>? env = null, Func<string, HashSet<string>>? quarantinedNames = null)
     {
-        if (!RootExists(tmp) || Owner.RunRecord(env, _ => { }) != Owner.This) return [];
+        if (Owner.RunRecord(env, _ => { }) != Owner.This || !RootExists(tmp)) return []; // a process that writes the run's record does not touch the root at all
         var pattern = Owned.Pattern();
-        var quarantined = (quarantinedNames ?? LeftoversSweep.QuarantinedNames)(tmp); // listed ONCE per audit, not once per orphan claim
+        var (quarantined, entries) = ListRoot(tmp, quarantinedNames);
         var found = new List<Claimed>();
-        foreach (var entry in new DirectoryInfo(tmp).EnumerateFileSystemInfos())
+        foreach (var entry in entries)
         {
             if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint) || !pattern.IsMatch(entry.Name)) continue;
             if (Examine(entry, owner, mine, quarantined) is { } claimed) found.Add(claimed);
@@ -53,15 +53,45 @@ internal static class LeftoversAudit
 
     /// <summary>Is there a temp root at all? Read as the entry itself (<see cref="Native.IdentityOf"/>), not with <c>Directory.Exists</c>, which
     /// says false for an error exactly as it does for an absence: a root beneath a parent this process cannot traverse is not a missing
-    /// root, and an audit that took it for one would pass a run that left a claimed folder in it. Only an entry that is not there (or a link
-    /// to nothing) is "missing"; one that cannot be reached is a <see cref="LeftoversAuditException"/> naming the root and the error.</summary>
+    /// root, and an audit that took it for one would pass a run that left a claimed folder in it. Only an entry that is not there (a path
+    /// that runs through a file, a link to nothing included) is "missing"; one that cannot be reached is a <see cref="LeftoversAuditException"/>
+    /// naming the root and the error. A link is judged by its FINAL target, read the same way (a target beneath a parent that cannot be traversed
+    /// is unreachable, not missing).</summary>
     private static bool RootExists(string tmp)
     {
         try
         {
-            return Native.IdentityOf(tmp) is { } entry && (!entry.IsLink || Directory.Exists(tmp));
+            return Native.IdentityOf(tmp) is { } entry && (!entry.IsLink || RootExists(FinalTarget(tmp)));
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        catch (IOException ex) when (IsNotADirectory(ex))
+        {
+            return false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException && ex is not LeftoversAuditException)
+        {
+            throw new LeftoversAuditException(tmp, ex);
+        }
+        catch (LeftoversAuditException ex) when (ex.InnerException is { } inner)
+        {
+            throw new LeftoversAuditException(tmp, inner); // named by the root the audit was given, the error says where it stopped
+        }
+    }
+
+    private static string FinalTarget(string link) => new DirectoryInfo(link).ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? link;
+
+    /// <summary>ENOTDIR: a component of the path is a file, so there is no such root (the native read's error carries the errno).</summary>
+    private static bool IsNotADirectory(IOException error) =>
+        !OperatingSystem.IsWindows() && error.InnerException is System.ComponentModel.Win32Exception native && native.NativeErrorCode == Errno.Current.Enotdir;
+
+    /// <summary>The root's listing, read ONCE per audit (the sibling quarantines, then the entries): a root that exists but cannot be listed is a
+    /// <see cref="LeftoversAuditException"/> naming the root and the error, never an empty list.</summary>
+    private static (HashSet<string> Quarantined, List<FileSystemInfo> Entries) ListRoot(string tmp, Func<string, HashSet<string>>? quarantinedNames)
+    {
+        try
+        {
+            return ((quarantinedNames ?? LeftoversSweep.QuarantinedNames)(tmp), [.. new DirectoryInfo(tmp).EnumerateFileSystemInfos()]);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             throw new LeftoversAuditException(tmp, ex);
         }
@@ -103,9 +133,23 @@ internal static class LeftoversAudit
     {
         var left = registry.Select(d => (d.Path, d.DisposeAttempted)).ToList();
         foreach (var dir in registry) dir.Dispose();
-        var claimed = Discover(tmp, owner, mine, env);
+        var claimed = DiscoverKeeping(left, tmp, owner, mine, env);
         foreach (var item in claimed) Remove(item, mine, hooks);
         if (Verdict(left, [.. claimed.Select(c => c.Path)]) is { } failure) throw failure;
+    }
+
+    /// <summary>The discovery of <see cref="Run"/>: a root that cannot be reached does not lose what the registry held — the failure names the
+    /// folders never disposed and disposed but not removed too.</summary>
+    private static IReadOnlyList<Claimed> DiscoverKeeping(List<(string Path, bool DisposeAttempted)> left, string tmp, Owner owner, Func<string, bool>? mine, Func<string, string?>? env)
+    {
+        try
+        {
+            return Discover(tmp, owner, mine, env);
+        }
+        catch (LeftoversAuditException unreachable) when (unreachable.UnreadableRoot is { } root && unreachable.InnerException is { } error)
+        {
+            throw new LeftoversAuditException(root, error, [.. left.Where(l => !l.DisposeAttempted).Select(l => l.Path)], [.. left.Where(l => l.DisposeAttempted).Select(l => l.Path)]);
+        }
     }
 
     /// <summary>The sweep's own removal (<see cref="LeftoversSweep.RemoveCaptured"/>), by the identity captured at discovery: a

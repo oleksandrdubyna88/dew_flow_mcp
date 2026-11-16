@@ -50,7 +50,29 @@ internal static class Removal
     private static void RemoveFolder(string dir)
     {
         UnlinkTopLevelLinks(dir);
+        if (OperatingSystem.IsWindows()) ClearReadOnlyBelow(dir); // .NET's recursive delete refuses a read-only file there
         Directory.Delete(dir, recursive: true);
+    }
+
+    /// <summary>Clear the read-only attribute of every file and folder below <paramref name="dir"/>, and of <paramref name="dir"/> itself — what
+    /// a recursive delete on Windows needs (it refuses a read-only file, and git writes its object files read-only). A link or junction is never
+    /// entered and never changed: it is neither listed through nor opened, so nothing it points at is touched; the delete that follows removes
+    /// it as a link.</summary>
+    internal static void ClearReadOnlyBelow(string dir)
+    {
+        foreach (var entry in new DirectoryInfo(dir).EnumerateFileSystemInfos())
+        {
+            if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint)) continue;
+            if (entry is DirectoryInfo folder) ClearReadOnlyBelow(folder.FullName); // clears the folder itself last
+            else ClearReadOnly(entry);
+        }
+
+        ClearReadOnly(new DirectoryInfo(dir));
+    }
+
+    private static void ClearReadOnly(FileSystemInfo entry)
+    {
+        if (entry.Attributes.HasFlag(FileAttributes.ReadOnly)) entry.Attributes &= ~FileAttributes.ReadOnly;
     }
 
     /// <summary>Only the claim beside <paramref name="dir"/> (the helper's own, or one whose folder was never made).</summary>

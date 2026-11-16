@@ -249,13 +249,28 @@ public static class LeftoversGuard
 
     // ---- shared-store ----------------------------------------------------------------------------------------------------------
 
-    /// <summary>The line's first shared-store hit (one reported per line, as the shipped guard counts); a named drop or truncate of an owner-form
-    /// name is not one. Every match of every pattern is a hit, so that a line holding a teardown AND a reset is not cleared by the teardown:
-    /// with <paramref name="containerScoped"/> (a valid <c>container-scoped</c> marker on the line or the one above, rule §6 (b)) the container's
-    /// own teardowns (<see cref="ContainerTeardown"/>) are no hit, every other one still is.</summary>
-    private static IEnumerable<string> SharedStoreHits(string line, bool containerScoped) =>
-        SharedStore.SelectMany(s => s.Pattern.Matches(line).Where(m => IsStoreHit(m, s.Named))).Where(m => !(containerScoped && ContainerTeardown.IsMatch(m.Value)))
-            .Select(m => m.Value.Trim()).Take(1);
+    /// <summary>The first shared-store pattern that hits the line, by its FIRST match (one hit per line, as the shipped guard counts — the same
+    /// contract as the Node guard's <c>sharedStoreHit</c>); a named drop or truncate of an owner-form name is not one. With
+    /// <paramref name="containerScoped"/> (a valid <c>container-scoped</c> marker on the line or the one above, rule §6 (b)) a line whose every
+    /// shared-store match is the container's own teardown (<see cref="IsContainerTeardown"/>) has no hit; on any other line that has a hit the one reported is the
+    /// first match that is NOT a teardown (a line with a teardown and a reset names the reset), and a line that has none stays clean.</summary>
+    private static IEnumerable<string> SharedStoreHits(string line, bool containerScoped)
+    {
+        var first = SharedStore.Select(s => (s.Named, Match: s.Pattern.Match(line))).Where(s => IsStoreHit(s.Match, s.Named)).Select(s => s.Match.Value.Trim()).Take(1).ToList();
+        return !containerScoped || first.Count == 0 ? first : IsContainerTeardown(line) ? [] : [.. StoreMatches(line).Where(hit => !ContainerTeardown.IsMatch(hit)).Take(1)];
+    }
+
+    /// <summary>Every shared-store match on the line, all patterns, all occurrences, the owner-form names left out.</summary>
+    private static IEnumerable<string> StoreMatches(string line) =>
+        SharedStore.SelectMany(s => s.Pattern.Matches(line).Where(m => IsStoreHit(m, s.Named))).Select(m => m.Value.Trim());
+
+    /// <summary>Is EVERY shared-store match on the line (all of them, not the first of each pattern) a container's own teardown — and is there at
+    /// least one? A teardown beside a reset on one line clears nothing. As the Node guard's <c>isContainerTeardown</c>.</summary>
+    private static bool IsContainerTeardown(string line)
+    {
+        var hits = StoreMatches(line).ToList();
+        return hits.Count > 0 && hits.All(hit => ContainerTeardown.IsMatch(hit));
+    }
 
     private static bool IsStoreHit(Match match, bool named) =>
         match.Success && !(named && OwnerForm.IsMatch(match.Groups[1].Value.TrimStart('"', '\'', '`')));

@@ -137,6 +137,34 @@ public sealed class LeftoversGuardTests : IDisposable
         Add("F42 N19 a teardown and a DR§OP TABLE on one line", "a.sh", $"# {Scoped(Owner)}\npsql -c 'DR§OP DATABASE a; DR§OP TABLE users'", "shared-store");
         Add("F42 N19 FLUSH§DB and FLUSH§ALL on one line", "a.sh", $"# {Scoped(Owner)}\nredis-cli FLUSH§DB; redis-cli FLUSH§ALL", "shared-store");
         Add("F42 N19 teardowns only on one line", "a.sh", $"# {Scoped(Owner)}\npsql -c 'DR§OP DATABASE a; DR§OP SCHEMA b'; redis-cli FLUSH§DB", "");
+        // Parity rows with the Node guard (F41's tests), item by item: what Node answers for the same text.
+        Add("F42 P1 an owner of two characters, one of them punctuation", "tests/X/A.cs", $"// {Scoped("the data lives and dies with x.")}\nvar a = 1;", "");
+        Add("F42 P1 an owner that starts with an underscore", "tests/X/A.cs", $"// {Scoped("the data lives and dies with the _x")}\nvar a = 1;", "");
+        Add("F42 P1 an underscore continues a word, so its_x is no article", "tests/X/A.cs", $"// {Scoped("the data lives and dies with its_x")}\nvar a = 1;", "");
+        Add("F42 P1 any whitespace between the words", "tests/X/A.cs", $"// {Scoped("the data lives and dies with the\tPostgresFixture")}\nvar a = 1;", "");
+        Add("F42 P1 the spelling twice, one occurrence with an owner is enough", "tests/X/A.cs", $"// {Scoped("the x lives and dies with the, and the y lives and dies with the Orders fixture")}\nvar a = 1;", "");
+        Add("F42 N16 a zero-width joiner before the spelling is a word character, so the spelling starts mid-word", "tests/X/A.cs", $"// {Scoped("\u200Dlives and dies with the Orders fixture")}\nvar a = 1;", "exemption");
+        Add("F42 N16 a letter before the spelling", "tests/X/A.cs", $"// {Scoped("xlives and dies with the fixture")}\nvar a = 1;", "exemption");
+        Add("F42 N16 the long s is not an s: the spelling is ASCII case classes, not a case fold", "tests/X/A.cs", $"// {Scoped("live\u017F and die\u017F with the fixture")}\nvar a = 1;", "exemption");
+        Add("F42 N16 a one-character word after an article", "tests/X/A.cs", $"// {Scoped("the per-test databases lives and dies with a b")}\nvar a = 1;", "exemption");
+        Add("F42 N16 an article alone, an", "tests/X/A.cs", $"// {Scoped("the per-test databases lives and dies with an")}\nvar a = 1;", "exemption");
+        Add("F42 N16 an article and a dot-word, a.b", "tests/X/A.cs", $"// {Scoped("the per-test databases lives and dies with a.b")}\nvar a = 1;", "exemption");
+        Add("F42 N16 an article followed by punctuation, a. foo", "tests/X/A.cs", $"// {Scoped("the per-test databases lives and dies with a. foo")}\nvar a = 1;", "exemption");
+        Add("F42 N16 an article followed by punctuation, an. foo", "tests/X/A.cs", $"// {Scoped("the per-test databases lives and dies with an. foo")}\nvar a = 1;", "exemption");
+        Add("F42 N16 an article joined to a word by a dash, the-fixture", "tests/X/A.cs", $"// {Scoped("the per-test databases lives and dies with the-fixture")}\nvar a = 1;", "exemption");
+        Add("F42 N16 an article and an article-led word, the the-fixture", "tests/X/A.cs", $"// {Scoped("the per-test databases lives and dies with the the-fixture")}\nvar a = 1;", "exemption");
+        Add("F42 P1 an then a zero-width joiner and a letter: the joiner is a word character, so an is no article there", "tests/X/A.cs", $"// {Scoped("the data lives and dies with an\u200Dx")}\nvar a = 1;", "");
+        Add("F42 N16 an article, a zero-width non-joiner and punctuation", "tests/X/A.cs", $"// {Scoped("the data lives and dies with a\u200C. foo")}\nvar a = 1;", "exemption");
+        Add("F42 N2 a placeholder repeated is no reason", "tests/X/A.cs", $"// {Scoped("n/a n/a n/a n/a")}\nvar a = 1;", "exemption");
+        Add("F42 N3 an empty reason after the dash", "tests/X/A.cs", $"// {Marker} container-scoped —\nvar a = 1;", "exemption");
+        Add("F42 N19 a teardown, a teardown and a delete-all", "a.sh", $"# {Scoped(Owner)}\nawait q('DR§OP DATABASE a; DR§OP SCHEMA b'); await users.delete§Many({{}});", "shared-store");
+        // Node reads the FIRST match of each pattern for a finding: a second named drop after an owner-form first match is not reported,
+        // marked or not; the marker only decides a line that already has a finding.
+        Add("F42 an owner-form drop then another drop on one line is clean, as in Node", "a.sh", $"psql -c 'DR§OP TABLE {Lower}_u1000_mcp_x_abc123; DR§OP TABLE users'", "");
+        Add("F42 an owner-form truncate then another truncate on one line is clean, as in Node", "a.sh", $"psql -c 'TRUN§CATE TABLE {Lower}_u1000_mcp_x_abc123; TRUN§CATE TABLE users'", "");
+        Add("F42 a teardown and a named drop of an owner-form name under the marker is clean: the owner form is no hit", "a.sh", $"# {Scoped(Owner)}\npsql -c 'DR§OP DATABASE bench; DR§OP TABLE {P}-u1-bench-x-1;'", "");
+        Add("F42 the same owner-form drop line under the marker is clean too, as in Node", "a.sh", $"# {Scoped(Owner)}\npsql -c 'DR§OP TABLE {Lower}_u1000_mcp_x_abc123; DR§OP TABLE users'", "");
+        Add("F42 an owner-form drop of a database then another database under the marker is clean, as in Node", "a.sh", $"# {Scoped(Owner)}\npsql -c 'DR§OP DATABASE {Lower}_u1000_mcp_x_abc123; DR§OP DATABASE b'", "");
         Add("F42 the shared-store exemption (a) still clears a reset, as before", "a.sh", $"-- {Marker} shared-store — pg:5432 users; reuse intentional; lock: pg_advisory_lock(42)\npsql -c 'TRUN§CATE TABLE users'", "");
 
         // comments
@@ -292,7 +320,27 @@ public sealed class LeftoversGuardTests : IDisposable
         var finding = LeftoversGuard.Scan(root, RepositoryRoot.Path).Findings.Should().ContainSingle().Subject;
 
         finding.Class.Should().Be("shared-store");
-        finding.Text.Should().Contain(Fx("TRUN§CATE")).And.NotContain(Fx("DR§OP"));
+        finding.Text.Should().Contain(Fx("TRUN§CATE")).And.NotContain(Fx("DR§OP"), "the first hit that is not a teardown is what is reported");
+    }
+
+    [Fact]
+    public void A_second_flush_is_reported_when_the_first_is_the_teardown()
+    {
+        var root = Tree(("a.sh", $"# {Marker} container-scoped — the per-test databases live and die with the PostgresFixture container\nredis-cli FLUSH§DB; redis-cli FLUSH§ALL\n"));
+
+        var finding = LeftoversGuard.Scan(root, RepositoryRoot.Path).Findings.Should().ContainSingle().Subject;
+
+        finding.Class.Should().Be("shared-store");
+        finding.Text.Should().Be("`" + Fx("FLUSH§ALL") + "`");
+    }
+
+    [Fact]
+    public void The_refusal_of_a_container_scoped_marker_without_an_owner_has_the_node_guards_sentence()
+    {
+        var root = Tree(("tests/X/A.cs", $"// {Marker} container-scoped — the per-test databases live and die with\nvar a = 1;"));
+
+        LeftoversGuard.Scan(root, RepositoryRoot.Path).Findings.Should().ContainSingle().Which.Text.Should().Be(
+            "the exemption of `container-scoped` must name what it lives and dies with: `lives and dies with` or `live and die with`, then an optional article and an owner of two characters or more that is not an article and does not start with an article followed by punctuation (`the PostgresFixture container`, not `the-fixture`)");
     }
 
     [Fact]

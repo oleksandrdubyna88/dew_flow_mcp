@@ -61,6 +61,34 @@ public sealed class OwnedTests : IDisposable
         warnings.Should().BeEmpty();
     }
 
+    // The read-only clearing the Windows removal runs before its recursive delete is plain code, so it is pinned on every OS: .NET maps
+    // FileAttributes.ReadOnly to the write bits off on POSIX. What is never entered: a link, a junction.
+    [Fact]
+    public void The_read_only_clearing_reaches_files_and_folders_at_every_depth_and_never_enters_a_link()
+    {
+        var root = _owned.Dir("clear-readonly");
+        var outside = _owned.Dir("clear-readonly-outside");
+        var guarded = Path.Combine(outside, "guarded.txt");
+        File.WriteAllText(guarded, "not ours");
+        File.SetAttributes(guarded, FileAttributes.ReadOnly);
+        Directory.CreateDirectory(Path.Combine(root, "deep", "er"));
+        var files = new[] { Path.Combine(root, "top.txt"), Path.Combine(root, "deep", "mid.txt"), Path.Combine(root, "deep", "er", "leaf.txt") };
+        foreach (var file in files)
+        {
+            File.WriteAllText(file, "x");
+            File.SetAttributes(file, FileAttributes.ReadOnly);
+        }
+
+        DirectoryLinks.CreateOrSkip(Path.Combine(root, "deep", "link"), outside); // a junction on Windows where symlinks need a privilege
+        Removal.ClearReadOnlyBelow(root);
+
+        files.Should().OnlyContain(file => !File.GetAttributes(file).HasFlag(FileAttributes.ReadOnly));
+        File.GetAttributes(guarded).Should().HaveFlag(FileAttributes.ReadOnly, "what a link points at is not this folder's to change");
+        File.Exists(guarded).Should().BeTrue();
+        File.SetAttributes(guarded, FileAttributes.Normal); // so the scope can remove it
+        Removal.UnlinkTopLevelLinks(Path.Combine(root, "deep"));
+    }
+
     /// <summary>One <c>git</c> step in <paramref name="folder"/>; false (the test returns) when git is not installed, a failed step fails the test.</summary>
     private static bool Git(string folder, string[] arguments)
     {

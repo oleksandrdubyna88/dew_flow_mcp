@@ -108,8 +108,8 @@ public sealed class LeftoversAuditTests : IDisposable
         {
             var discover = () => LeftoversAudit.ClaimedBy(tmp, Owner.This, Mine, NoEnv);
 
-            discover.Should().Throw<Exception>("the root cannot be read, so nothing can be said about what this run left in it")
-                .Which.Message.Should().Contain(tmp);
+            discover.Should().Throw<LeftoversAuditException>("the root cannot be read, so nothing can be said about what this run left in it")
+                .Which.Message.Should().Contain(tmp).And.Contain("UnauthorizedAccessException");
         }
         finally
         {
@@ -144,6 +144,115 @@ public sealed class LeftoversAuditTests : IDisposable
         }
 
         Directory.Exists(claimed).Should().BeTrue("with the mode back the claimed folder is where it was: nothing here removed it");
+    }
+
+    [Fact]
+    public void A_temp_root_that_is_a_link_to_a_folder_beneath_a_parent_that_cannot_be_traversed_is_not_a_missing_one()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip(WindowsReason);
+            return;
+        }
+
+        if (Environment.IsPrivilegedProcess) Assert.Skip(PrivilegedReason);
+        var parent = _owned.Dir("audit-link-untraversable-parent");
+        var target = Path.Combine(parent, "root");
+        Directory.CreateDirectory(target);
+        var linkParent = _owned.Dir("audit-link-holder");
+        var link = Path.Combine(linkParent, "root-link");
+        Directory.CreateSymbolicLink(link, target);
+        File.SetUnixFileMode(parent, UnixFileMode.None);
+        try
+        {
+            var discover = () => LeftoversAudit.ClaimedBy(link, Owner.This, Mine, NoEnv);
+
+            discover.Should().Throw<LeftoversAuditException>("the link's final target is unreachable, which is not the same as missing").Which.Message.Should().Contain(link);
+        }
+        finally
+        {
+            File.SetUnixFileMode(parent, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    [Fact]
+    public void A_temp_root_that_is_a_link_to_nothing_is_missing()
+    {
+        if (OperatingSystem.IsWindows()) Assert.Skip(WindowsReason);
+        var holder = _owned.Dir("audit-dangling-holder");
+        var link = Path.Combine(holder, "root-link");
+        Directory.CreateSymbolicLink(link, Path.Combine(holder, "no-such-target"));
+
+        LeftoversAudit.ClaimedBy(link, Owner.This, Mine, NoEnv).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void A_temp_root_whose_path_runs_through_a_file_is_missing_not_unreachable()
+    {
+        if (OperatingSystem.IsWindows()) Assert.Skip(WindowsReason);
+        var folder = _owned.Dir("audit-notdir");
+        var file = Path.Combine(folder, "a-file");
+        File.WriteAllText(file, "x");
+
+        LeftoversAudit.ClaimedBy(Path.Combine(file, "root"), Owner.This, Mine, NoEnv).Should().BeEmpty("ENOTDIR says no such root");
+    }
+
+    [Fact]
+    public void A_process_that_writes_the_runs_record_does_not_touch_the_root_at_all()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip(WindowsReason);
+            return;
+        }
+
+        if (Environment.IsPrivilegedProcess) Assert.Skip(PrivilegedReason);
+        var parent = _owned.Dir("audit-run-record-untraversable");
+        var tmp = Path.Combine(parent, "root");
+        Directory.CreateDirectory(tmp);
+        using var sibling = LiveProcess.Start();
+        string? Env(string name) => name == "TESTSTODELETE_RUN" ? sibling.Record().Format() : null;
+        File.SetUnixFileMode(parent, UnixFileMode.None);
+        try
+        {
+            var discover = () => LeftoversAudit.ClaimedBy(tmp, Owner.This, Mine, Env);
+
+            discover.Should().NotThrow("its folders are in the registry; the root is not its to read").Subject.Should().BeEmpty();
+        }
+        finally
+        {
+            File.SetUnixFileMode(parent, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    [Fact]
+    public void An_audit_that_cannot_read_the_root_still_reports_what_the_registry_holds()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip(WindowsReason);
+            return;
+        }
+
+        if (Environment.IsPrivilegedProcess) Assert.Skip(PrivilegedReason);
+        var parent = _owned.Dir("audit-registry-untraversable");
+        var tmp = Path.Combine(parent, "root");
+        Directory.CreateDirectory(tmp);
+        var leaked = OwnedDir.Create("leaked", _owned.Dir("audit-registry-holder"));
+        File.SetUnixFileMode(parent, UnixFileMode.None);
+        try
+        {
+            var run = () => LeftoversAudit.Run(tmp, Owner.This, [leaked], Mine, NoEnv);
+
+            var error = run.Should().Throw<LeftoversAuditException>().Which;
+            error.NeverDisposed.Should().Equal([leaked.Path]); // the undisposed folder is still named
+            error.Message.Should().StartWith("mcp tests: this run left 1 folder(s) it claimed — 1 never disposed").And.Contain(tmp);
+        }
+        finally
+        {
+            File.SetUnixFileMode(parent, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            leaked.Dispose();
+        }
     }
 
     [Fact]
