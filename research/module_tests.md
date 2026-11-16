@@ -108,7 +108,7 @@ A comment `<prefix>-exempt: <kind> — <reason>` on the line of a finding or the
 - **`container-scoped`** (rule §6 (b)) is a declaration, not a class: `container-scoped — <what> lives and dies with <fixture or job>` (or
   `live and die with`, any case). Valid when the general reason rule holds AND an owner follows `with`: an optional article (`the`, `a`,
   `an`, `its`, `this`, `that`), then a word of at least two characters that is not itself an article — "… lives and dies with the" names no
-  owner and is one `exemption` finding that says so. A valid marker with nothing beside it is clean; the guard never reports a marker for
+  owner and is one `exemption` finding that says so. The owner is read the same way in C# and in Node: whitespace is the explicit class `[\f\n\r\t\v\x85\p{Z}]`; a word edge is a lookaround over `[\p{L}\p{Mn}\p{Nd}\p{Pc}\u200C\u200D]` (so `xlives and dies with …` and a joiner before the spelling do not start it); the spelling and the articles are explicit upper/lower letter pairs, never a case-insensitive option (JavaScript's fold reads `ſ` as `s`, .NET's does not); an article followed by punctuation (`a. foo`, `the-fixture`) is no article-then-owner. A valid marker with nothing beside it is clean; the guard never reports a marker for
   exempting nothing. It clears ONE class, `shared-store`, on its line and the next, and only the container's own teardown there:
   `DROP DATABASE`, `DROP SCHEMA`, `FLUSHDB`. `DROP TABLE`, `TRUNCATE`, `FLUSHALL` and a delete-all stay `shared-store` (they need (a)'s `lock:`
   or a per-run name), and so does a line that holds a teardown AND a reset: every hit on the line must be a teardown. It clears no other class —
@@ -118,9 +118,12 @@ A comment `<prefix>-exempt: <kind> — <reason>` on the line of a finding or the
   flow, so `DROP DATABASE production_db` under a valid marker is clean too (scenario P7 pins it). The marker is the author's declaration, read in
   review; the lifetime is proved by the consumer's fixture test.
 - A refused marker is one finding of class `exemption` and exempts nothing: no class, `ryuk-off`, `owner-blind`, an unknown kind (including a
-  near miss such as `container-scope`), no reason, a placeholder, a `shared-store` reason without `lock:`, a `container-scoped` reason without an owner.
-- The shared-store reading finds every match of every pattern on the line (it used to read the first match of each pattern), so a teardown
-  cannot hide a reset beside it; a named drop or truncate of an owner-form name is still no hit. One finding per class per line, as before.
+  near miss such as `container-scope`), no reason, a placeholder, a `shared-store` reason without `lock:`, a `container-scoped` reason without an owner. The sentence for the last, identical in both guards: "the exemption of `container-scoped` must name what it lives and dies with: `lives and dies with` or `live and die with`, then an optional article and an owner of two characters or more that is not an article and does not start with an article followed by punctuation (`the PostgresFixture container`, not `the-fixture`)".
+- The shared-store finding is the old one: the FIRST match of each pattern, one finding per class per line, as the Node guard's `sharedStoreHit` (a second
+  named drop after an owner-form first match is not reported). The marker adds one reading, `IsContainerTeardown`: ALL matches on the line (an owner-form
+  name is no match), clear only when every one is `DROP DATABASE`, `DROP SCHEMA` or `FLUSHDB`. On a marked line that is not all teardown, the finding's text is the first
+  match that is NOT a teardown (`DROP DATABASE a; TRUNCATE TABLE users` names the `TRUNCATE`; `FLUSHDB; FLUSHALL` names `FLUSHALL`), and a line the old
+  reading finds clean stays clean.
 
 The Node guard's half is `dew_flow_conventions` F41 (`tools/leftovers-check.mjs`); the two are held to the same scenarios (F41's P1–P7 and
 N1–N19; the plan is `todo/PLAN_F42_template_container_scoped.md`).
@@ -131,11 +134,11 @@ Each was reproduced first. The runs are in the plan's *Reproductions (2026-11-16
 
 | Note | Outcome | Test |
 |---|---|---|
-| N1 `Removal.RemoveFolder` on a read-only file (a git repository: its object files are read-only) | **not reproducible on this Linux machine; the test runs on the `windows-latest` leg** — there it is the proof, and the plan's fix (clear the read-only attribute on the folder's files before the recursive delete, never entering a reparse point) is applied only if that leg is red | `OwnedTests`: the git folder (every OS), the read-only attributes at two depths (Windows only) |
+| N1 `Removal.RemoveFolder` on a read-only file (a git repository: its object files are read-only) | **not reproducible on this Linux machine; the fix is built from the code review's reading, and the test that proves it end to end runs on the `windows-latest` leg**: before the recursive delete, on Windows only, `Removal.ClearReadOnlyBelow` clears the read-only attribute of every file and folder, never entering or touching a link or junction (those are unlinked, as before). The clearing is plain code and is pinned on every OS (.NET maps `ReadOnly` to the write bits on POSIX) | `OwnedTests`: the git folder (every OS), the read-only attributes at two depths (Windows only) |
 | N2 `DirectoryLinks.Run` drains only stdout | **does not reproduce**: both pipes are read before the wait (`DirectoryLinks.cs` starts `ReadToEndAsync` on each); 200,000 bytes to each stream finish on their own. The test is a regression pin; with the stderr read removed it fails by the timeout kill | `DirectoryLinksTests` |
-| N3 `mklink /J` and a path with a command-interpreter character | **bounded behaviour, kept**: such a path is skipped with its reason, never quoted (cmd's quoting is not a list one can trust). A space is not such a character and is handed through as one argument; the test runs on the Windows leg | `DirectoryLinksTests` |
+| N3 `mklink /J` and a path with a command-interpreter character | **bounded behaviour, kept**: such a path is skipped with its reason, never quoted (cmd's quoting is not a list one can trust). A space is not such a character and is handed through as one argument. The test runs `cmd /c mklink /J` directly (it pins cmd's own behaviour with a spaced path, not `CreateOrSkip`) and runs on the Windows leg | `DirectoryLinksTests` |
 | N4 `MountedSelectorPick` leaves a hanging `node` | **reproduced, fixed**: the child is ended (whole tree) and reaped in a `finally` before the assertion fails. A seam (`RunNode`) takes the program and a timeout, so the test hangs a child with `setInterval` on purpose | `LeftoversGuardTests` |
-| N5 `LeftoversAudit.Discover` reads an unreachable temp root as empty | **half reproduced, fixed**: a root beneath a parent the process cannot traverse answered `Directory.Exists` false and the audit passed; it is now a `LeftoversAuditException`. A root that exists but cannot be listed was already red (the listing throws, naming the path): kept as a pin. Skipped on Windows (ACLs) and when privileged | `LeftoversAuditTests` |
+| N5 `LeftoversAudit.Discover` reads an unreachable temp root as empty | **half reproduced, fixed**: a root beneath a parent the process cannot traverse answered `Directory.Exists` false and the audit passed; it is now a `LeftoversAuditException`. A root that exists but cannot be listed was red already but with the framework's `UnauthorizedAccessException`; it is now a `LeftoversAuditException` too, as is a root that is a link whose FINAL target cannot be reached. A path that runs through a file (ENOTDIR) and a link to nothing are "missing". A process that writes the run's record (`TESTSTODELETE_RUN`) never touches the root. When the root cannot be reached the failure still names the registry's folders (never disposed, disposed but not removed). Skipped on Windows (ACLs) and when privileged | `LeftoversAuditTests` |
 
 ## What it does not prove
 
@@ -144,6 +147,7 @@ Each was reproduced first. The runs are in the plan's *Reproductions (2026-11-16
   A volume that does not take `RENAME_EXCL` (a sweep then keeps the folder with one error — there is no fallback on Darwin), macOS before 10.12 and a case-sensitive APFS volume are not measured.
 - The container carve-out of rule §5: this repository starts no container, so the guard does not recognise it — a
   `docker run` without `--rm` is a finding.
+- The `\b`/`\w` of the SHARED-STORE patterns (`\bDROP`, `\bTRUNCATE`, `\bFLUSH…\b`, `[\w.$-]*`) are each engine's own: .NET's are Unicode, JavaScript's are ASCII, so a line with a Unicode letter beside such a word can read differently in C# and in Node. Older than F42; not changed here (the owner reading above is the part made identical).
 - That a `container-scoped` marker sits over the container's own database (see *The exemption marker*): the guard reads the spelling only.
 - The guard of C# is a SPELLING check. It decodes escapes (`\uXXXX`, `\UXXXXXXXX`, `\x…`), joins the literals that are operands of `+`
   or of `string.Concat` and the interpolation holes that hold only a literal, reads a one-character regex class (`[T]`) as its character,
