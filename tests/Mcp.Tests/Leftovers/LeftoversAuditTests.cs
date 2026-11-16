@@ -156,7 +156,7 @@ public sealed class LeftoversAuditTests : IDisposable
         }
 
         if (Environment.IsPrivilegedProcess) Assert.Skip(PrivilegedReason);
-        var parent = _owned.Dir("audit-link-untraversable-parent");
+        var parent = _owned.Dir("audit-link-untrav-parent");
         var target = Path.Combine(parent, "root");
         Directory.CreateDirectory(target);
         var linkParent = _owned.Dir("audit-link-holder");
@@ -207,7 +207,7 @@ public sealed class LeftoversAuditTests : IDisposable
         }
 
         if (Environment.IsPrivilegedProcess) Assert.Skip(PrivilegedReason);
-        var parent = _owned.Dir("audit-run-record-untraversable");
+        var parent = _owned.Dir("audit-runrec-untrav");
         var tmp = Path.Combine(parent, "root");
         Directory.CreateDirectory(tmp);
         using var sibling = LiveProcess.Start();
@@ -235,7 +235,7 @@ public sealed class LeftoversAuditTests : IDisposable
         }
 
         if (Environment.IsPrivilegedProcess) Assert.Skip(PrivilegedReason);
-        var parent = _owned.Dir("audit-registry-untraversable");
+        var parent = _owned.Dir("audit-registry-untrav");
         var tmp = Path.Combine(parent, "root");
         Directory.CreateDirectory(tmp);
         var leaked = OwnedDir.Create("leaked", _owned.Dir("audit-registry-holder"));

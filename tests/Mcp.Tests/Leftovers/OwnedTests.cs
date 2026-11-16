@@ -117,7 +117,7 @@ public sealed class OwnedTests : IDisposable
     {
         if (OperatingSystem.IsMacOS()) Assert.Skip("the hard-link count is read on Linux and Windows only");
         var root = _owned.Dir("clear-readonly-real-link");
-        var outside = _owned.Dir("clear-readonly-real-link-outside");
+        var outside = _owned.Dir("ro-link-outside");
         var inside = Path.Combine(root, "data.txt");
         var other = Path.Combine(outside, "alias.txt");
         File.WriteAllText(inside, "x");
